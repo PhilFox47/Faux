@@ -95,7 +95,11 @@ export function initDb() {
       ai_enabled BOOLEAN DEFAULT 1,
       model_name TEXT DEFAULT 'zai-org/glm-5',
       timezone TEXT DEFAULT 'UTC',
-      api_key TEXT DEFAULT ''
+      api_key TEXT DEFAULT '',
+      prob_post REAL DEFAULT 100.0,
+      prob_image_post REAL DEFAULT 30.0,
+      prob_comment REAL DEFAULT 1000.0,
+      prob_message REAL DEFAULT 5.0
     );
 
     CREATE TABLE IF NOT EXISTS tags (
@@ -109,6 +113,17 @@ export function initDb() {
       PRIMARY KEY (user_id, tag_id),
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (tag_id) REFERENCES tags(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS relationships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id_1 INTEGER NOT NULL,
+      user_id_2 INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id_1) REFERENCES users(id),
+      FOREIGN KEY (user_id_2) REFERENCES users(id),
+      UNIQUE(user_id_1, user_id_2)
     );
 
     CREATE TABLE IF NOT EXISTS api_logs (
@@ -167,6 +182,15 @@ export function initDb() {
     db.prepare('SELECT api_key FROM settings').get();
   } catch (e) {
     db.exec("ALTER TABLE settings ADD COLUMN api_key TEXT DEFAULT ''");
+  }
+
+  try {
+    db.prepare('SELECT prob_post FROM settings').get();
+  } catch (e) {
+    db.exec("ALTER TABLE settings ADD COLUMN prob_post REAL DEFAULT 100.0");
+    db.exec("ALTER TABLE settings ADD COLUMN prob_image_post REAL DEFAULT 30.0");
+    db.exec("ALTER TABLE settings ADD COLUMN prob_comment REAL DEFAULT 1000.0");
+    db.exec("ALTER TABLE settings ADD COLUMN prob_message REAL DEFAULT 5.0");
   }
 
   // Insert default settings

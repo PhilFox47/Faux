@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
@@ -31,11 +31,16 @@ export default function App() {
   const [modelName, setModelName] = useState('zai-org/glm-5');
   const [apiKey, setApiKey] = useState('');
   const [timezone, setTimezone] = useState('UTC');
+  const [probPost, setProbPost] = useState(100);
+  const [probImagePost, setProbImagePost] = useState(30);
+  const [probComment, setProbComment] = useState(1000);
+  const [probMessage, setProbMessage] = useState(5);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean, message?: string, error?: string} | null>(null);
 
   // Profile Viewing
   const [viewingProfile, setViewingProfile] = useState<any>(null);
+  const [viewingProfilePosts, setViewingProfilePosts] = useState<any[]>([]);
   const [viewingPostData, setViewingPostData] = useState<any>(null);
 
   const handleViewPost = async (postId: number) => {
@@ -97,7 +102,19 @@ export default function App() {
   const [apiLogs, setApiLogs] = useState<any[]>([]);
 
   const fetchApiLogs = () => {
-    fetch('/api/logs').then(r => r.json()).then(setApiLogs);
+    fetch('/api/logs')
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setApiLogs(data);
+        } else {
+          setApiLogs([]);
+        }
+      })
+      .catch(err => {
+        console.error("Failed to fetch API logs:", err);
+        setApiLogs([]);
+      });
   };
 
   const handleEditProfile = (user: any) => {
@@ -167,12 +184,20 @@ export default function App() {
         if (data.model_name) setModelName(data.model_name);
         if (data.timezone) setTimezone(data.timezone);
         if (data.api_key !== undefined) setApiKey(data.api_key);
+        if (data.prob_post !== undefined) setProbPost(data.prob_post);
+        if (data.prob_image_post !== undefined) setProbImagePost(data.prob_image_post);
+        if (data.prob_comment !== undefined) setProbComment(data.prob_comment);
+        if (data.prob_message !== undefined) setProbMessage(data.prob_message);
       }
     });
   };
 
   const handleUpdateSettings = async (newSettings: any) => {
     if (newSettings.timezone) setTimezone(newSettings.timezone);
+    if (newSettings.prob_post !== undefined) setProbPost(newSettings.prob_post);
+    if (newSettings.prob_image_post !== undefined) setProbImagePost(newSettings.prob_image_post);
+    if (newSettings.prob_comment !== undefined) setProbComment(newSettings.prob_comment);
+    if (newSettings.prob_message !== undefined) setProbMessage(newSettings.prob_message);
     await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -180,7 +205,7 @@ export default function App() {
     });
   };
 
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState<'all' | 'content' | null>(null);
 
   const handleResetDb = async () => {
     await fetch('/api/reset-db', { method: 'POST' });
@@ -188,7 +213,15 @@ export default function App() {
     fetchUsers();
     fetchConversations();
     fetchNotifications();
-    setShowResetConfirm(false);
+    setShowResetConfirm(null);
+  };
+
+  const handleResetContent = async () => {
+    await fetch('/api/reset-content', { method: 'POST' });
+    fetchPosts();
+    fetchConversations();
+    fetchNotifications();
+    setShowResetConfirm(null);
   };
 
   const handleViewProfile = async (userId: number) => {
@@ -717,7 +750,7 @@ export default function App() {
                 {activeChat ? (
                   <>
                     <div className="p-4 border-b border-gray-800 font-bold flex items-center gap-3">
-                      <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                      <div className="w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
                         {activeChat.avatar_url ? <img src={activeChat.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
                       </div>
                       {activeChat.name}
@@ -820,6 +853,46 @@ export default function App() {
                   </div>
 
                   <div className="mb-6">
+                    <h4 className="text-md font-bold mb-2">AI Activity Probabilities (per Day)</h4>
+                    <p className="text-sm text-gray-400 mb-4">Adjust how often AI characters perform actions on average per day.</p>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Text Posts ({probPost}/day)</label>
+                        <input 
+                          type="range" min="0" max="500" value={probPost} 
+                          onChange={e => handleUpdateSettings({ prob_post: parseInt(e.target.value) })}
+                          className="w-full accent-orange-500" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Image Posts ({probImagePost}/day)</label>
+                        <input 
+                          type="range" min="0" max="100" value={probImagePost} 
+                          onChange={e => handleUpdateSettings({ prob_image_post: parseInt(e.target.value) })}
+                          className="w-full accent-orange-500" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Comments ({probComment}/day)</label>
+                        <input 
+                          type="range" min="0" max="2000" value={probComment} 
+                          onChange={e => handleUpdateSettings({ prob_comment: parseInt(e.target.value) })}
+                          className="w-full accent-orange-500" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Direct Messages ({probMessage}/day)</label>
+                        <input 
+                          type="range" min="0" max="50" value={probMessage} 
+                          onChange={e => handleUpdateSettings({ prob_message: parseInt(e.target.value) })}
+                          className="w-full accent-orange-500" 
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-400 mb-1">LLM Model (NanoGPT)</label>
                     <div className="flex gap-2">
                       <input 
@@ -862,13 +935,21 @@ export default function App() {
                     <Trash2 size={20} />
                     Danger Zone
                   </h3>
-                  <p className="text-sm text-gray-400 mb-4">Resetting the database will delete all characters, posts, comments, and messages. This action cannot be undone.</p>
-                  <button 
-                    onClick={() => setShowResetConfirm(true)}
-                    className="bg-red-500/10 text-red-500 border border-red-500/50 px-6 py-3 rounded-xl font-bold hover:bg-red-500 hover:text-white transition"
-                  >
-                    Reset Database
-                  </button>
+                  <p className="text-sm text-gray-400 mb-4">Resetting the database will delete data. This action cannot be undone.</p>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => setShowResetConfirm('content')}
+                      className="bg-orange-500/10 text-orange-500 border border-orange-500/50 px-6 py-3 rounded-xl font-bold hover:bg-orange-500 hover:text-white transition"
+                    >
+                      Delete All Posts, Comments & Messages
+                    </button>
+                    <button 
+                      onClick={() => setShowResetConfirm('all')}
+                      className="bg-red-500/10 text-red-500 border border-red-500/50 px-6 py-3 rounded-xl font-bold hover:bg-red-500 hover:text-white transition"
+                    >
+                      Delete All (Purge Everything)
+                    </button>
+                  </div>
                 </section>
 
                 {showResetConfirm && (
@@ -877,19 +958,23 @@ export default function App() {
                       <h3 className="text-xl font-bold mb-4 text-red-500 flex items-center justify-center gap-2">
                         <AlertTriangle size={24} /> Reset Database
                       </h3>
-                      <p className="text-gray-400 mb-6">Are you sure you want to delete all data? This will reset the simulation and cannot be undone.</p>
+                      <p className="text-gray-400 mb-6">
+                        {showResetConfirm === 'all' 
+                          ? "Are you sure you want to delete all data? This will reset the simulation and cannot be undone."
+                          : "Are you sure you want to delete all posts, comments, and messages? Characters will be kept. This cannot be undone."}
+                      </p>
                       <div className="flex gap-4">
                         <button 
-                          onClick={() => setShowResetConfirm(false)}
+                          onClick={() => setShowResetConfirm(null)}
                           className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition"
                         >
                           Cancel
                         </button>
                         <button 
-                          onClick={handleResetDb}
+                          onClick={showResetConfirm === 'all' ? handleResetDb : handleResetContent}
                           className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition"
                         >
-                          Yes, Reset Everything
+                          Yes, Delete
                         </button>
                       </div>
                     </div>
@@ -1251,6 +1336,10 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
 
+  useEffect(() => {
+    setEditContent(post.content);
+  }, [post.content]);
+
   const fetchComments = () => {
     fetch(`/api/posts/${post.id}/comments`).then(r => r.json()).then(setComments);
   };
@@ -1431,6 +1520,10 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(comment.content);
+
+  useEffect(() => {
+    setEditContent(comment.content);
+  }, [comment.content]);
 
   const handleDelete = async () => {
     await fetch(`/api/comments/${comment.id}`, { method: 'DELETE' });

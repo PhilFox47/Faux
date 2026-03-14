@@ -25,7 +25,7 @@ async function startServer() {
   });
 
   app.post("/api/settings", (req, res) => {
-    const { ai_enabled, model_name, timezone, api_key } = req.body;
+    const { ai_enabled, model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message } = req.body;
     if (ai_enabled !== undefined) {
       db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(ai_enabled ? 1 : 0);
     }
@@ -37,6 +37,18 @@ async function startServer() {
     }
     if (api_key !== undefined) {
       db.prepare("UPDATE settings SET api_key = ? WHERE id = 1").run(api_key);
+    }
+    if (prob_post !== undefined) {
+      db.prepare("UPDATE settings SET prob_post = ? WHERE id = 1").run(prob_post);
+    }
+    if (prob_image_post !== undefined) {
+      db.prepare("UPDATE settings SET prob_image_post = ? WHERE id = 1").run(prob_image_post);
+    }
+    if (prob_comment !== undefined) {
+      db.prepare("UPDATE settings SET prob_comment = ? WHERE id = 1").run(prob_comment);
+    }
+    if (prob_message !== undefined) {
+      db.prepare("UPDATE settings SET prob_message = ? WHERE id = 1").run(prob_message);
     }
     res.json({ success: true });
   });
@@ -51,7 +63,22 @@ async function startServer() {
       db.prepare("DELETE FROM posts").run();
       db.prepare("DELETE FROM follows").run();
       db.prepare("DELETE FROM user_tags").run();
+      db.prepare("DELETE FROM relationships").run();
       db.prepare("DELETE FROM users WHERE username != 'real_user'").run();
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/reset-content", (req, res) => {
+    try {
+      db.prepare("DELETE FROM comment_likes").run();
+      db.prepare("DELETE FROM likes").run();
+      db.prepare("DELETE FROM comments").run();
+      db.prepare("DELETE FROM direct_messages").run();
+      db.prepare("DELETE FROM notifications").run();
+      db.prepare("DELETE FROM posts").run();
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -332,19 +359,28 @@ async function startServer() {
   });
 
   app.delete("/api/posts/:id", (req, res) => {
-    const postId = req.params.id;
-    db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)").run(postId);
-    db.prepare("DELETE FROM comments WHERE post_id = ?").run(postId);
-    db.prepare("DELETE FROM likes WHERE post_id = ?").run(postId);
-    db.prepare("DELETE FROM notifications WHERE type = 'post_like' AND reference_id = ?").run(postId);
-    db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-    res.json({ success: true });
+    try {
+      const postId = req.params.id;
+      db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)").run(postId);
+      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)").run(postId);
+      db.prepare("DELETE FROM comments WHERE post_id = ?").run(postId);
+      db.prepare("DELETE FROM likes WHERE post_id = ?").run(postId);
+      db.prepare("DELETE FROM notifications WHERE type IN ('like_post', 'comment', 'reply') AND reference_id = ?").run(postId);
+      db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.put("/api/posts/:id", (req, res) => {
-    const { content } = req.body;
-    db.prepare("UPDATE posts SET content = ? WHERE id = ?").run(content, req.params.id);
-    res.json({ success: true });
+    try {
+      const { content } = req.body;
+      db.prepare("UPDATE posts SET content = ? WHERE id = ?").run(content, req.params.id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Delete and Edit Comments
@@ -363,17 +399,28 @@ async function startServer() {
   });
 
   app.delete("/api/comments/:id", (req, res) => {
-    const commentId = req.params.id;
-    db.prepare("DELETE FROM comment_likes WHERE comment_id = ?").run(commentId);
-    db.prepare("DELETE FROM comments WHERE parent_id = ?").run(commentId);
-    db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
-    res.json({ success: true });
+    try {
+      const commentId = req.params.id;
+      db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE parent_id = ?)").run(commentId);
+      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE parent_id = ?)").run(commentId);
+      db.prepare("DELETE FROM comment_likes WHERE comment_id = ?").run(commentId);
+      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id = ?").run(commentId);
+      db.prepare("DELETE FROM comments WHERE parent_id = ?").run(commentId);
+      db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.put("/api/comments/:id", (req, res) => {
-    const { content } = req.body;
-    db.prepare("UPDATE comments SET content = ? WHERE id = ?").run(content, req.params.id);
-    res.json({ success: true });
+    try {
+      const { content } = req.body;
+      db.prepare("UPDATE comments SET content = ? WHERE id = ?").run(content, req.params.id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Likes
@@ -489,19 +536,20 @@ async function startServer() {
   // Background Worker for AI Activity
   setInterval(async () => {
     try {
-      const settings = db.prepare("SELECT ai_enabled FROM settings WHERE id = 1").get() as any;
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
       if (!settings || !settings.ai_enabled) return;
 
       const aiUsers = db.prepare("SELECT * FROM users WHERE is_ai = 1").all() as any[];
       if (aiUsers.length === 0) return;
 
-      const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
-      const roll = Math.random();
-
-      console.log(`AI Worker running for ${randomAi.display_name}. Roll: ${roll}`);
+      const probPost = (settings.prob_post ?? 100) / 1440;
+      const probImagePost = (settings.prob_image_post ?? 30) / 1440;
+      const probComment = (settings.prob_comment ?? 1000) / 1440;
+      const probMessage = (settings.prob_message ?? 5) / 1440;
 
       // Local actions (Likes & Follows) - Doesn't use API tokens
       if (Math.random() < 0.3) {
+        const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
         // 30% chance to do some local actions
         const recentPosts = db.prepare("SELECT id, user_id FROM posts ORDER BY created_at DESC LIMIT 50").all() as any[];
         if (recentPosts.length > 0) {
@@ -565,14 +613,14 @@ async function startServer() {
         }
       }
 
-      const doAiPost = async (aiUser: any) => {
-        const recentContext = db.prepare("SELECT content FROM posts ORDER BY created_at DESC LIMIT 3").all() as any[];
+      const doAiPost = async (aiUser: any, isImage: boolean) => {
+        const recentContext = db.prepare("SELECT content FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 3").all(aiUser.id) as any[];
         const contextStr = recentContext.map(p => p.content).join(" | ");
         
         const postContent = await generatePost(aiUser, contextStr);
         if (postContent) {
           let imageUrl = null;
-          if (Math.random() < 0.3) {
+          if (isImage) {
             const imagePrompt = `A picture taken by ${aiUser.display_name}. Context: ${postContent}. Style: realistic, social media photo.`;
             imageUrl = await generateImage(imagePrompt);
           }
@@ -582,8 +630,8 @@ async function startServer() {
         }
       };
 
-      if (roll < 0.0025) {
-        // 0.25% chance to DM (approx 3-4 times a day if running every minute)
+      if (Math.random() < probMessage) {
+        const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
         const realUser = db.prepare("SELECT * FROM users WHERE is_ai = 0").get() as any;
         if (realUser) {
           const dmContent = await generateDM(randomAi, realUser.display_name);
@@ -593,11 +641,20 @@ async function startServer() {
             console.log(`${randomAi.display_name} sent a DM to real_user`);
           }
         }
-      } else if (roll < 0.0725) {
-        // 7% chance to Post (approx 100 posts a day)
-        await doAiPost(randomAi);
-      } else {
-        // ~92.75% chance to Comment (approx 1335 comments a day, ~13 per post)
+      } 
+      
+      if (Math.random() < probPost) {
+        const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
+        await doAiPost(randomAi, false);
+      }
+      
+      if (Math.random() < probImagePost) {
+        const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
+        await doAiPost(randomAi, true);
+      }
+      
+      if (Math.random() < probComment) {
+        const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
         // Weight newer posts higher and check if already commented
         const recentPosts = db.prepare(`
           SELECT p.*, u.display_name as author_name,
@@ -676,7 +733,7 @@ async function startServer() {
 
             if (skipComment) {
               console.log(`${randomAi.display_name} skipped commenting due to too many comments. Creating a post instead.`);
-              await doAiPost(randomAi);
+              await doAiPost(randomAi, false);
               return;
             }
             
