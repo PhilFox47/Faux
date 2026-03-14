@@ -25,12 +25,15 @@ async function startServer() {
   });
 
   app.post("/api/settings", (req, res) => {
-    const { ai_enabled, model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message } = req.body;
+    const { ai_enabled, model_name, image_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message } = req.body;
     if (ai_enabled !== undefined) {
       db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(ai_enabled ? 1 : 0);
     }
     if (model_name !== undefined) {
       db.prepare("UPDATE settings SET model_name = ? WHERE id = 1").run(model_name);
+    }
+    if (image_model_name !== undefined) {
+      db.prepare("UPDATE settings SET image_model_name = ? WHERE id = 1").run(image_model_name);
     }
     if (timezone !== undefined) {
       db.prepare("UPDATE settings SET timezone = ? WHERE id = 1").run(timezone);
@@ -128,6 +131,95 @@ async function startServer() {
   app.get("/api/tags", (req, res) => {
     const tags = db.prepare("SELECT name FROM tags ORDER BY name ASC").all();
     res.json(tags.map((t: any) => t.name));
+  });
+
+  app.get("/api/users/:id/relationships", (req, res) => {
+    const relationships = db.prepare(`
+      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar
+      FROM relationships r
+      JOIN users u ON r.user_id_2 = u.id
+      WHERE r.user_id_1 = ?
+    `).all(req.params.id);
+    res.json(relationships);
+  });
+
+  app.post("/api/users/:id/relationships", (req, res) => {
+    const { user_id_2, description } = req.body;
+    const user_id_1 = req.params.id;
+    try {
+      // Two-sided relationship
+      db.prepare("INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(user_id_1, user_id_2, description);
+      db.prepare("INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(user_id_2, user_id_1, description);
+      
+      // Mutual follow
+      db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user_id_1, user_id_2);
+      db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user_id_2, user_id_1);
+      
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/users/:id/relationships/:otherId", (req, res) => {
+    const user_id_1 = req.params.id;
+    const user_id_2 = req.params.otherId;
+    try {
+      db.prepare("DELETE FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").run(user_id_1, user_id_2);
+      db.prepare("DELETE FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").run(user_id_2, user_id_1);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/users/:id", (req, res) => {
+    const userId = req.params.id;
+    try {
+      // Don't delete the real user
+      const user = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(userId) as any;
+      if (!user || user.is_ai === 0) {
+        return res.status(400).json({ error: "Cannot delete real user" });
+      }
+
+      // Delete all related data
+      db.prepare("DELETE FROM comment_likes WHERE user_id = ?").run(userId);
+      db.prepare("DELETE FROM likes WHERE user_id = ?").run(userId);
+      db.prepare("DELETE FROM notifications WHERE user_id = ? OR actor_id = ?").run(userId, userId);
+      db.prepare("DELETE FROM follows WHERE follower_id = ? OR followed_id = ?").run(userId, userId);
+      db.prepare("DELETE FROM user_tags WHERE user_id = ?").run(userId);
+      db.prepare("DELETE FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").run(userId, userId);
+      
+      // Delete comments and their likes/notifications
+      const comments = db.prepare("SELECT id FROM comments WHERE user_id = ?").all(userId) as any[];
+      for (const c of comments) {
+        db.prepare("DELETE FROM comment_likes WHERE comment_id = ?").run(c.id);
+        db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id = ?").run(c.id);
+        db.prepare("DELETE FROM comments WHERE parent_id = ?").run(c.id);
+        db.prepare("DELETE FROM comments WHERE id = ?").run(c.id);
+      }
+
+      // Delete posts and their comments/likes/notifications
+      const posts = db.prepare("SELECT id FROM posts WHERE user_id = ?").all(userId) as any[];
+      for (const p of posts) {
+        db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)").run(p.id);
+        db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)").run(p.id);
+        db.prepare("DELETE FROM comments WHERE post_id = ?").run(p.id);
+        db.prepare("DELETE FROM likes WHERE post_id = ?").run(p.id);
+        db.prepare("DELETE FROM notifications WHERE type IN ('like_post', 'comment', 'reply') AND reference_id = ?").run(p.id);
+        db.prepare("DELETE FROM posts WHERE id = ?").run(p.id);
+      }
+
+      // Delete DMs
+      db.prepare("DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?").run(userId, userId);
+
+      // Finally delete user
+      db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.put("/api/users/:id", (req, res) => {
@@ -247,11 +339,19 @@ async function startServer() {
       `).all() as any[];
       const contextStr = recentContext.map(p => p.content).join(" | ");
       
-      const postContent = await generatePost(aiUser, contextStr);
+      const rels = db.prepare(`
+        SELECT u.display_name, r.description 
+        FROM relationships r 
+        JOIN users u ON r.user_id_2 = u.id 
+        WHERE r.user_id_1 = ?
+      `).all(aiUser.id) as any[];
+      const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
+
+      const postContent = await generatePost(aiUser, contextStr, relStr);
       if (postContent) {
         let imageUrl = null;
         if (type === 'image') {
-          const imagePrompt = `A picture taken by ${aiUser.display_name}. Context: ${postContent}. Style: realistic, social media photo.`;
+          const imagePrompt = `A picture taken by ${aiUser.display_name}. Physical appearance: ${aiUser.physical_appearance || aiUser.bio}. Clothing style: ${aiUser.clothing_style || 'casual'}. Context: ${postContent}. Style: realistic, social media photo.`;
           imageUrl = await generateImage(imagePrompt);
         }
         db.prepare("INSERT INTO posts (user_id, content, image_url) VALUES (?, ?, ?)")
@@ -519,7 +619,10 @@ async function startServer() {
           content: msg.content
         }));
 
-        const reply = await replyToDM(receiver, user.display_name, formattedHistory);
+        const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
+        const relContext = rel ? rel.description : '';
+
+        const reply = await replyToDM(receiver, user.display_name, formattedHistory, relContext);
         if (reply) {
           db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
             .run(receiverId, user.id, reply);
@@ -617,11 +720,19 @@ async function startServer() {
         const recentContext = db.prepare("SELECT content FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 3").all(aiUser.id) as any[];
         const contextStr = recentContext.map(p => p.content).join(" | ");
         
-        const postContent = await generatePost(aiUser, contextStr);
+        const rels = db.prepare(`
+          SELECT u.display_name, r.description 
+          FROM relationships r 
+          JOIN users u ON r.user_id_2 = u.id 
+          WHERE r.user_id_1 = ?
+        `).all(aiUser.id) as any[];
+        const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
+
+        const postContent = await generatePost(aiUser, contextStr, relStr);
         if (postContent) {
           let imageUrl = null;
           if (isImage) {
-            const imagePrompt = `A picture taken by ${aiUser.display_name}. Context: ${postContent}. Style: realistic, social media photo.`;
+            const imagePrompt = `A picture of ${aiUser.display_name}. Physical appearance: ${aiUser.physical_appearance || aiUser.bio}. Clothing style: ${aiUser.clothing_style || 'casual'}. Context: ${postContent}. Style: realistic, social media photo.`;
             imageUrl = await generateImage(imagePrompt);
           }
           db.prepare("INSERT INTO posts (user_id, content, image_url) VALUES (?, ?, ?)")
@@ -634,7 +745,9 @@ async function startServer() {
         const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
         const realUser = db.prepare("SELECT * FROM users WHERE is_ai = 0").get() as any;
         if (realUser) {
-          const dmContent = await generateDM(randomAi, realUser.display_name);
+          const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+          const relContext = rel ? rel.description : '';
+          const dmContent = await generateDM(randomAi, realUser.display_name, relContext);
           if (dmContent) {
             db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
               .run(randomAi.id, realUser.id, dmContent);
@@ -742,7 +855,11 @@ async function startServer() {
               // Get other comments for context
               const otherComments = db.prepare("SELECT content FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => c.content).join(" | ");
               
-              const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments);
+              // Get relationship context
+              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
+              const relContext = rel ? rel.description : '';
+
+              const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext);
               if (commentContent) {
                 db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
                   .run(randomPost.id, randomAi.id, commentContent);
@@ -757,7 +874,11 @@ async function startServer() {
               }
             } else {
               const randomComment = choice.data;
-              const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, "", true);
+              // Get relationship context
+              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
+              const relContext = rel ? rel.description : '';
+
+              const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, "", true, relContext);
               if (replyContent) {
                 db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
                   .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);

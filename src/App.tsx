@@ -29,6 +29,7 @@ export default function App() {
   // Settings
   const [aiEnabled, setAiEnabled] = useState(true);
   const [modelName, setModelName] = useState('zai-org/glm-5');
+  const [imageModelName, setImageModelName] = useState('z-image-turbo');
   const [apiKey, setApiKey] = useState('');
   const [timezone, setTimezone] = useState('UTC');
   const [probPost, setProbPost] = useState(100);
@@ -37,6 +38,7 @@ export default function App() {
   const [probMessage, setProbMessage] = useState(5);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean, message?: string, error?: string} | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
 
   // Profile Viewing
   const [viewingProfile, setViewingProfile] = useState<any>(null);
@@ -97,6 +99,9 @@ export default function App() {
   const [profilePhysicalAppearance, setProfilePhysicalAppearance] = useState('');
   const [profileClothingStyle, setProfileClothingStyle] = useState('');
   const [profileTags, setProfileTags] = useState<string[]>([]);
+  const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
+  const [newRelUserId, setNewRelUserId] = useState('');
+  const [newRelDesc, setNewRelDesc] = useState('');
 
   // API Logs
   const [apiLogs, setApiLogs] = useState<any[]>([]);
@@ -117,7 +122,7 @@ export default function App() {
       });
   };
 
-  const handleEditProfile = (user: any) => {
+  const handleEditProfile = async (user: any) => {
     setEditingProfile(user);
     setProfileName(user.display_name || '');
     setProfileUsername(user.username || '');
@@ -128,7 +133,49 @@ export default function App() {
     setProfilePhysicalAppearance(user.physical_appearance || '');
     setProfileClothingStyle(user.clothing_style || '');
     setProfileTags(user.tags || []);
+    
+    // Fetch relationships
+    try {
+      const res = await fetch(`/api/users/${user.id}/relationships`);
+      const data = await res.json();
+      setProfileRelationships(data);
+    } catch (e) {
+      setProfileRelationships([]);
+    }
+    
     setActiveTab('profile');
+  };
+
+  const handleAddRelationship = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRelUserId || !newRelDesc) return;
+    try {
+      await fetch(`/api/users/${editingProfile.id}/relationships`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id_2: newRelUserId, description: newRelDesc })
+      });
+      setNewRelUserId('');
+      setNewRelDesc('');
+      const res = await fetch(`/api/users/${editingProfile.id}/relationships`);
+      setProfileRelationships(await res.json());
+      showToast('Relationship added!');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteRelationship = async (otherId: number) => {
+    try {
+      await fetch(`/api/users/${editingProfile.id}/relationships/${otherId}`, {
+        method: 'DELETE'
+      });
+      const res = await fetch(`/api/users/${editingProfile.id}/relationships`);
+      setProfileRelationships(await res.json());
+      showToast('Relationship deleted!');
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -154,7 +201,28 @@ export default function App() {
     setEditingProfile(null);
     fetchUsers();
     setActiveTab('home');
-    alert('Profile updated!');
+    showToast('Profile updated!');
+  };
+
+  const handleDeleteCharacter = () => {
+    if (!editingProfile || editingProfile.is_ai === 0) return;
+    
+    setConfirmModal({
+      isOpen: true,
+      title: "Delete Character",
+      message: `Are you sure you want to delete ${editingProfile.display_name}? This action cannot be undone.`,
+      onConfirm: async () => {
+        await fetch(`/api/users/${editingProfile.id}`, {
+          method: 'DELETE'
+        });
+        setEditingProfile(null);
+        setActiveTab('home');
+        fetchUsers();
+        fetchPosts();
+        fetchConversations();
+        setConfirmModal(null);
+      }
+    });
   };
 
   const fetchPosts = () => {
@@ -182,6 +250,7 @@ export default function App() {
       if (data) {
         setAiEnabled(data.ai_enabled === 1);
         if (data.model_name) setModelName(data.model_name);
+        if (data.image_model_name) setImageModelName(data.image_model_name);
         if (data.timezone) setTimezone(data.timezone);
         if (data.api_key !== undefined) setApiKey(data.api_key);
         if (data.prob_post !== undefined) setProbPost(data.prob_post);
@@ -214,6 +283,7 @@ export default function App() {
     fetchConversations();
     fetchNotifications();
     setShowResetConfirm(null);
+    showToast("Database reset successfully!");
   };
 
   const handleResetContent = async () => {
@@ -222,6 +292,7 @@ export default function App() {
     fetchConversations();
     fetchNotifications();
     setShowResetConfirm(null);
+    showToast("Content reset successfully!");
   };
 
   const handleViewProfile = async (userId: number) => {
@@ -426,7 +497,16 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_name: modelName })
     });
-    alert("Model saved!");
+    showToast("Model saved!");
+  };
+
+  const saveImageModelName = async () => {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_model_name: imageModelName })
+    });
+    showToast("Image Model saved!");
   };
 
   const saveApiKey = async () => {
@@ -435,7 +515,7 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ api_key: apiKey })
     });
-    alert("API Key saved!");
+    showToast("API Key saved!");
   };
 
   const handleTestApi = async () => {
@@ -482,6 +562,30 @@ export default function App() {
           {toastMessage}
         </div>
       )}
+
+      {confirmModal && confirmModal.isOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-sm p-6 relative">
+            <h3 className="text-xl font-bold mb-2">{confirmModal.title}</h3>
+            <p className="text-gray-400 mb-6">{confirmModal.message}</p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 rounded-lg font-bold text-gray-400 hover:text-white hover:bg-gray-800 transition"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmModal.onConfirm}
+                className="px-4 py-2 rounded-lg font-bold bg-red-500 hover:bg-red-600 text-white transition"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="w-full max-w-7xl flex h-screen">
         
         {/* Left Sidebar */}
@@ -519,19 +623,19 @@ export default function App() {
             </button>
           </div>
           <div 
-            onClick={() => handleEditProfile(users.find(u => u.username === 'real_user'))}
+            onClick={() => handleEditProfile(users.find(u => u.is_ai === 0))}
             className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
           >
             <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
-              {users.find(u => u.username === 'real_user')?.avatar_url ? (
-                <img src={users.find(u => u.username === 'real_user')?.avatar_url} alt="" className="w-full h-full object-cover" />
+              {users.find(u => u.is_ai === 0)?.avatar_url ? (
+                <img src={users.find(u => u.is_ai === 0)?.avatar_url} alt="" className="w-full h-full object-cover" />
               ) : (
-                users.find(u => u.username === 'real_user')?.display_name?.[0] || 'Y'
+                users.find(u => u.is_ai === 0)?.display_name?.[0] || 'Y'
               )}
             </div>
             <div className="hidden xl:block">
-              <p className="font-bold text-sm">{users.find(u => u.username === 'real_user')?.display_name || 'You'}</p>
-              <p className="text-gray-500 text-sm">@{users.find(u => u.username === 'real_user')?.username || 'real_user'}</p>
+              <p className="font-bold text-sm">{users.find(u => u.is_ai === 0)?.display_name || 'You'}</p>
+              <p className="text-gray-500 text-sm">@{users.find(u => u.is_ai === 0)?.username || 'real_user'}</p>
             </div>
           </div>
         </div>
@@ -759,7 +863,10 @@ export default function App() {
                       {chatMessages.map((msg, i) => {
                         const isMe = msg.sender_id !== activeChat.id;
                         return (
-                          <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                          <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
+                            {!isMe && (
+                              <img src={activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0 mb-1" />
+                            )}
                             <div className={`max-w-[70%] rounded-2xl p-3 ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
                               {msg.content}
                             </div>
@@ -902,6 +1009,21 @@ export default function App() {
                         className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
                       />
                       <button onClick={saveModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-400 mb-1">Image Model (NanoGPT)</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        value={imageModelName}
+                        onChange={e => setImageModelName(e.target.value)}
+                        className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                      />
+                      <button onClick={saveImageModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
                         Save
                       </button>
                     </div>
@@ -1103,7 +1225,68 @@ export default function App() {
                   </div>
                 )}
                 
+                <div className="pt-6 border-t border-gray-800">
+                  <h3 className="text-lg font-bold mb-4">Relationships</h3>
+                  <div className="space-y-3 mb-4">
+                    {profileRelationships.map(rel => (
+                      <div key={rel.id} className="bg-gray-900 p-3 rounded-lg border border-gray-800 flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                          <img src={rel.other_avatar} alt="" className="w-8 h-8 rounded-full object-cover" />
+                          <div>
+                            <p className="font-bold text-sm">{rel.other_name}</p>
+                            <p className="text-xs text-gray-400">{rel.description}</p>
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => handleDeleteRelationship(rel.user_id_2)} className="text-red-500 hover:text-red-400">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                    {profileRelationships.length === 0 && (
+                      <p className="text-sm text-gray-500">No relationships added yet.</p>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-gray-400 mb-1">Character</label>
+                      <select 
+                        value={newRelUserId} 
+                        onChange={e => setNewRelUserId(e.target.value)}
+                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
+                      >
+                        <option value="">Select character...</option>
+                        {users.filter(u => u.id !== editingProfile.id && !profileRelationships.find(r => r.user_id_2 === u.id)).map(u => (
+                          <option key={u.id} value={u.id}>{u.display_name} (@{u.username})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-[2]">
+                      <label className="block text-xs font-medium text-gray-400 mb-1">Description (e.g. "is best friends with")</label>
+                      <input 
+                        type="text" 
+                        value={newRelDesc} 
+                        onChange={e => setNewRelDesc(e.target.value)}
+                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
+                      />
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={handleAddRelationship}
+                      disabled={!newRelUserId || !newRelDesc}
+                      className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white font-bold py-2 px-4 rounded-lg transition"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex gap-4 pt-4">
+                  {editingProfile.is_ai === 1 && (
+                    <button type="button" onClick={handleDeleteCharacter} className="flex-1 bg-red-600 text-white font-bold py-3 rounded-full hover:bg-red-700 transition">
+                      Delete Character
+                    </button>
+                  )}
                   <button type="button" onClick={() => { setActiveTab('home'); setEditingProfile(null); }} className="flex-1 bg-gray-800 text-white font-bold py-3 rounded-full hover:bg-gray-700 transition">
                     Cancel
                   </button>

@@ -94,6 +94,7 @@ export function initDb() {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       ai_enabled BOOLEAN DEFAULT 1,
       model_name TEXT DEFAULT 'zai-org/glm-5',
+      image_model_name TEXT DEFAULT 'z-image-turbo',
       timezone TEXT DEFAULT 'UTC',
       api_key TEXT DEFAULT '',
       prob_post REAL DEFAULT 100.0,
@@ -193,8 +194,12 @@ export function initDb() {
     db.exec("ALTER TABLE settings ADD COLUMN prob_message REAL DEFAULT 5.0");
   }
 
+  try {
+    db.exec("ALTER TABLE settings ADD COLUMN image_model_name TEXT DEFAULT 'z-image-turbo'");
+  } catch (e) {}
+
   // Insert default settings
-  db.prepare("INSERT OR IGNORE INTO settings (id, ai_enabled, model_name, timezone, api_key) VALUES (1, 1, 'zai-org/glm-5', 'UTC', '')").run();
+  db.prepare("INSERT OR IGNORE INTO settings (id, ai_enabled, model_name, image_model_name, timezone, api_key) VALUES (1, 1, 'zai-org/glm-5', 'z-image-turbo', 'UTC', '')").run();
 
   // Insert the real user if not exists
   const stmt = db.prepare('SELECT id FROM users WHERE username = ?');

@@ -31,6 +31,15 @@ function getModel() {
   }
 }
 
+function getImageModel() {
+  try {
+    const settings = db.prepare("SELECT image_model_name FROM settings WHERE id = 1").get() as any;
+    return settings?.image_model_name || 'z-image-turbo';
+  } catch (e) {
+    return 'z-image-turbo';
+  }
+}
+
 export async function testConnection() {
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -105,12 +114,13 @@ function buildCharacterPrompt(character: any) {
   return prompt;
 }
 
-export async function generatePost(character: any, context: string = '') {
+export async function generatePost(character: any, context: string = '', relationships: string = '') {
   const prompt = `${buildCharacterPrompt(character)}
 Write a short, engaging social media post (like a tweet) that fits your character perfectly.
 Your post should be independent and reflect your current thoughts, feelings, or activities. 
 Avoid referencing other people's posts directly unless it's a very general observation.
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
+${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
 ${context ? `Recent platform activity for inspiration (do not copy, just for vibe): ${context}` : ''}
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
 
@@ -141,9 +151,10 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
   }
 }
 
-export async function generateComment(character: any, postContent: string, postAuthorName: string, otherComments: string = '', isReply: boolean = false) {
+export async function generateComment(character: any, postContent: string, postAuthorName: string, otherComments: string = '', isReply: boolean = false, relationshipContext: string = '') {
   const prompt = `${buildCharacterPrompt(character)}
 You are looking at a social media post by ${postAuthorName}: "${postContent}"
+${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
 ${otherComments ? `Other users have already commented: ${otherComments}` : ''}
 ${isReply ? `You are replying to a specific comment.` : `Write a ${isReply ? 'reply' : 'comment'} that fits your character perfectly.`}
 Keep it short, natural, and in character. Do not wrap in quotes. Keep it under 150 characters.`;
@@ -175,9 +186,10 @@ Keep it short, natural, and in character. Do not wrap in quotes. Keep it under 1
   }
 }
 
-export async function generateDM(character: any, userDisplayName: string) {
+export async function generateDM(character: any, userDisplayName: string, relationshipContext: string = '') {
   const prompt = `${buildCharacterPrompt(character)}
 You are sending a private direct message to ${userDisplayName}.
+${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
 Write a short, in-character message starting a conversation. Give a good reason for reaching out (e.g., asking a question, sharing a secret, or reacting to something). Do not wrap in quotes.`;
 
   try {
@@ -207,9 +219,10 @@ Write a short, in-character message starting a conversation. Give a good reason 
   }
 }
 
-export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string}[]) {
+export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string}[], relationshipContext: string = '') {
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are having a private direct message conversation with ${userDisplayName}.
+${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
 Reply in character to their latest message. Make sure to actually write like it's a Direct Message Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character.`;
 
   const messages: any[] = [
@@ -246,8 +259,9 @@ Reply in character to their latest message. Make sure to actually write like it'
 
 export async function generateImage(prompt: string) {
   try {
+    const model = getImageModel();
     const response = await getOpenAI().images.generate({
-      model: 'z-image-turbo',
+      model: model,
       prompt: prompt,
       n: 1,
       size: '1024x1024'
@@ -256,7 +270,7 @@ export async function generateImage(prompt: string) {
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImage",
-      JSON.stringify({ model: 'z-image-turbo', prompt }),
+      JSON.stringify({ model: model, prompt }),
       url || "Failed"
     );
     
@@ -265,7 +279,7 @@ export async function generateImage(prompt: string) {
     console.error('Error generating image:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImage",
-      JSON.stringify({ model: 'z-image-turbo', prompt }),
+      JSON.stringify({ model: getImageModel(), prompt }),
       "Error: " + error.message
     );
     return null;
