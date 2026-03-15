@@ -100,7 +100,8 @@ export function initDb() {
       prob_post REAL DEFAULT 100.0,
       prob_image_post REAL DEFAULT 30.0,
       prob_comment REAL DEFAULT 1000.0,
-      prob_message REAL DEFAULT 5.0
+      prob_message REAL DEFAULT 5.0,
+      allow_nsfw BOOLEAN DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS tags (
@@ -127,6 +128,32 @@ export function initDb() {
       UNIQUE(user_id_1, user_id_2)
     );
 
+    CREATE TABLE IF NOT EXISTS group_chats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS group_chat_members (
+      group_chat_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_read_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (group_chat_id, user_id),
+      FOREIGN KEY (group_chat_id) REFERENCES group_chats(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS group_chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_chat_id INTEGER NOT NULL,
+      sender_id INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (group_chat_id) REFERENCES group_chats(id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS api_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       endpoint TEXT NOT NULL,
@@ -135,6 +162,13 @@ export function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // Add last_read_at column if it doesn't exist
+  try {
+    db.exec("ALTER TABLE group_chat_members ADD COLUMN last_read_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+  } catch (e) {
+    // Column might already exist
+  }
 
   // Handle schema migrations for settings if model_name doesn't exist
   try {
@@ -198,12 +232,16 @@ export function initDb() {
     db.exec("ALTER TABLE settings ADD COLUMN image_model_name TEXT DEFAULT 'z-image-turbo'");
   } catch (e) {}
 
+  try {
+    db.exec("ALTER TABLE settings ADD COLUMN allow_nsfw BOOLEAN DEFAULT 0");
+  } catch (e) {}
+
   // Insert default settings
-  db.prepare("INSERT OR IGNORE INTO settings (id, ai_enabled, model_name, image_model_name, timezone, api_key) VALUES (1, 1, 'zai-org/glm-5', 'z-image-turbo', 'UTC', '')").run();
+  db.prepare("INSERT OR IGNORE INTO settings (id, ai_enabled, model_name, image_model_name, timezone, api_key, allow_nsfw) VALUES (1, 1, 'zai-org/glm-5', 'z-image-turbo', 'UTC', '', 0)").run();
 
   // Insert the real user if not exists
-  const stmt = db.prepare('SELECT id FROM users WHERE username = ?');
-  const user = stmt.get('real_user');
+  const stmt = db.prepare('SELECT id FROM users WHERE is_ai = 0');
+  const user = stmt.get();
   if (!user) {
     db.prepare(`
       INSERT INTO users (username, display_name, bio, is_ai, ai_persona)

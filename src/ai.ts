@@ -103,10 +103,15 @@ function buildCharacterPrompt(character: any) {
   prompt += `\nYou are currently using "Faux", a multiversal social media platform where characters from various franchises, universes, and backgrounds interact.`;
   
   try {
-    const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
+    const settings = db.prepare("SELECT timezone, allow_nsfw FROM settings WHERE id = 1").get() as any;
     const tz = settings?.timezone || 'UTC';
     const currentTime = new Date().toLocaleString('en-US', { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     prompt += `\nThe current local time for you is ${currentTime}.`;
+    if (settings?.allow_nsfw) {
+      prompt += `\nNSFW content is ALLOWED. You may use explicit language, adult themes, and mature content if it fits your character.`;
+    } else {
+      prompt += `\nKeep your responses SFW (Safe for Work). Avoid explicit language and adult themes.`;
+    }
   } catch (e) {
     // ignore
   }
@@ -115,9 +120,24 @@ function buildCharacterPrompt(character: any) {
 }
 
 export async function generatePost(character: any, context: string = '', relationships: string = '') {
+  const topics = [
+    "a random thought you just had",
+    "something you are currently doing or working on",
+    "a strong opinion about a trivial matter",
+    "a question for your followers",
+    "a recent memory or experience",
+    "a complaint about something minor",
+    "an observation about your surroundings",
+    "a cryptic or mysterious statement",
+    "a joke or humorous observation",
+    "a piece of advice you'd give yourself"
+  ];
+  const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+
   const prompt = `${buildCharacterPrompt(character)}
 Write a short, engaging social media post (like a tweet) that fits your character perfectly.
 Your post should be independent and reflect your current thoughts, feelings, or activities. 
+For this specific post, focus on: ${randomTopic}.
 Avoid referencing other people's posts directly unless it's a very general observation.
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
@@ -129,7 +149,7 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
       model: getModel(),
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 150,
-      temperature: 0.8,
+      temperature: 0.9,
     });
     const content = response.choices[0].message.content?.trim();
     
@@ -250,6 +270,43 @@ Reply in character to their latest message. Make sure to actually write like it'
     console.error('Error replying to DM:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "replyToDM",
+      JSON.stringify({ model: getModel(), messages }),
+      "Error: " + error.message
+    );
+    return null;
+  }
+}
+
+export async function generateGroupChatReply(character: any, groupName: string, messageHistory: {role: string, content: string}[], otherMembers: any[]) {
+  const otherMembersStr = otherMembers.map(m => m.display_name).join(', ');
+  const systemPrompt = `${buildCharacterPrompt(character)}
+You are in a group chat named "${groupName}" with ${otherMembersStr}.
+Reply in character to the latest messages. Make sure to actually write like it's a Group Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character. You can address specific people by name if you want.`;
+
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...messageHistory
+  ];
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: messages as any,
+      temperature: 0.8,
+    });
+    const content = response.choices[0].message.content?.trim();
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generateGroupChatReply",
+      JSON.stringify({ model: getModel(), messages }),
+      content || "Failed"
+    );
+    
+    return content;
+  } catch (error: any) {
+    console.error('Error replying to Group Chat:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generateGroupChatReply",
       JSON.stringify({ model: getModel(), messages }),
       "Error: " + error.message
     );

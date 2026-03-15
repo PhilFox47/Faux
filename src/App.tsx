@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [posts, setPosts] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [conversations, setConversations] = useState<any[]>([]);
+  const [groupChats, setGroupChats] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [activeChat, setActiveChat] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newPostContent, setNewPostContent] = useState('');
   const [newChatMsg, setNewChatMsg] = useState('');
+  const [isGroupChat, setIsGroupChat] = useState(false);
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState<number[]>([]);
 
   // Add Character Form
   const [charName, setCharName] = useState('');
@@ -32,6 +37,7 @@ export default function App() {
   const [imageModelName, setImageModelName] = useState('z-image-turbo');
   const [apiKey, setApiKey] = useState('');
   const [timezone, setTimezone] = useState('UTC');
+  const [allowNsfw, setAllowNsfw] = useState(false);
   const [probPost, setProbPost] = useState(100);
   const [probImagePost, setProbImagePost] = useState(30);
   const [probComment, setProbComment] = useState(1000);
@@ -83,6 +89,7 @@ export default function App() {
 
   // Likers Modal
   const [likersModal, setLikersModal] = useState<{type: 'post' | 'comment', id: number, users: any[]} | null>(null);
+  const [followersModal, setFollowersModal] = useState<{users: any[], title: string} | null>(null);
 
   // Threaded Comments
   const [replyingTo, setReplyingTo] = useState<{postId: number, commentId: number, authorName: string} | null>(null);
@@ -102,6 +109,7 @@ export default function App() {
   const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
   const [newRelUserId, setNewRelUserId] = useState('');
   const [newRelDesc, setNewRelDesc] = useState('');
+  const [relSearch, setRelSearch] = useState('');
 
   // API Logs
   const [apiLogs, setApiLogs] = useState<any[]>([]);
@@ -123,6 +131,7 @@ export default function App() {
   };
 
   const handleEditProfile = async (user: any) => {
+    if (!user) return;
     setEditingProfile(user);
     setProfileName(user.display_name || '');
     setProfileUsername(user.username || '');
@@ -182,7 +191,7 @@ export default function App() {
     e.preventDefault();
     if (!editingProfile) return;
     
-    await fetch(`/api/users/${editingProfile.id}`, {
+    const res = await fetch(`/api/users/${editingProfile.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -197,6 +206,12 @@ export default function App() {
         tags: profileTags
       })
     });
+    
+    if (!res.ok) {
+      const err = await res.json();
+      showToast(err.error || "Failed to save profile");
+      return;
+    }
     
     setEditingProfile(null);
     fetchUsers();
@@ -237,12 +252,20 @@ export default function App() {
     fetch('/api/dms').then(r => r.json()).then(setConversations);
   };
 
+  const fetchGroupChats = () => {
+    fetch('/api/group-chats').then(r => r.json()).then(setGroupChats);
+  };
+
   const fetchNotifications = () => {
     fetch('/api/notifications').then(r => r.json()).then(setNotifications);
   };
 
-  const fetchChatMessages = (userId: number) => {
-    fetch(`/api/dms/${userId}`).then(r => r.json()).then(setChatMessages);
+  const fetchChatMessages = (id: number, isGroup: boolean = false) => {
+    if (isGroup) {
+      fetch(`/api/group-chats/${id}/messages`).then(r => r.json()).then(setChatMessages);
+    } else {
+      fetch(`/api/dms/${id}`).then(r => r.json()).then(setChatMessages);
+    }
   };
 
   const fetchSettings = () => {
@@ -253,11 +276,22 @@ export default function App() {
         if (data.image_model_name) setImageModelName(data.image_model_name);
         if (data.timezone) setTimezone(data.timezone);
         if (data.api_key !== undefined) setApiKey(data.api_key);
+        if (data.allow_nsfw !== undefined) setAllowNsfw(data.allow_nsfw === 1);
         if (data.prob_post !== undefined) setProbPost(data.prob_post);
         if (data.prob_image_post !== undefined) setProbImagePost(data.prob_image_post);
         if (data.prob_comment !== undefined) setProbComment(data.prob_comment);
         if (data.prob_message !== undefined) setProbMessage(data.prob_message);
       }
+    });
+  };
+
+  const toggleNsfw = async () => {
+    const newVal = !allowNsfw;
+    setAllowNsfw(newVal);
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allow_nsfw: newVal ? 1 : 0 })
     });
   };
 
@@ -373,17 +407,42 @@ export default function App() {
     fetchPosts();
     fetchUsers();
     fetchConversations();
+    fetchGroupChats();
     fetchNotifications();
     fetchSettings();
     fetchApiLogs();
     const interval = setInterval(() => {
       fetchPosts();
       fetchConversations();
+      fetchGroupChats();
       fetchNotifications();
-      if (activeChat) fetchChatMessages(activeChat.id);
+      if (activeChat) fetchChatMessages(activeChat.id, isGroupChat);
     }, 10000); // Poll every 10s
     return () => clearInterval(interval);
-  }, [activeChat]);
+  }, [activeChat, isGroupChat]);
+
+  const handleCreateGroupChat = async () => {
+    if (!newGroupName.trim() || selectedGroupMembers.length === 0) return;
+    try {
+      const res = await fetch('/api/group-chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newGroupName, member_ids: selectedGroupMembers })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setShowCreateGroupModal(false);
+        setNewGroupName('');
+        setSelectedGroupMembers([]);
+        fetchGroupChats();
+        setActiveChat({ id: data.id, name: newGroupName, isGroup: true });
+        setIsGroupChat(true);
+        fetchChatMessages(data.id, true);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleCreatePost = async () => {
     if (!newPostContent.trim()) return;
@@ -471,14 +530,19 @@ export default function App() {
     // Optimistic update
     const msg = newChatMsg;
     setNewChatMsg('');
-    setChatMessages(prev => [...prev, { sender_id: 1, content: msg, created_at: new Date().toISOString() }]); // Assuming real_user is id 1 for UI
+    const realUser = users.find(u => u.is_ai === 0);
+    setChatMessages(prev => [...prev, { sender_id: realUser?.id || 1, content: msg, created_at: new Date().toISOString() }]);
 
-    await fetch(`/api/dms/${activeChat.id}`, {
+    const endpoint = isGroupChat ? `/api/group-chats/${activeChat.id}/messages` : `/api/dms/${activeChat.id}`;
+    
+    await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: msg })
     });
-    fetchChatMessages(activeChat.id);
+    fetchChatMessages(activeChat.id, isGroupChat);
+    if (isGroupChat) fetchGroupChats();
+    else fetchConversations();
   };
 
   const toggleAiEnabled = async () => {
@@ -537,6 +601,7 @@ export default function App() {
   };
 
   const unreadNotifs = notifications.filter(n => !n.is_read).length;
+  const unreadMessages = conversations.reduce((acc, curr) => acc + (curr.unread_count || 0), 0) + groupChats.reduce((acc, curr) => acc + (curr.unread_count || 0), 0);
 
   const formatTimestamp = (ts: string) => {
     try {
@@ -612,7 +677,21 @@ export default function App() {
                 active={activeTab === 'notifications'} 
                 onClick={() => { setActiveTab('notifications'); markNotificationsRead(); }} 
               />
-              <NavItem icon={<MessageSquare />} label="Messages" active={activeTab === 'messages'} onClick={() => setActiveTab('messages')} />
+              <NavItem 
+                icon={
+                  <div className="relative">
+                    <MessageSquare />
+                    {unreadMessages > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                        {unreadMessages}
+                      </span>
+                    )}
+                  </div>
+                } 
+                label="Messages" 
+                active={activeTab === 'messages'} 
+                onClick={() => setActiveTab('messages')} 
+              />
               <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); }} />
             </nav>
             <button 
@@ -824,29 +903,70 @@ export default function App() {
           {activeTab === 'messages' && (
             <div className="flex h-[calc(100vh-60px)]">
               {/* Conversation List */}
-              <div className="w-1/3 border-r border-gray-800 overflow-y-auto">
-                {conversations.map(conv => (
-                  <div 
-                    key={conv.other_user_id} 
-                    onClick={() => { setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url }); fetchChatMessages(conv.other_user_id); }}
-                    className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id ? 'bg-gray-900' : ''}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
-                        {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
-                      </div>
-                      <div className="overflow-hidden">
-                        <p className="font-bold truncate">{conv.display_name}</p>
-                        <p className={`text-sm truncate ${conv.is_read === 0 && conv.sender_id === conv.other_user_id ? 'text-white font-bold' : 'text-gray-500'}`}>
-                          {conv.last_message}
-                        </p>
+              <div className="w-1/3 border-r border-gray-800 flex flex-col">
+                <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+                  <h2 className="font-bold text-lg">Messages</h2>
+                  <button onClick={() => setShowCreateGroupModal(true)} className="p-2 hover:bg-gray-800 rounded-full" title="New Group Chat">
+                    <Plus size={20} />
+                  </button>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {groupChats.map(group => (
+                    <div 
+                      key={`group-${group.id}`} 
+                      onClick={() => { setActiveChat({ id: group.id, name: group.name, isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true); }}
+                      className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-gray-900' : ''}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
+                          <Users size={24} />
+                        </div>
+                        <div className="overflow-hidden flex-1">
+                          <div className="flex justify-between items-center">
+                            <p className="font-bold truncate">{group.name}</p>
+                            {group.unread_count > 0 && (
+                              <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                {group.unread_count}
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-sm truncate ${group.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
+                            {group.last_message || 'No messages yet'}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-                {conversations.length === 0 && (
-                  <div className="p-4 text-center text-gray-500 text-sm">No messages yet.</div>
-                )}
+                  ))}
+                  {conversations.map(conv => (
+                    <div 
+                      key={`dm-${conv.other_user_id}`} 
+                      onClick={() => { setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false); }}
+                      className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-gray-900' : ''}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
+                          {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
+                        </div>
+                        <div className="overflow-hidden flex-1">
+                          <div className="flex justify-between items-center">
+                            <p className="font-bold truncate">{conv.display_name}</p>
+                            {conv.unread_count > 0 && (
+                              <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                {conv.unread_count}
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-sm truncate ${conv.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
+                            {conv.last_message}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {conversations.length === 0 && groupChats.length === 0 && (
+                    <div className="p-4 text-center text-gray-500 text-sm">No messages yet.</div>
+                  )}
+                </div>
               </div>
 
               {/* Chat Area */}
@@ -940,6 +1060,19 @@ export default function App() {
                       className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${aiEnabled ? 'bg-orange-500' : 'bg-gray-700'}`}
                     >
                       <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${aiEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <p className="font-medium">Allow NSFW Content</p>
+                      <p className="text-sm text-gray-500 mt-1">When enabled, AI characters may generate explicit language and mature themes.</p>
+                    </div>
+                    <button 
+                      onClick={toggleNsfw}
+                      className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${allowNsfw ? 'bg-orange-500' : 'bg-gray-700'}`}
+                    >
+                      <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${allowNsfw ? 'translate-x-6' : 'translate-x-0'}`} />
                     </button>
                   </div>
 
@@ -1247,6 +1380,16 @@ export default function App() {
                     )}
                   </div>
                   
+                  <div className="flex flex-col gap-2 mb-2">
+                    <label className="block text-xs font-medium text-gray-400">Search Character</label>
+                    <input 
+                      type="text" 
+                      value={relSearch} 
+                      onChange={e => setRelSearch(e.target.value)}
+                      placeholder="Search by name or username..."
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
+                    />
+                  </div>
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
                       <label className="block text-xs font-medium text-gray-400 mb-1">Character</label>
@@ -1256,7 +1399,7 @@ export default function App() {
                         className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
                       >
                         <option value="">Select character...</option>
-                        {users.filter(u => u.id !== editingProfile.id && !profileRelationships.find(r => r.user_id_2 === u.id)).map(u => (
+                        {users.filter(u => u.id !== editingProfile.id && !profileRelationships.find(r => r.user_id_2 === u.id) && (u.display_name.toLowerCase().includes(relSearch.toLowerCase()) || u.username.toLowerCase().includes(relSearch.toLowerCase()))).map(u => (
                           <option key={u.id} value={u.id}>{u.display_name} (@{u.username})</option>
                         ))}
                       </select>
@@ -1329,7 +1472,7 @@ export default function App() {
                     <p className="font-bold truncate text-sm group-hover:underline">{u.display_name}</p>
                     <p className="text-gray-500 text-xs truncate">@{u.username}</p>
                   </div>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-1 flex-shrink-0">
                     <button 
                       onClick={() => handleFollow(u.id)}
                       className={`text-xs font-bold px-3 py-1 rounded-full transition ${u.is_followed ? 'bg-gray-800 text-white hover:bg-red-900/50 hover:text-red-500' : 'bg-white text-black hover:bg-gray-200'}`}
@@ -1415,8 +1558,26 @@ export default function App() {
                 <p className="mb-4 whitespace-pre-wrap">{viewingProfile.bio}</p>
                 
                 <div className="flex gap-4 text-sm text-gray-500 mb-6">
-                  <span><strong className="text-white">{viewingProfile.following_count || 0}</strong> Following</span>
-                  <span><strong className="text-white">{viewingProfile.follower_count || 0}</strong> Followers</span>
+                  <span 
+                    className="cursor-pointer hover:underline"
+                    onClick={async () => {
+                      const res = await fetch(`/api/users/${viewingProfile.id}/following`);
+                      const data = await res.json();
+                      setFollowersModal({ users: data, title: 'Following' });
+                    }}
+                  >
+                    <strong className="text-white">{viewingProfile.following_count || 0}</strong> Following
+                  </span>
+                  <span 
+                    className="cursor-pointer hover:underline"
+                    onClick={async () => {
+                      const res = await fetch(`/api/users/${viewingProfile.id}/followers`);
+                      const data = await res.json();
+                      setFollowersModal({ users: data, title: 'Followers' });
+                    }}
+                  >
+                    <strong className="text-white">{viewingProfile.follower_count || 0}</strong> Followers
+                  </span>
                 </div>
 
                 {viewingProfile.is_ai === 1 && (
@@ -1488,6 +1649,89 @@ export default function App() {
                   </div>
                 ))}
                 {likersModal.users.length === 0 && <p className="text-center text-gray-500 py-8">No likes yet.</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Followers/Following Modal */}
+        {followersModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[70vh]">
+              <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+                <h3 className="font-bold">{followersModal.title}</h3>
+                <button onClick={() => setFollowersModal(null)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2">
+                {followersModal.users.map(u => (
+                  <div key={u.id} className="flex items-center gap-3 p-3 hover:bg-gray-800 rounded-xl cursor-pointer" onClick={() => { handleViewProfile(u.id); setFollowersModal(null); }}>
+                    <div className="w-10 h-10 bg-gray-700 rounded-full overflow-hidden">
+                      {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="m-auto mt-2" />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">{u.display_name}</p>
+                      <p className="text-gray-500 text-xs">@{u.username}</p>
+                    </div>
+                  </div>
+                ))}
+                {followersModal.users.length === 0 && <p className="text-center text-gray-500 py-8">No users found.</p>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCreateGroupModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold">Create Group Chat</h3>
+                <button onClick={() => setShowCreateGroupModal(false)} className="text-gray-500 hover:text-white">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Group Name</label>
+                  <input 
+                    type="text" 
+                    value={newGroupName}
+                    onChange={e => setNewGroupName(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-orange-500"
+                    placeholder="Enter group name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Select Members</label>
+                  <div className="max-h-60 overflow-y-auto space-y-2 border border-gray-800 rounded-xl p-2">
+                    {users.filter(u => u.is_ai === 1).map(user => (
+                      <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedGroupMembers.includes(user.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedGroupMembers(prev => [...prev, user.id]);
+                            } else {
+                              setSelectedGroupMembers(prev => prev.filter(id => id !== user.id));
+                            }
+                          }}
+                          className="w-5 h-5 rounded border-gray-700 text-orange-500 focus:ring-orange-500 bg-gray-900"
+                        />
+                        <div className="w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
+                          {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
+                        </div>
+                        <span className="font-medium">{user.display_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <button 
+                  onClick={handleCreateGroupChat}
+                  disabled={!newGroupName.trim() || selectedGroupMembers.length === 0}
+                  className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition"
+                >
+                  Create Group
+                </button>
               </div>
             </div>
           </div>

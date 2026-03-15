@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage } from "./src/ai";
+import { generatePost, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateGroupChatReply } from "./src/ai";
 
 async function startServer() {
   const app = express();
@@ -67,7 +67,7 @@ async function startServer() {
       db.prepare("DELETE FROM follows").run();
       db.prepare("DELETE FROM user_tags").run();
       db.prepare("DELETE FROM relationships").run();
-      db.prepare("DELETE FROM users WHERE username != 'real_user'").run();
+      db.prepare("DELETE FROM users WHERE is_ai = 1").run();
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -111,11 +111,49 @@ async function startServer() {
   });
 
   // Users
+  app.get("/api/users/:id/posts", (req, res) => {
+    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const userId = user ? user.id : 0;
+    const posts = db.prepare(`
+      SELECT p.*, u.username, u.display_name, u.avatar_url,
+      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
+      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+      (SELECT COUNT(*) FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
+      FROM posts p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.user_id = ?
+      ORDER BY p.created_at DESC
+    `).all(userId, req.params.id);
+    res.json(posts);
+  });
+
+  app.get("/api/users/:id/followers", (req, res) => {
+    const followers = db.prepare(`
+      SELECT u.id, u.username, u.display_name, u.avatar_url
+      FROM follows f
+      JOIN users u ON f.follower_id = u.id
+      WHERE f.followed_id = ?
+    `).all(req.params.id);
+    res.json(followers);
+  });
+
+  app.get("/api/users/:id/following", (req, res) => {
+    const following = db.prepare(`
+      SELECT u.id, u.username, u.display_name, u.avatar_url
+      FROM follows f
+      JOIN users u ON f.followed_id = u.id
+      WHERE f.follower_id = ?
+    `).all(req.params.id);
+    res.json(following);
+  });
+
   app.get("/api/users", (req, res) => {
     const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
     const users = db.prepare(`
       SELECT u.*, 
       (SELECT COUNT(*) FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
+      (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
+      (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count,
       (SELECT json_group_array(t.name) FROM user_tags ut JOIN tags t ON ut.tag_id = t.id WHERE ut.user_id = u.id) as tags
       FROM users u ORDER BY u.created_at DESC
     `).all(user?.id || 0);
@@ -351,7 +389,10 @@ async function startServer() {
       if (postContent) {
         let imageUrl = null;
         if (type === 'image') {
-          const imagePrompt = `A picture taken by ${aiUser.display_name}. Physical appearance: ${aiUser.physical_appearance || aiUser.bio}. Clothing style: ${aiUser.clothing_style || 'casual'}. Context: ${postContent}. Style: realistic, social media photo.`;
+          const appearance = (aiUser.physical_appearance || aiUser.bio || '').substring(0, 200);
+          const clothing = (aiUser.clothing_style || 'casual').substring(0, 100);
+          const context = postContent.substring(0, 500);
+          const imagePrompt = `Subject: ${aiUser.display_name}, ${appearance}, ${clothing}. Context: ${context}. Style: realistic, social media photo.`;
           imageUrl = await generateImage(imagePrompt);
         }
         db.prepare("INSERT INTO posts (user_id, content, image_url) VALUES (?, ?, ?)")
@@ -551,6 +592,138 @@ async function startServer() {
     }
   });
 
+  // Group Chats
+  app.get("/api/group-chats", (req, res) => {
+    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    const groups = db.prepare(`
+      SELECT gc.*, 
+      (SELECT content FROM group_chat_messages WHERE group_chat_id = gc.id ORDER BY created_at DESC LIMIT 1) as last_message,
+      (SELECT created_at FROM group_chat_messages WHERE group_chat_id = gc.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
+      (SELECT COUNT(*) FROM group_chat_messages WHERE group_chat_id = gc.id AND created_at > gcm.last_read_at) as unread_count
+      FROM group_chats gc
+      JOIN group_chat_members gcm ON gc.id = gcm.group_chat_id
+      WHERE gcm.user_id = ?
+      ORDER BY last_message_time DESC NULLS LAST, gc.created_at DESC
+    `).all(user.id);
+
+    for (const group of groups as any[]) {
+      group.members = db.prepare(`
+        SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_ai
+        FROM users u
+        JOIN group_chat_members gcm ON u.id = gcm.user_id
+        WHERE gcm.group_chat_id = ?
+      `).all(group.id);
+    }
+
+    res.json(groups);
+  });
+
+  app.post("/api/group-chats", (req, res) => {
+    const { name, member_ids } = req.body;
+    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    try {
+      const stmt = db.prepare("INSERT INTO group_chats (name) VALUES (?)");
+      const info = stmt.run(name);
+      const groupId = info.lastInsertRowid;
+
+      const insertMember = db.prepare("INSERT INTO group_chat_members (group_chat_id, user_id) VALUES (?, ?)");
+      insertMember.run(groupId, user.id);
+      for (const memberId of member_ids) {
+        insertMember.run(groupId, memberId);
+      }
+
+      res.json({ id: groupId });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/group-chats/:id/messages", (req, res) => {
+    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    if (user) {
+      db.prepare("UPDATE group_chat_members SET last_read_at = CURRENT_TIMESTAMP WHERE group_chat_id = ? AND user_id = ?").run(req.params.id, user.id);
+    }
+
+    const messages = db.prepare(`
+      SELECT m.*, u.display_name, u.username, u.avatar_url
+      FROM group_chat_messages m
+      JOIN users u ON m.sender_id = u.id
+      WHERE m.group_chat_id = ?
+      ORDER BY m.created_at ASC
+    `).all(req.params.id);
+    res.json(messages);
+  });
+
+  app.post("/api/group-chats/:id/messages", async (req, res) => {
+    const { content } = req.body;
+    const user = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").get() as any;
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    const groupId = req.params.id;
+    try {
+      db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
+        .run(groupId, user.id, content);
+      
+      res.json({ success: true });
+
+      // AI Reply logic
+      const group = db.prepare("SELECT * FROM group_chats WHERE id = ?").get(groupId) as any;
+      if (!group) return;
+
+      const members = db.prepare(`
+        SELECT u.* FROM users u
+        JOIN group_chat_members gcm ON u.id = gcm.user_id
+        WHERE gcm.group_chat_id = ? AND u.is_ai = 1
+      `).all(groupId) as any[];
+
+      const history = db.prepare(`
+        SELECT m.sender_id, m.content, u.display_name
+        FROM group_chat_messages m
+        JOIN users u ON m.sender_id = u.id
+        WHERE m.group_chat_id = ?
+        ORDER BY m.created_at DESC LIMIT 15
+      `).all(groupId).reverse();
+
+      const formattedHistory = history.map((msg: any) => ({
+        role: msg.sender_id === user.id ? 'user' : 'assistant',
+        content: `[${msg.display_name}]: ${msg.content}`
+      }));
+
+      // Let each AI decide if they want to reply (e.g. 50% chance, or if mentioned)
+      for (const aiUser of members) {
+        const isMentioned = content.toLowerCase().includes(aiUser.display_name.toLowerCase()) || content.toLowerCase().includes(aiUser.username.toLowerCase());
+        const shouldReply = isMentioned || Math.random() < 0.4;
+        
+        if (shouldReply) {
+          const otherMembers = db.prepare(`
+            SELECT u.* FROM users u
+            JOIN group_chat_members gcm ON u.id = gcm.user_id
+            WHERE gcm.group_chat_id = ? AND u.id != ?
+          `).all(groupId, aiUser.id) as any[];
+
+          const reply = await generateGroupChatReply(aiUser, group.name, formattedHistory, otherMembers);
+          if (reply) {
+            db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
+              .run(groupId, aiUser.id, reply);
+            
+            // Add this reply to history for the next AI
+            formattedHistory.push({
+              role: 'assistant',
+              content: `[${aiUser.display_name}]: ${reply}`
+            });
+          }
+        }
+      }
+
+    } catch (e: any) {
+      console.error("Error in /api/group-chats/:id/messages:", e);
+    }
+  });
+
   // DMs
   app.get("/api/dms", (req, res) => {
     const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
@@ -561,7 +734,8 @@ async function startServer() {
       SELECT 
         u.id as other_user_id, u.username, u.display_name, u.avatar_url,
         dm.content as last_message, dm.created_at, dm.is_read,
-        dm.sender_id
+        dm.sender_id,
+        (SELECT COUNT(*) FROM direct_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread_count
       FROM users u
       JOIN direct_messages dm ON (dm.sender_id = u.id AND dm.receiver_id = ?) OR (dm.sender_id = ? AND dm.receiver_id = u.id)
       WHERE dm.id IN (
@@ -571,7 +745,7 @@ async function startServer() {
       )
       AND u.id != ?
       ORDER BY dm.created_at DESC
-    `).all(user.id, user.id, user.id, user.id);
+    `).all(user.id, user.id, user.id, user.id, user.id);
     res.json(conversations);
   });
 
@@ -732,7 +906,10 @@ async function startServer() {
         if (postContent) {
           let imageUrl = null;
           if (isImage) {
-            const imagePrompt = `A picture of ${aiUser.display_name}. Physical appearance: ${aiUser.physical_appearance || aiUser.bio}. Clothing style: ${aiUser.clothing_style || 'casual'}. Context: ${postContent}. Style: realistic, social media photo.`;
+            const appearance = (aiUser.physical_appearance || aiUser.bio || '').substring(0, 200);
+            const clothing = (aiUser.clothing_style || 'casual').substring(0, 100);
+            const context = postContent.substring(0, 500);
+            const imagePrompt = `Subject: ${aiUser.display_name}, ${appearance}, ${clothing}. Context: ${context}. Style: realistic, social media photo.`;
             imageUrl = await generateImage(imagePrompt);
           }
           db.prepare("INSERT INTO posts (user_id, content, image_url) VALUES (?, ?, ?)")
