@@ -1,5 +1,8 @@
 import OpenAI from 'openai';
 import db from './db';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 
 function getOpenAI() {
   let apiKey = process.env.NANO_GPT_API_KEY || '';
@@ -119,7 +122,32 @@ function buildCharacterPrompt(character: any) {
   return prompt;
 }
 
-export async function generatePost(character: any, context: string = '', relationships: string = '') {
+export async function pickBestCommenter(post: any, availableUsers: any[]) {
+  const prompt = `You are a social media manager. Given the following post:
+"${post.content}" by ${post.author_name}
+
+Which of the following users is most likely to leave a comment based on their bio?
+${availableUsers.map(u => `ID: ${u.id}, Name: ${u.display_name}, Bio: ${u.bio}`).join('\n')}
+
+Reply with ONLY the ID of the chosen user.`;
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 10,
+      temperature: 0.2,
+    });
+    const content = response.choices[0].message.content?.trim();
+    const id = parseInt(content || '');
+    if (!isNaN(id)) return id;
+  } catch (e) {
+    console.error('Error picking commenter:', e);
+  }
+  return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
+}
+
+export async function generatePost(character: any, context: string = '', relationships: string = '', isImage: boolean = false) {
   const topics = [
     "a random thought you just had",
     "something you are currently doing or working on",
@@ -142,6 +170,7 @@ Avoid referencing other people's posts directly unless it's a very general obser
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
 ${context ? `Recent platform activity for inspiration (do not copy, just for vibe): ${context}` : ''}
+${isImage ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. The image will be generated based on this text, so make the text descriptive enough to inspire an image, but natural for social media.` : ''}
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
 
   try {
@@ -171,9 +200,21 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
   }
 }
 
-export async function generateComment(character: any, postContent: string, postAuthorName: string, otherComments: string = '', isReply: boolean = false, relationshipContext: string = '') {
+export async function generateComment(character: any, postContent: string, postAuthorName: string, otherComments: string = '', isReply: boolean = false, relationshipContext: string = '', otherUserId?: number) {
+  let otherUserInfo = '';
+  if (otherUserId) {
+    const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
+    if (otherUser) {
+      otherUserInfo = `Their Bio: ${otherUser.bio || 'No bio provided.'}\n`;
+      if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
+        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
+      }
+    }
+  }
+
   const prompt = `${buildCharacterPrompt(character)}
 You are looking at a social media post by ${postAuthorName}: "${postContent}"
+${otherUserInfo}
 ${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
 ${otherComments ? `Other users have already commented: ${otherComments}` : ''}
 ${isReply ? `You are replying to a specific comment.` : `Write a ${isReply ? 'reply' : 'comment'} that fits your character perfectly.`}
@@ -206,9 +247,22 @@ Keep it short, natural, and in character. Do not wrap in quotes. Keep it under 1
   }
 }
 
-export async function generateDM(character: any, userDisplayName: string, relationshipContext: string = '') {
+export async function generateDM(character: any, userDisplayName: string, relationshipContext: string = '', otherUserId?: number) {
+  let otherUserInfo = '';
+  if (otherUserId) {
+    const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
+    if (otherUser) {
+      otherUserInfo = `Their Bio: ${otherUser.bio || 'No bio provided.'}\n`;
+      // If relationship context exists, it implies some level of closeness, but let's be safe and only include backstory if it's explicitly a close relationship.
+      if (relationshipContext && relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner')) {
+        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
+      }
+    }
+  }
+
   const prompt = `${buildCharacterPrompt(character)}
 You are sending a private direct message to ${userDisplayName}.
+${otherUserInfo}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
 Write a short, in-character message starting a conversation. Give a good reason for reaching out (e.g., asking a question, sharing a secret, or reacting to something). Do not wrap in quotes.`;
 
@@ -239,9 +293,21 @@ Write a short, in-character message starting a conversation. Give a good reason 
   }
 }
 
-export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string}[], relationshipContext: string = '') {
+export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string}[], relationshipContext: string = '', otherUserId?: number) {
+  let otherUserInfo = '';
+  if (otherUserId) {
+    const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
+    if (otherUser) {
+      otherUserInfo = `Their Bio: ${otherUser.bio || 'No bio provided.'}\n`;
+      if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
+        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
+      }
+    }
+  }
+
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are having a private direct message conversation with ${userDisplayName}.
+${otherUserInfo}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
 Reply in character to their latest message. Make sure to actually write like it's a Direct Message Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character.`;
 
@@ -279,8 +345,12 @@ Reply in character to their latest message. Make sure to actually write like it'
 
 export async function generateGroupChatReply(character: any, groupName: string, messageHistory: {role: string, content: string}[], otherMembers: any[]) {
   const otherMembersStr = otherMembers.map(m => m.display_name).join(', ');
+  const otherMembersBios = otherMembers.map(m => `${m.display_name} Bio: ${m.bio || 'No bio provided.'}`).join('\n');
+  
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are in a group chat named "${groupName}" with ${otherMembersStr}.
+Here is some information about the other members:
+${otherMembersBios}
 Reply in character to the latest messages. Make sure to actually write like it's a Group Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character. You can address specific people by name if you want.`;
 
   const messages = [
@@ -314,6 +384,45 @@ Reply in character to the latest messages. Make sure to actually write like it's
   }
 }
 
+export async function generateImagePrompt(character: any, postContent: string) {
+  const prompt = `You are an expert at writing prompts for the Z-Image-Turbo AI image generator.
+You need to write an image generation prompt for a social media post by ${character.display_name}.
+The text of their post is: "${postContent}"
+
+Follow this structure for the prompt:
+[Shot & subject] + [Age & appearance] + [Clothing & modesty] + [Environment/background] + [Lighting] + [Mood] + [Style/medium] + [Technical notes] + [Safety/cleanup constraints]
+
+Character details:
+Name: ${character.display_name}
+Appearance: ${character.physical_appearance || character.bio || 'average looking'}
+Clothing style: ${character.clothing_style || 'casual everyday clothes'}
+
+Guidelines:
+- The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
+- Images should look like actual images posted on social media by "normal" people (can have weird angles, be blurry, candid, etc.).
+- Accurately describe the physical features and clothing of the character (if the character is visible) to ensure consistency.
+- Include safety constraints at the end: "safe for work, non-sexual, fully clothed characters, no nudity, no suggestive poses, no text, no watermark, no logos, plain background, not busy or cluttered, no extra limbs, correct human anatomy, no motion blur, sharp focus, no lens distortion, no fisheye effect"
+- Keep the prompt under 1000 characters (absolute maximum 1200 characters).
+- ONLY output the final prompt text, nothing else.`;
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 300,
+      temperature: 0.7,
+    });
+    let content = response.choices[0].message.content?.trim() || "";
+    if (content.length > 1200) {
+      content = content.substring(0, 1200);
+    }
+    return content;
+  } catch (error) {
+    console.error('Error generating image prompt:', error);
+    return "";
+  }
+}
+
 export async function generateImage(prompt: string) {
   try {
     const model = getImageModel();
@@ -321,9 +430,34 @@ export async function generateImage(prompt: string) {
       model: model,
       prompt: prompt,
       n: 1,
-      size: '1024x1024'
+      size: '1024x1024',
+      response_format: 'b64_json'
     });
-    const url = response.data[0].url;
+    
+    const imageData = response.data[0];
+    let url = '';
+    
+    if (imageData.b64_json) {
+      const buffer = Buffer.from(imageData.b64_json, 'base64');
+      const filename = `${crypto.randomUUID()}.png`;
+      const uploadDir = path.join(process.cwd(), 'uploads');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(uploadDir, filename), buffer);
+      url = `/uploads/${filename}`;
+    } else if (imageData.url) {
+      const res = await fetch(imageData.url);
+      const arrayBuffer = await res.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const filename = `${crypto.randomUUID()}.png`;
+      const uploadDir = path.join(process.cwd(), 'uploads');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      fs.writeFileSync(path.join(uploadDir, filename), buffer);
+      url = `/uploads/${filename}`;
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImage",

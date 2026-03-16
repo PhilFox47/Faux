@@ -2,13 +2,14 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateGroupChatReply } from "./src/ai";
+import { generatePost, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateGroupChatReply, pickBestCommenter } from "./src/ai";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
   // Initialize Database
   initDb();
@@ -385,19 +386,26 @@ async function startServer() {
       `).all(aiUser.id) as any[];
       const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
 
-      const postContent = await generatePost(aiUser, contextStr, relStr);
+      const postContent = await generatePost(aiUser, contextStr, relStr, type === 'image');
       if (postContent) {
-        let imageUrl = null;
+        const info = db.prepare("INSERT INTO posts (user_id, content) VALUES (?, ?)").run(aiUser.id, postContent);
+        const postId = info.lastInsertRowid;
+        
+        // Respond immediately so UI doesn't hang
+        res.json({ success: true, postId });
+
+        // Generate image in background
         if (type === 'image') {
-          const appearance = (aiUser.physical_appearance || aiUser.bio || '').substring(0, 200);
-          const clothing = (aiUser.clothing_style || 'casual').substring(0, 100);
-          const context = postContent.substring(0, 500);
-          const imagePrompt = `Subject: ${aiUser.display_name}, ${appearance}, ${clothing}. Context: ${context}. Style: realistic, social media photo.`;
-          imageUrl = await generateImage(imagePrompt);
+          try {
+            const imagePrompt = await generateImagePrompt(aiUser, postContent);
+            const imageUrl = await generateImage(imagePrompt);
+            if (imageUrl) {
+              db.prepare("UPDATE posts SET image_url = ? WHERE id = ?").run(imageUrl, postId);
+            }
+          } catch (err) {
+            console.error("Failed to generate image for post", postId, err);
+          }
         }
-        db.prepare("INSERT INTO posts (user_id, content, image_url) VALUES (?, ?, ?)")
-          .run(aiUser.id, postContent, imageUrl);
-        res.json({ success: true });
       } else {
         res.status(500).json({ error: "Failed to generate post" });
       }
@@ -796,7 +804,7 @@ async function startServer() {
         const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
         const relContext = rel ? rel.description : '';
 
-        const reply = await replyToDM(receiver, user.display_name, formattedHistory, relContext);
+        const reply = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id);
         if (reply) {
           db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
             .run(receiverId, user.id, reply);
@@ -902,19 +910,24 @@ async function startServer() {
         `).all(aiUser.id) as any[];
         const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
 
-        const postContent = await generatePost(aiUser, contextStr, relStr);
+        const postContent = await generatePost(aiUser, contextStr, relStr, isImage);
         if (postContent) {
-          let imageUrl = null;
-          if (isImage) {
-            const appearance = (aiUser.physical_appearance || aiUser.bio || '').substring(0, 200);
-            const clothing = (aiUser.clothing_style || 'casual').substring(0, 100);
-            const context = postContent.substring(0, 500);
-            const imagePrompt = `Subject: ${aiUser.display_name}, ${appearance}, ${clothing}. Context: ${context}. Style: realistic, social media photo.`;
-            imageUrl = await generateImage(imagePrompt);
-          }
-          db.prepare("INSERT INTO posts (user_id, content, image_url) VALUES (?, ?, ?)")
-            .run(aiUser.id, postContent, imageUrl);
+          const info = db.prepare("INSERT INTO posts (user_id, content) VALUES (?, ?)").run(aiUser.id, postContent);
+          const postId = info.lastInsertRowid;
           console.log(`${aiUser.display_name} created a post`);
+
+          if (isImage) {
+            try {
+              const imagePrompt = await generateImagePrompt(aiUser, postContent);
+              const imageUrl = await generateImage(imagePrompt);
+              if (imageUrl) {
+                db.prepare("UPDATE posts SET image_url = ? WHERE id = ?").run(imageUrl, postId);
+                console.log(`Image attached to post ${postId} by ${aiUser.display_name}`);
+              }
+            } catch (err) {
+              console.error("Failed to generate image for auto post", postId, err);
+            }
+          }
         }
       };
 
@@ -924,7 +937,7 @@ async function startServer() {
         if (realUser) {
           const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
           const relContext = rel ? rel.description : '';
-          const dmContent = await generateDM(randomAi, realUser.display_name, relContext);
+          const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id);
           if (dmContent) {
             db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
               .run(randomAi.id, realUser.id, dmContent);
@@ -944,89 +957,79 @@ async function startServer() {
       }
       
       if (Math.random() < probComment) {
-        const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
-        // Weight newer posts higher and check if already commented
+        // Pick a recent post or comment to reply to
         const recentPosts = db.prepare(`
-          SELECT p.*, u.display_name as author_name,
-          (SELECT COUNT(*) FROM follows WHERE follower_id = ? AND followed_id = p.user_id) as is_followed,
-          (SELECT COUNT(*) FROM comments WHERE post_id = p.id AND user_id = ?) as already_commented
+          SELECT p.*, u.display_name as author_name, u.bio as author_bio,
+          (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count
           FROM posts p 
           JOIN users u ON p.user_id = u.id 
-          WHERE p.user_id != ? -- Don't comment on own posts
           ORDER BY p.created_at DESC LIMIT 50
-        `).all(randomAi.id, randomAi.id, randomAi.id) as any[];
+        `).all() as any[];
         
-        if (recentPosts.length > 0) {
-          // Simple weighting: newer posts (lower index) get more entries in the selection array
-          // Also exclude posts already commented on unless we want to reply to a comment
-          let weightedPosts: any[] = [];
-          recentPosts.forEach((post, index) => {
-            if (post.already_commented > 0) return; // Only one top-level comment per post
+        const recentComments = db.prepare(`
+          SELECT c.*, u.display_name as author_name, p.content as post_content,
+          (SELECT COUNT(*) FROM comments WHERE parent_id = c.id) as reply_count
+          FROM comments c
+          JOIN users u ON c.user_id = u.id
+          JOIN posts p ON c.post_id = p.id
+          ORDER BY c.created_at DESC LIMIT 30
+        `).all() as any[];
 
-            const weight = Math.max(1, 10 - Math.floor(index / 5)); // Newer posts get more weight
-            const followBonus = post.is_followed ? 3 : 1;
-            
-            for (let i = 0; i < weight * followBonus; i++) {
-              weightedPosts.push({ type: 'post', data: post });
-            }
-          });
+        let weightedItems: any[] = [];
+        
+        recentPosts.forEach((post, index) => {
+          const weight = Math.max(1, 10 - Math.floor(index / 5));
+          for (let i = 0; i < weight; i++) {
+            weightedItems.push({ type: 'post', data: post });
+          }
+        });
 
-          // Also consider replying to existing comments
-          const recentComments = db.prepare(`
-            SELECT c.*, u.display_name as author_name, p.content as post_content,
-            (SELECT COUNT(*) FROM comments WHERE parent_id = c.id AND user_id = ?) as already_replied
-            FROM comments c
-            JOIN users u ON c.user_id = u.id
-            JOIN posts p ON c.post_id = p.id
-            WHERE c.user_id != ? -- Don't reply to own comments
-            ORDER BY c.created_at DESC LIMIT 30
-          `).all(randomAi.id, randomAi.id) as any[];
+        recentComments.forEach((comment, index) => {
+          // Check thread depth
+          let depth = 1;
+          let currentComment = comment;
+          while (currentComment.parent_id) {
+            depth++;
+            currentComment = db.prepare("SELECT parent_id FROM comments WHERE id = ?").get(currentComment.parent_id) as any;
+            if (!currentComment) break;
+          }
+          if (depth >= 5) return; // Limit thread to 5 levels
 
-          recentComments.forEach((comment, index) => {
-            if (comment.already_replied > 0) return; // Only reply to a comment once
-            
-            // Check thread depth
-            let depth = 1;
-            let currentComment = comment;
-            while (currentComment.parent_id) {
-              depth++;
-              currentComment = db.prepare("SELECT parent_id FROM comments WHERE id = ?").get(currentComment.parent_id) as any;
-              if (!currentComment) break;
-            }
-            if (depth >= 5) return; // Limit thread to 5 levels
+          const weight = Math.max(1, 5 - Math.floor(index / 6));
+          for (let i = 0; i < weight; i++) {
+            weightedItems.push({ type: 'comment', data: comment });
+          }
+        });
 
-            const weight = Math.max(1, 5 - Math.floor(index / 6));
-            for (let i = 0; i < weight; i++) {
-              weightedPosts.push({ type: 'comment', data: comment });
-            }
-          });
+        if (weightedItems.length > 0) {
+          const choice = weightedItems[Math.floor(Math.random() * weightedItems.length)];
+          
+          let skipComment = false;
+          let totalComments = choice.type === 'post' ? choice.data.comment_count : (db.prepare("SELECT COUNT(*) as count FROM comments WHERE post_id = ?").get(choice.data.post_id) as any).count;
 
-          if (weightedPosts.length > 0) {
-            const choice = weightedPosts[Math.floor(Math.random() * weightedPosts.length)];
-            
-            let skipComment = false;
-            let totalComments = 0;
-            
-            if (choice.type === 'post') {
-              totalComments = (db.prepare("SELECT COUNT(*) as count FROM comments WHERE post_id = ?").get(choice.data.id) as any).count;
-            } else {
-              totalComments = (db.prepare("SELECT COUNT(*) as count FROM comments WHERE post_id = ?").get(choice.data.post_id) as any).count;
-            }
+          if (totalComments >= 20) {
+            skipComment = Math.random() < 0.50;
+          } else if (totalComments >= 10) {
+            skipComment = Math.random() < 0.30;
+          } else if (totalComments >= 5) {
+            skipComment = Math.random() < 0.10;
+          }
 
-            if (totalComments >= 20) {
-              skipComment = Math.random() < 0.50;
-            } else if (totalComments >= 10) {
-              skipComment = Math.random() < 0.30;
-            } else if (totalComments >= 5) {
-              skipComment = Math.random() < 0.10;
-            }
+          if (skipComment) {
+            const randomAi = aiUsers[Math.floor(Math.random() * aiUsers.length)];
+            console.log(`${randomAi.display_name} skipped commenting due to too many comments. Creating a post instead.`);
+            await doAiPost(randomAi, false);
+            return;
+          }
+          
+          // Now pick the best commenter
+          const targetUserId = choice.type === 'post' ? choice.data.user_id : choice.data.user_id;
+          const availableAis = aiUsers.filter(u => u.id !== targetUserId);
+          
+          if (availableAis.length > 0) {
+            const chosenAiId = await pickBestCommenter(choice.data, availableAis);
+            const randomAi = availableAis.find(u => u.id === chosenAiId) || availableAis[0];
 
-            if (skipComment) {
-              console.log(`${randomAi.display_name} skipped commenting due to too many comments. Creating a post instead.`);
-              await doAiPost(randomAi, false);
-              return;
-            }
-            
             if (choice.type === 'post') {
               const randomPost = choice.data;
               // Get other comments for context
@@ -1036,9 +1039,9 @@ async function startServer() {
               const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
               const relContext = rel ? rel.description : '';
 
-              const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext);
+              const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id);
               if (commentContent) {
-                db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
+                const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
                   .run(randomPost.id, randomAi.id, commentContent);
                 console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
 
@@ -1046,7 +1049,7 @@ async function startServer() {
                 const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
                 if (realUser && randomPost.user_id === realUser.id) {
                   db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-                    .run(realUser.id, randomAi.id, randomPost.id);
+                    .run(realUser.id, randomAi.id, info.lastInsertRowid);
                 }
               }
             } else {
@@ -1055,9 +1058,9 @@ async function startServer() {
               const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
               const relContext = rel ? rel.description : '';
 
-              const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, "", true, relContext);
+              const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, "", true, relContext, randomComment.user_id);
               if (replyContent) {
-                db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
+                const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
                   .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
                 console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
 
@@ -1065,7 +1068,7 @@ async function startServer() {
                 const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
                 if (realUser && randomComment.user_id === realUser.id) {
                   db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-                    .run(realUser.id, randomAi.id, randomComment.post_id);
+                    .run(realUser.id, randomAi.id, info.lastInsertRowid);
                 }
               }
             }

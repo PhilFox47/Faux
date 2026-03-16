@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus } from 'lucide-react';
+import { TagTextarea } from './components/TagTextarea';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
@@ -50,6 +51,8 @@ export default function App() {
   const [viewingProfile, setViewingProfile] = useState<any>(null);
   const [viewingProfilePosts, setViewingProfilePosts] = useState<any[]>([]);
   const [viewingPostData, setViewingPostData] = useState<any>(null);
+  const [highlightedPostId, setHighlightedPostId] = useState<number | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<number | null>(null);
 
   const handleViewPost = async (postId: number) => {
     try {
@@ -67,23 +70,36 @@ export default function App() {
   };
 
   const handleNotificationClick = async (notif: any) => {
+    // Mark as read immediately
+    if (!notif.is_read) {
+      fetch(`/api/notifications/${notif.id}/read`, { method: 'POST' });
+      setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: 1 } : n));
+      setUnreadNotifications(prev => Math.max(0, prev - 1));
+    }
+
     if (notif.type === 'follow') {
       handleViewProfile(notif.reference_id);
       setActiveTab('profile');
-    } else if (notif.type === 'like_comment') {
-      // For comment likes, we need to find the post ID
+    } else if (notif.type === 'like_comment' || notif.type === 'comment' || notif.type === 'reply') {
+      // For comment-related notifications, reference_id is the comment ID
       try {
         const res = await fetch(`/api/comments/${notif.reference_id}`);
         if (res.ok) {
           const comment = await res.json();
-          handleViewPost(comment.post_id);
+          setHighlightedPostId(comment.post_id);
+          setHighlightedCommentId(comment.id);
+          setActiveTab('home');
+        } else {
+          showToast("Comment not found");
         }
       } catch (e) {
         showToast("Error loading comment");
       }
-    } else {
-      // like_post, comment, reply
-      handleViewPost(notif.reference_id);
+    } else if (notif.type === 'like_post') {
+      // like_post
+      setHighlightedPostId(notif.reference_id);
+      setHighlightedCommentId(null);
+      setActiveTab('home');
     }
   };
 
@@ -523,7 +539,7 @@ export default function App() {
     fetchUsers();
   };
 
-  const handleSendMsg = async (e: React.FormEvent) => {
+  const handleSendMsg = async (e: React.FormEvent | React.KeyboardEvent | any) => {
     e.preventDefault();
     if (!newChatMsg.trim() || !activeChat) return;
     
@@ -731,13 +747,14 @@ export default function App() {
               <div className="border-b border-gray-800 p-4 flex gap-4">
                 <div className="w-10 h-10 bg-orange-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold">Y</div>
                 <div className="flex-1">
-                  <textarea 
+                  <TagTextarea 
+                    users={users}
                     value={newPostContent}
-                    onChange={(e) => setNewPostContent(e.target.value)}
+                    onValueChange={setNewPostContent}
                     className="w-full bg-transparent text-xl outline-none resize-none placeholder-gray-500" 
                     placeholder="What's happening?"
                     rows={3}
-                  ></textarea>
+                  />
                   <div className="flex justify-between items-center mt-2 border-t border-gray-800 pt-3">
                     <div className="text-orange-500 flex gap-4"></div>
                     <button 
@@ -762,6 +779,13 @@ export default function App() {
                     onShowLikers={handleShowLikers}
                     formatTimestamp={formatTimestamp}
                     onRefresh={fetchPosts}
+                    highlightedPostId={highlightedPostId}
+                    highlightedCommentId={highlightedCommentId}
+                    onHighlightClear={() => {
+                      setHighlightedPostId(null);
+                      setHighlightedCommentId(null);
+                    }}
+                    users={users}
                   />
                 ))}
                 {posts.length === 0 && (
@@ -995,15 +1019,22 @@ export default function App() {
                       })}
                     </div>
                     <div className="p-4 border-t border-gray-800">
-                      <form onSubmit={handleSendMsg} className="flex gap-2">
-                        <input 
-                          type="text" 
+                      <form onSubmit={handleSendMsg} className="flex gap-2 items-center">
+                        <TagTextarea 
+                          users={users}
                           value={newChatMsg}
-                          onChange={e => setNewChatMsg(e.target.value)}
+                          onValueChange={setNewChatMsg}
                           placeholder="Start a new message" 
-                          className="flex-1 bg-gray-900 border border-gray-700 rounded-full px-4 py-2 outline-none focus:border-orange-500"
+                          className="flex-1 bg-gray-900 border border-gray-700 rounded-2xl px-4 py-2 outline-none focus:border-orange-500 resize-none min-h-[40px] max-h-[120px]"
+                          rows={1}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendMsg(e);
+                            }
+                          }}
                         />
-                        <button type="submit" className="bg-orange-500 text-white p-2 rounded-full hover:bg-orange-600">
+                        <button type="submit" className="bg-orange-500 text-white p-2 rounded-full hover:bg-orange-600 flex-shrink-0">
                           <Send size={20} />
                         </button>
                       </form>
@@ -1754,7 +1785,7 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
-function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void }) {
+function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[] }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -1762,13 +1793,54 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
+  const postRef = React.useRef<HTMLDivElement>(null);
+  const commentRefs = React.useRef<{ [key: number]: HTMLDivElement | null }>({});
 
   useEffect(() => {
     setEditContent(post.content);
   }, [post.content]);
 
+  useEffect(() => {
+    if (highlightedPostId === post.id) {
+      if (highlightedCommentId) {
+        if (!showComments) {
+          setShowComments(true);
+        } else {
+          // If comments are already shown, just scroll to it
+          setTimeout(() => {
+            const commentEl = commentRefs.current[highlightedCommentId];
+            if (commentEl) {
+              commentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+              postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            if (onHighlightClear) setTimeout(onHighlightClear, 2000);
+          }, 100);
+        }
+      } else {
+        setTimeout(() => {
+          postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (onHighlightClear) setTimeout(onHighlightClear, 2000);
+        }, 100);
+      }
+    }
+  }, [highlightedPostId, highlightedCommentId, post.id, showComments]);
+
   const fetchComments = () => {
-    fetch(`/api/posts/${post.id}/comments`).then(r => r.json()).then(setComments);
+    fetch(`/api/posts/${post.id}/comments`).then(r => r.json()).then(data => {
+      setComments(data);
+      if (highlightedPostId === post.id && highlightedCommentId) {
+        setTimeout(() => {
+          const commentEl = commentRefs.current[highlightedCommentId];
+          if (commentEl) {
+            commentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          if (onHighlightClear) setTimeout(onHighlightClear, 2000);
+        }, 300);
+      }
+    });
   };
 
   useEffect(() => {
@@ -1829,7 +1901,10 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   });
 
   return (
-    <div className="border-b border-gray-800 p-4 hover:bg-gray-900/50 transition">
+    <div 
+      ref={postRef}
+      className={`border-b border-gray-800 p-4 hover:bg-gray-900/50 transition ${highlightedPostId === post.id && !highlightedCommentId ? 'bg-orange-900/20 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}`}
+    >
       <div className="flex gap-4">
         <div 
           onClick={() => onViewProfile(post.user_id)}
@@ -1854,9 +1929,10 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
           </div>
           {isEditing ? (
             <div className="mt-2">
-              <textarea 
+              <TagTextarea 
+                users={users || []}
                 value={editContent} 
-                onChange={e => setEditContent(e.target.value)} 
+                onValueChange={setEditContent} 
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
                 rows={3}
               />
@@ -1903,19 +1979,31 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
               onShowLikers={onShowLikers}
               formatTimestamp={formatTimestamp}
               onRefresh={fetchComments}
+              highlightedCommentId={highlightedCommentId}
+              commentRef={(id, el) => { commentRefs.current[id] = el; }}
+              users={users}
             />
           ))}
           
-          <form onSubmit={(e) => handleAddComment(e)} className="flex gap-2 mt-4">
-            <div className="w-8 h-8 bg-orange-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs">Y</div>
-            <input 
-              type="text" 
-              value={newComment}
-              onChange={e => setNewComment(e.target.value)}
-              placeholder="Post your reply" 
-              className="flex-1 bg-transparent border-b border-gray-700 pb-1 outline-none focus:border-orange-500 text-sm"
-            />
-            <button type="submit" disabled={!newComment.trim()} className="text-orange-500 font-bold text-sm disabled:opacity-50">Reply</button>
+          <form onSubmit={(e) => handleAddComment(e)} className="flex gap-2 mt-4 items-end">
+            <div className="w-8 h-8 bg-orange-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs mb-1">Y</div>
+            <div className="flex-1">
+              <TagTextarea 
+                users={users}
+                value={newComment}
+                onValueChange={setNewComment}
+                placeholder="Post your reply" 
+                className="w-full bg-transparent border-b border-gray-700 pb-1 outline-none focus:border-orange-500 text-sm resize-none"
+                rows={1}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAddComment(e);
+                  }
+                }}
+              />
+            </div>
+            <button type="submit" disabled={!newComment.trim()} className="text-orange-500 font-bold text-sm disabled:opacity-50 mb-1">Reply</button>
           </form>
         </div>
       )}
@@ -1924,14 +2012,15 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
             <h3 className="font-bold mb-4">Replying to @{replyingTo.name}</h3>
-            <textarea 
+            <TagTextarea 
+              users={users}
               autoFocus
               value={replyingTo.content}
-              onChange={e => setReplyingTo({...replyingTo, content: e.target.value})}
+              onValueChange={val => setReplyingTo({...replyingTo, content: val})}
               className="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 text-white outline-none focus:border-orange-500 mb-4"
               placeholder="Write your reply..."
               rows={4}
-            ></textarea>
+            />
             <div className="flex gap-3">
               <button onClick={() => setReplyingTo(null)} className="flex-1 bg-gray-800 text-white font-bold py-2 rounded-full">Cancel</button>
               <button onClick={(e) => handleAddComment(e as any, replyingTo.id)} className="flex-1 bg-orange-500 text-white font-bold py-2 rounded-full">Reply</button>
@@ -1943,7 +2032,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   );
 }
 
-function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void }) {
+function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[] }) {
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(comment.content);
@@ -1968,8 +2057,8 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex gap-3 group">
+    <div className="space-y-3" ref={(el) => commentRef && commentRef(comment.id, el)}>
+      <div className={`flex gap-3 group p-2 -m-2 rounded-xl transition ${highlightedCommentId === comment.id ? 'bg-orange-900/20 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}`}>
         <div 
           onClick={() => onViewProfile(comment.user_id)}
           className="w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
@@ -1994,9 +2083,10 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
             </div>
             {isEditing ? (
               <div className="mt-2">
-                <textarea 
+                <TagTextarea 
+                  users={users || []}
                   value={editContent} 
-                  onChange={e => setEditContent(e.target.value)} 
+                  onValueChange={setEditContent} 
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm"
                   rows={2}
                 />
@@ -2039,6 +2129,9 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
               onShowLikers={onShowLikers}
               formatTimestamp={formatTimestamp}
               onRefresh={onRefresh}
+              highlightedCommentId={highlightedCommentId}
+              commentRef={commentRef}
+              users={users}
             />
           ))}
         </div>
