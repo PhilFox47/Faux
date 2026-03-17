@@ -12,6 +12,7 @@ export default function App() {
   const [activeChat, setActiveChat] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newPostContent, setNewPostContent] = useState('');
+  const [newPostType, setNewPostType] = useState('life_update');
   const [newChatMsg, setNewChatMsg] = useState('');
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
@@ -28,6 +29,7 @@ export default function App() {
   const [charWritingStyle, setCharWritingStyle] = useState('');
   const [charPhysicalAppearance, setCharPhysicalAppearance] = useState('');
   const [charClothingStyle, setCharClothingStyle] = useState('');
+  const [charArtstyle, setCharArtstyle] = useState('');
   const [charTags, setCharTags] = useState<string[]>([]);
   const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
   const [personaChatResponse, setPersonaChatResponse] = useState('');
@@ -74,7 +76,6 @@ export default function App() {
     if (!notif.is_read) {
       fetch(`/api/notifications/${notif.id}/read`, { method: 'POST' });
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: 1 } : n));
-      setUnreadNotifications(prev => Math.max(0, prev - 1));
     }
 
     if (notif.type === 'follow') {
@@ -121,6 +122,7 @@ export default function App() {
   const [profileWritingStyle, setProfileWritingStyle] = useState('');
   const [profilePhysicalAppearance, setProfilePhysicalAppearance] = useState('');
   const [profileClothingStyle, setProfileClothingStyle] = useState('');
+  const [profileArtstyle, setProfileArtstyle] = useState('');
   const [profileTags, setProfileTags] = useState<string[]>([]);
   const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
   const [newRelUserId, setNewRelUserId] = useState('');
@@ -157,6 +159,7 @@ export default function App() {
     setProfileWritingStyle(user.writing_style || '');
     setProfilePhysicalAppearance(user.physical_appearance || '');
     setProfileClothingStyle(user.clothing_style || '');
+    setProfileArtstyle(user.artstyle || '');
     setProfileTags(user.tags || []);
     
     // Fetch relationships
@@ -219,6 +222,7 @@ export default function App() {
         writing_style: profileWritingStyle,
         physical_appearance: profilePhysicalAppearance,
         clothing_style: profileClothingStyle,
+        artstyle: profileArtstyle,
         tags: profileTags
       })
     });
@@ -465,9 +469,10 @@ export default function App() {
     await fetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: newPostContent })
+      body: JSON.stringify({ content: newPostContent, post_type: newPostType })
     });
     setNewPostContent('');
+    setNewPostType('life_update');
     fetchPosts();
   };
 
@@ -486,6 +491,7 @@ export default function App() {
         writing_style: charWritingStyle,
         physical_appearance: charPhysicalAppearance,
         clothing_style: charClothingStyle,
+        artstyle: charArtstyle,
         tags: charTags
       })
     });
@@ -498,6 +504,7 @@ export default function App() {
     setCharWritingStyle('');
     setCharPhysicalAppearance('');
     setCharClothingStyle('');
+    setCharArtstyle('');
     setCharTags([]);
     setPersonaChatResponse('');
     fetchUsers();
@@ -756,7 +763,27 @@ export default function App() {
                     rows={3}
                   />
                   <div className="flex justify-between items-center mt-2 border-t border-gray-800 pt-3">
-                    <div className="text-orange-500 flex gap-4"></div>
+                    <div className="text-orange-500 flex gap-4">
+                      <select 
+                        value={newPostType} 
+                        onChange={(e) => setNewPostType(e.target.value)}
+                        className="bg-gray-800 text-white rounded px-2 py-1 text-sm outline-none border border-gray-700 focus:border-orange-500"
+                      >
+                        <option value="life_update">Life Update</option>
+                        <option value="image_post">Image Post</option>
+                        <option value="question">Question</option>
+                        <option value="random_thought">Random Thought</option>
+                        <option value="discussion">Discussion</option>
+                        <option value="recommendation">Recommendation</option>
+                        <option value="follow_up">Follow up</option>
+                        <option value="picking_up_trend">Picking up a Trend</option>
+                        <option value="mention">Mention</option>
+                        <option value="joke">Joke</option>
+                        <option value="shitpost">Shitpost / Rage Bait</option>
+                        <option value="venting">Venting</option>
+                        <option value="dm_invitation">DM Invitation</option>
+                      </select>
+                    </div>
                     <button 
                       onClick={handleCreatePost}
                       disabled={!newPostContent.trim()}
@@ -862,6 +889,10 @@ export default function App() {
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-1">Clothing Style (Private)</label>
                     <textarea value={charClothingStyle} onChange={e => setCharClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Usual outfits, fashion sense, accessories..."></textarea>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle (Private)</label>
+                    <textarea value={charArtstyle} onChange={e => setCharArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Anime, Realistic, Pixel Art, Oil Painting..."></textarea>
                   </div>
                   <button type="submit" className="w-full bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold py-3 rounded-full hover:from-orange-600 hover:to-yellow-600 transition shadow-lg">
                     Add Character
@@ -1382,6 +1413,10 @@ export default function App() {
                         <textarea value={profileClothingStyle} onChange={e => setProfileClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
                       </div>
                       <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle</label>
+                        <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                      </div>
+                      <div>
                         <label className="block text-sm font-medium text-gray-400 mb-1">Tags (comma separated)</label>
                         <input value={profileTags.join(', ')} onChange={e => setProfileTags(e.target.value.split(',').map(t => t.trim()).filter(Boolean))} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
                       </div>
@@ -1475,8 +1510,8 @@ export default function App() {
         </div>
 
         {/* Right Sidebar */}
-        <div className="w-80 p-4 hidden lg:block sticky top-0 h-screen flex flex-col border-l border-gray-800">
-          <div className="bg-gray-900 rounded-2xl p-4 mb-4 flex-1 flex flex-col overflow-hidden">
+        <div className="w-80 p-4 hidden lg:flex sticky top-0 h-screen flex-col border-l border-gray-800">
+          <div className="bg-gray-900 rounded-2xl p-4 flex-1 flex flex-col overflow-hidden min-h-0">
             <h2 className="font-bold text-xl mb-4">Characters</h2>
             <div className="mb-4">
               <input 
@@ -1487,7 +1522,7 @@ export default function App() {
                 className="w-full bg-gray-800 text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
-            <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+            <div className="space-y-4 overflow-y-auto flex-1 pr-2 min-h-0">
               {users.filter(u => u.is_ai && (u.display_name.toLowerCase().includes(characterSearch.toLowerCase()) || u.username.toLowerCase().includes(characterSearch.toLowerCase()))).map(u => (
                 <div key={u.id} className="flex items-center gap-3 group">
                   <div 
@@ -1793,6 +1828,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(post.content);
+  const [isImageExpanded, setIsImageExpanded] = useState(false);
   const postRef = React.useRef<HTMLDivElement>(null);
   const commentRefs = React.useRef<{ [key: number]: HTMLDivElement | null }>({});
 
@@ -1945,9 +1981,34 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
             <p className="mt-1 whitespace-pre-wrap">{post.content}</p>
           )}
           {post.image_url && (
-            <div className="mt-3 rounded-2xl overflow-hidden border border-gray-800 max-h-[500px]">
-              <img src={post.image_url} alt="Post image" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            </div>
+            <>
+              <div 
+                className="mt-3 rounded-2xl overflow-hidden border border-gray-800 max-h-[500px] cursor-pointer"
+                onClick={() => setIsImageExpanded(true)}
+              >
+                <img src={post.image_url} alt="Post image" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              </div>
+              {isImageExpanded && (
+                <div 
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+                  onClick={() => setIsImageExpanded(false)}
+                >
+                  <img 
+                    src={post.image_url} 
+                    alt="Expanded post image" 
+                    className="max-w-full max-h-full object-contain rounded-lg" 
+                    referrerPolicy="no-referrer" 
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <button 
+                    className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition"
+                    onClick={() => setIsImageExpanded(false)}
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+              )}
+            </>
           )}
           <div className="flex gap-12 mt-3 text-gray-500">
             <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 hover:text-orange-500 transition">

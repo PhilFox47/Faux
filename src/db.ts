@@ -22,6 +22,7 @@ export function initDb() {
       user_id INTEGER NOT NULL,
       content TEXT NOT NULL,
       image_url TEXT,
+      post_type TEXT DEFAULT 'life_update',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
@@ -198,6 +199,12 @@ export function initDb() {
     db.exec("ALTER TABLE users ADD COLUMN clothing_style TEXT");
   }
 
+  try {
+    db.prepare('SELECT artstyle FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN artstyle TEXT");
+  }
+
   // Handle schema migrations for comments
   try {
     db.prepare('SELECT parent_id FROM comments').get();
@@ -205,11 +212,23 @@ export function initDb() {
     db.exec("ALTER TABLE comments ADD COLUMN parent_id INTEGER DEFAULT NULL");
   }
 
+  try {
+    db.prepare('SELECT op_ignored FROM comments').get();
+  } catch (e) {
+    db.exec("ALTER TABLE comments ADD COLUMN op_ignored BOOLEAN DEFAULT 0");
+  }
+
   // Handle schema migrations for posts
   try {
     db.prepare('SELECT image_url FROM posts').get();
   } catch (e) {
     db.exec("ALTER TABLE posts ADD COLUMN image_url TEXT");
+  }
+
+  try {
+    db.prepare('SELECT post_type FROM posts').get();
+  } catch (e) {
+    db.exec("ALTER TABLE posts ADD COLUMN post_type TEXT DEFAULT 'life_update'");
   }
 
   // Handle schema migrations for settings

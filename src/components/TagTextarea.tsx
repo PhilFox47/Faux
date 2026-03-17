@@ -4,6 +4,11 @@ interface TagTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElem
   users: any[];
   value: string;
   onValueChange: (value: string) => void;
+  className?: string;
+  placeholder?: string;
+  rows?: number;
+  autoFocus?: boolean;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
 export function TagTextarea({ users, value, onValueChange, className, ...props }: TagTextareaProps) {

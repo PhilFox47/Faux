@@ -69,7 +69,8 @@ Please provide a comprehensive profile including:
 4. A description of their writing style, tone, and common catchphrases.
 5. Physical appearance details.
 6. Clothing style and fashion sense.
-7. A list of 10-20 relevant tags. These tags are used to find "similar" characters. They should include character traits like what Franchise they are from, personality traits, interests, and things they can bond over with other characters.
+7. Artstyle for image generation (e.g., Realistic, Anime, Pixel Art, Oil Painting, Comic Book, 3D Render, etc.).
+8. A list of 10-20 relevant tags. These tags are used to find "similar" characters. They should include character traits like what Franchise they are from, personality traits, interests, and things they can bond over with other characters.
 
 Format your response as a friendly chat message, but make sure all the information is clearly laid out so I can copy it into the fields.`;
 
@@ -123,11 +124,29 @@ function buildCharacterPrompt(character: any) {
 }
 
 export async function pickBestCommenter(post: any, availableUsers: any[]) {
+  // 20% chance to just pick a random user to allow new characters a chance
+  if (Math.random() < 0.2) {
+    return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
+  }
+
+  const relationships = db.prepare(`
+    SELECT user_id_1, user_id_2, description 
+    FROM relationships 
+    WHERE user_id_1 = ? OR user_id_2 = ?
+  `).all(post.user_id, post.user_id) as any[];
+
+  const userContexts = availableUsers.map(u => {
+    let relDesc = "No established relationship.";
+    const rel = relationships.find(r => (r.user_id_1 === u.id && r.user_id_2 === post.user_id) || (r.user_id_2 === u.id && r.user_id_1 === post.user_id));
+    if (rel) relDesc = rel.description;
+    return `ID: ${u.id}, Name: ${u.display_name}, Bio: ${u.bio}, Relationship to OP: ${relDesc}`;
+  }).join('\n');
+
   const prompt = `You are a social media manager. Given the following post:
 "${post.content}" by ${post.author_name}
 
-Which of the following users is most likely to leave a comment based on their bio?
-${availableUsers.map(u => `ID: ${u.id}, Name: ${u.display_name}, Bio: ${u.bio}`).join('\n')}
+Which of the following users is most likely to leave a comment based on their bio and relationship to the author?
+${userContexts}
 
 Reply with ONLY the ID of the chosen user.`;
 
@@ -147,30 +166,51 @@ Reply with ONLY the ID of the chosen user.`;
   return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
 }
 
-export async function generatePost(character: any, context: string = '', relationships: string = '', isImage: boolean = false) {
-  const topics = [
-    "a random thought you just had",
-    "something you are currently doing or working on",
-    "a strong opinion about a trivial matter",
-    "a question for your followers",
-    "a recent memory or experience",
-    "a complaint about something minor",
-    "an observation about your surroundings",
-    "a cryptic or mysterious statement",
-    "a joke or humorous observation",
-    "a piece of advice you'd give yourself"
-  ];
-  const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+export const POST_ARCHETYPES = [
+  { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30 },
+  { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15 },
+  { id: 'question', name: 'Question', description: 'A Character asking a question.', probability: 10 },
+  { id: 'random_thought', name: 'Random Thought', description: 'A random thought a character had they want to share on Faux.', probability: 10 },
+  { id: 'discussion', name: 'Discussion', description: 'Similar to a Question, but with more arguing in the comments.', probability: 5 },
+  { id: 'recommendation', name: 'Recommendation', description: 'A Character recommending a Book, TV Show, Movie and so on.', probability: 5 },
+  { id: 'follow_up', name: 'Follow up', description: 'A character following up on a previous post. Sharing an update on their previous live update, thanking users for answering a previous question and so on. Always make sure it references a previous post of that character in some way.', probability: 5 },
+  { id: 'picking_up_trend', name: 'Picking up a Trend', description: 'Check what other characters have been posing about recently. If you notice a pattern, comment on it or even continue the "Trend".', probability: 5 },
+  { id: 'mention', name: 'Mention', description: 'A Character mentioning another character (with their @username) about something which leads to that mentioned character to react in a comment.', probability: 5 },
+  { id: 'joke', name: 'Joke', description: 'A character making a joke, that fits their personality.', probability: 5 },
+  { id: 'shitpost', name: 'Shitpost / Rage Bait', description: 'A shitpost or rage bait.', probability: 5 },
+  { id: 'venting', name: 'Venting', description: 'A character venting about something that made them angry.', probability: 5 },
+  { id: 'dm_invitation', name: 'DM Invitation', description: 'A Character mentions something and invites other users to contact them via DM.', probability: 2 }
+];
 
-  const prompt = `${buildCharacterPrompt(character)}
+export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false) {
+  if (isFirstPost) {
+    return { id: 'introduction', name: 'Introduction', description: 'Make them "introduce" themselves on Faux or write about that they just joined Faux. Whatever fits their character.' };
+  }
+  if (forceImage) {
+    return POST_ARCHETYPES.find(a => a.id === 'image_post')!;
+  }
+  
+  const totalWeight = POST_ARCHETYPES.reduce((sum, a) => sum + a.probability, 0);
+  let random = Math.random() * totalWeight;
+  for (const archetype of POST_ARCHETYPES) {
+    random -= archetype.probability;
+    if (random <= 0) return archetype;
+  }
+  return POST_ARCHETYPES[0];
+}
+
+export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '') {
+  let prompt = `${buildCharacterPrompt(character)}
 Write a short, engaging social media post (like a tweet) that fits your character perfectly.
 Your post should be independent and reflect your current thoughts, feelings, or activities. 
-For this specific post, focus on: ${randomTopic}.
-Avoid referencing other people's posts directly unless it's a very general observation.
+For this specific post, your post archetype is: "${postTypeObj.name}".
+Instructions for this archetype: ${postTypeObj.description}
+Avoid referencing other people's posts directly unless it's a very general observation or the archetype requires it.
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
 ${context ? `Recent platform activity for inspiration (do not copy, just for vibe): ${context}` : ''}
-${isImage ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. The image will be generated based on this text, so make the text descriptive enough to inspire an image, but natural for social media.` : ''}
+${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. The image will be generated based on this text, so make the text descriptive enough to inspire an image, but natural for social media.` : ''}
+${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
 
   try {
@@ -213,11 +253,11 @@ export async function generateComment(character: any, postContent: string, postA
   }
 
   const prompt = `${buildCharacterPrompt(character)}
-You are looking at a social media post by ${postAuthorName}: "${postContent}"
+You are looking at a social media ${isReply ? 'comment' : 'post'} by ${postAuthorName}: "${postContent}"
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
 ${otherComments ? `Other users have already commented: ${otherComments}` : ''}
-${isReply ? `You are replying to a specific comment.` : `Write a ${isReply ? 'reply' : 'comment'} that fits your character perfectly.`}
+${isReply ? `You are replying to a specific comment.` : `Write a comment that fits your character perfectly.`}
 Keep it short, natural, and in character. Do not wrap in quotes. Keep it under 150 characters.`;
 
   try {
@@ -247,7 +287,7 @@ Keep it short, natural, and in character. Do not wrap in quotes. Keep it under 1
   }
 }
 
-export async function generateDM(character: any, userDisplayName: string, relationshipContext: string = '', otherUserId?: number) {
+export async function generateDM(character: any, userDisplayName: string, relationshipContext: string = '', otherUserId?: number, context: string = '') {
   let otherUserInfo = '';
   if (otherUserId) {
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
@@ -264,6 +304,7 @@ export async function generateDM(character: any, userDisplayName: string, relati
 You are sending a private direct message to ${userDisplayName}.
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
+${context ? `Context for this message: ${context}` : ''}
 Write a short, in-character message starting a conversation. Give a good reason for reaching out (e.g., asking a question, sharing a secret, or reacting to something). Do not wrap in quotes.`;
 
   try {
@@ -385,24 +426,26 @@ Reply in character to the latest messages. Make sure to actually write like it's
 }
 
 export async function generateImagePrompt(character: any, postContent: string) {
-  const prompt = `You are an expert at writing prompts for the Z-Image-Turbo AI image generator.
+  const prompt = `You are an expert at writing prompts for the Chroma AI image generator.
 You need to write an image generation prompt for a social media post by ${character.display_name}.
 The text of their post is: "${postContent}"
 
-Follow this structure for the prompt:
-[Shot & subject] + [Age & appearance] + [Clothing & modesty] + [Environment/background] + [Lighting] + [Mood] + [Style/medium] + [Technical notes] + [Safety/cleanup constraints]
+Chroma is sensitive to prompting and understands plain English. A concise, structured prompt beats a verbose one.
+Do NOT use SD1.5 keywords like hyper-realistic, 8k, UHD.
 
 Character details:
 Name: ${character.display_name}
 Appearance: ${character.physical_appearance || character.bio || 'average looking'}
 Clothing style: ${character.clothing_style || 'casual everyday clothes'}
+Artstyle: ${character.artstyle || 'Realistic'}
 
 Guidelines:
+- If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Instagram photo", "Lighting: Natural morning light", "Style: Candid amateur photograph").
+- If the Artstyle is Stylized (Anime, Pixel Art, Oil Painting, etc.): Clearly describe the Art Direction (Genre, Medium, Texture).
 - The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
-- Images should look like actual images posted on social media by "normal" people (can have weird angles, be blurry, candid, etc.).
-- Accurately describe the physical features and clothing of the character (if the character is visible) to ensure consistency.
-- Include safety constraints at the end: "safe for work, non-sexual, fully clothed characters, no nudity, no suggestive poses, no text, no watermark, no logos, plain background, not busy or cluttered, no extra limbs, correct human anatomy, no motion blur, sharp focus, no lens distortion, no fisheye effect"
-- Keep the prompt under 1000 characters (absolute maximum 1200 characters).
+- Images don't always need to show the character who posted it. You can show a relevant object, scenery, situation, etc. Add variance.
+- Accurately describe the physical features and clothing of the character ONLY if the character is visible in the shot.
+- Keep the prompt short, direct, and effective.
 - ONLY output the final prompt text, nothing else.`;
 
   try {
@@ -426,12 +469,19 @@ Guidelines:
 export async function generateImage(prompt: string) {
   try {
     const model = getImageModel();
+    const sizes = ['1536x1536', '1536x1014', '1024x1536'];
+    const randomSize = sizes[Math.floor(Math.random() * sizes.length)];
+    
     const response = await getOpenAI().images.generate({
       model: model,
       prompt: prompt,
       n: 1,
-      size: '1024x1024',
-      response_format: 'b64_json'
+      size: randomSize as any,
+      response_format: 'b64_json',
+      // @ts-ignore - passing extra params for Chroma/Flux
+      steps: 28,
+      guidance_scale: 3.5,
+      guidance: 3.5
     });
     
     const imageData = response.data[0];
