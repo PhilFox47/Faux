@@ -312,10 +312,21 @@ export function initDb() {
 
       for (const table of tables) {
         try {
+          // 1. Versuche, die Einträge dem ältesten User zuzuweisen.
+          // Bei Konflikten (z.B. doppelten Likes) greift das IGNORE.
           db.prepare(`UPDATE OR IGNORE ${table.name} SET ${table.col} = ? WHERE ${table.col} = ?`).run(oldestUser.id, duplicateId);
-        } catch (e) {}
+          
+          // 2. NEU: Lösche alle verbleibenden Einträge, die nach dem IGNORE 
+          // immer noch auf den doppelten User verweisen.
+          db.prepare(`DELETE FROM ${table.name} WHERE ${table.col} = ?`).run(duplicateId);
+          
+        } catch (e) {
+          // Fehler lieber in der Konsole ausgeben, damit du siehst, ob eine Tabelle z.B. fehlt!
+          console.error(`Fehler beim Verarbeiten von Tabelle ${table.name}:`, e);
+        }
       }
       
+      // Jetzt hat der duplicateId garantiert keine verknüpften Daten mehr und kann gelöscht werden.
       db.prepare('DELETE FROM users WHERE id = ?').run(duplicateId);
     }
   }
