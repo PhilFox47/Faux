@@ -281,12 +281,12 @@ export function initDb() {
     const oldestUser = realUsers[0];
     const newestUser = realUsers[realUsers.length - 1];
     
-    // Update oldest user with newest user's profile data
+    // Update oldest user with newest user's profile data (ohne username)
     db.prepare(`
       UPDATE users 
-      SET username = ?, display_name = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?
+      SET display_name = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?
       WHERE id = ?
-    `).run(newestUser.username, newestUser.display_name, newestUser.bio, newestUser.avatar_url, newestUser.description, newestUser.writing_style, newestUser.physical_appearance, newestUser.clothing_style, newestUser.artstyle, oldestUser.id);
+    `).run(newestUser.display_name, newestUser.bio, newestUser.avatar_url, newestUser.description, newestUser.writing_style, newestUser.physical_appearance, newestUser.clothing_style, newestUser.artstyle, oldestUser.id);
 
     // Reassign all records from duplicates to the oldest user
     for (let i = 1; i < realUsers.length; i++) {
