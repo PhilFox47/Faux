@@ -353,6 +353,7 @@ export default function App() {
     const user = users.find(u => u.id === userId);
     if (!user) return;
     setViewingProfile(user);
+    setVisibleProfilePosts(30);
     const res = await fetch(`/api/users/${userId}/posts`);
     const posts = await res.json();
     setViewingProfilePosts(posts);
@@ -382,6 +383,7 @@ export default function App() {
           handleViewProfile(targetId);
         }
         fetchPosts();
+        fetchUsers();
         showToast("Post forced successfully!");
       } else {
         const err = await res.json();
@@ -642,6 +644,9 @@ export default function App() {
   };
 
   const [characterSearch, setCharacterSearch] = useState('');
+  const [visibleCharacters, setVisibleCharacters] = useState(20);
+  const [visiblePosts, setVisiblePosts] = useState(30);
+  const [visibleProfilePosts, setVisibleProfilePosts] = useState(30);
 
   return (
     <div className="min-h-screen bg-black text-white flex justify-center font-sans">
@@ -752,7 +757,13 @@ export default function App() {
             <>
               {/* Compose Post */}
               <div className="border-b border-gray-800 p-4 flex gap-4">
-                <div className="w-10 h-10 bg-orange-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold">Y</div>
+                <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
+                  {users.find(u => u.is_ai === 0)?.avatar_url ? (
+                    <img src={users.find(u => u.is_ai === 0)?.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    users.find(u => u.is_ai === 0)?.display_name?.[0] || 'Y'
+                  )}
+                </div>
                 <div className="flex-1">
                   <TagTextarea 
                     users={users}
@@ -797,7 +808,7 @@ export default function App() {
 
               {/* Feed */}
               <div>
-                {posts.map(post => (
+                {posts.slice(0, visiblePosts).map(post => (
                   <PostItem 
                     key={post.id} 
                     post={post} 
@@ -815,6 +826,16 @@ export default function App() {
                     users={users}
                   />
                 ))}
+                {posts.length > visiblePosts && (
+                  <div className="p-6 flex justify-center border-b border-gray-800">
+                    <button 
+                      onClick={() => setVisiblePosts(prev => prev + 30)}
+                      className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-full transition"
+                    >
+                      Load More
+                    </button>
+                  </div>
+                )}
                 {posts.length === 0 && (
                   <div className="p-8 text-center text-gray-500">
                     <p>The feed is currently empty.</p>
@@ -1518,13 +1539,19 @@ export default function App() {
                 type="text" 
                 placeholder="Search characters..." 
                 value={characterSearch}
-                onChange={e => setCharacterSearch(e.target.value)}
+                onChange={e => {
+                  setCharacterSearch(e.target.value);
+                  setVisibleCharacters(20);
+                }}
                 className="w-full bg-gray-800 text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
             <div className="space-y-4 overflow-y-auto flex-1 pr-2 min-h-0">
-              {users.filter(u => u.is_ai && (u.display_name.toLowerCase().includes(characterSearch.toLowerCase()) || u.username.toLowerCase().includes(characterSearch.toLowerCase()))).map(u => (
-                <div key={u.id} className="flex items-center gap-3 group">
+              {users
+                .filter(u => u.is_ai && (u.display_name.toLowerCase().includes(characterSearch.toLowerCase()) || u.username.toLowerCase().includes(characterSearch.toLowerCase())))
+                .slice(0, characterSearch ? undefined : visibleCharacters)
+                .map(u => (
+                <div key={u.id} className={`flex items-center gap-3 group ${!u.is_active ? 'opacity-50 grayscale' : ''}`}>
                   <div 
                     onClick={() => handleViewProfile(u.id)}
                     className="w-10 h-10 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
@@ -1564,6 +1591,16 @@ export default function App() {
               ))}
               {users.filter(u => u.is_ai && (u.display_name.toLowerCase().includes(characterSearch.toLowerCase()) || u.username.toLowerCase().includes(characterSearch.toLowerCase()))).length === 0 && (
                 <p className="text-gray-500 text-sm text-center py-4">No characters found.</p>
+              )}
+              {!characterSearch && users.filter(u => u.is_ai).length > visibleCharacters && (
+                <div className="flex justify-center py-4">
+                  <button 
+                    onClick={() => setVisibleCharacters(prev => prev + 20)}
+                    className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
+                  >
+                    Load More
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -1675,7 +1712,7 @@ export default function App() {
                 <div className="border-t border-gray-800 pt-6">
                   <h3 className="font-bold mb-4">Posts</h3>
                   <div className="space-y-4">
-                    {viewingProfilePosts.map(post => (
+                    {viewingProfilePosts.slice(0, visibleProfilePosts).map(post => (
                       <PostItem 
                         key={post.id} 
                         post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
@@ -1686,6 +1723,16 @@ export default function App() {
                         onRefresh={() => handleViewProfile(viewingProfile.id)}
                       />
                     ))}
+                    {viewingProfilePosts.length > visibleProfilePosts && (
+                      <div className="flex justify-center py-4">
+                        <button 
+                          onClick={() => setVisibleProfilePosts(prev => prev + 30)}
+                          className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
+                        >
+                          Load More
+                        </button>
+                      </div>
+                    )}
                     {viewingProfilePosts.length === 0 && <p className="text-center text-gray-500 py-4">No posts yet.</p>}
                   </div>
                 </div>
@@ -2047,7 +2094,13 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
           ))}
           
           <form onSubmit={(e) => handleAddComment(e)} className="flex gap-2 mt-4 items-end">
-            <div className="w-8 h-8 bg-orange-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs mb-1">Y</div>
+            <div className="w-8 h-8 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs mb-1 overflow-hidden">
+              {users.find(u => u.is_ai === 0)?.avatar_url ? (
+                <img src={users.find(u => u.is_ai === 0)?.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                users.find(u => u.is_ai === 0)?.display_name?.[0] || 'Y'
+              )}
+            </div>
             <div className="flex-1">
               <TagTextarea 
                 users={users}

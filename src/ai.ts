@@ -199,9 +199,9 @@ export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false)
   return POST_ARCHETYPES[0];
 }
 
-export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '') {
+export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false) {
   let prompt = `${buildCharacterPrompt(character)}
-Write a short, engaging social media post (like a tweet) that fits your character perfectly.
+${isIntroduction ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.` : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
 Your post should be independent and reflect your current thoughts, feelings, or activities. 
 For this specific post, your post archetype is: "${postTypeObj.name}".
 Instructions for this archetype: ${postTypeObj.description}
@@ -210,7 +210,7 @@ Do not attempt to search the web for current world events. If the user reference
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
 ${context ? `Recent platform activity for inspiration (do not copy, just for vibe): ${context}` : ''}
 ${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. The image will be generated based on this text, so make the text descriptive enough to inspire an image, but natural for social media.` : ''}
-${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
+${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}`}
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
 
   try {
@@ -245,7 +245,7 @@ export async function generateComment(character: any, postContent: string, postA
   if (otherUserId) {
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
     if (otherUser) {
-      otherUserInfo = `Their Bio: ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
       if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
         otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
       }
@@ -253,12 +253,11 @@ export async function generateComment(character: any, postContent: string, postA
   }
 
   const prompt = `${buildCharacterPrompt(character)}
-You are looking at a social media ${isReply ? 'comment' : 'post'} by ${postAuthorName}: "${postContent}"
+${isReply ? `You are participating in a comment thread. Here is the context of the thread:\n${otherComments}\n\nYou are replying to the last comment in the thread by ${postAuthorName}: "${postContent}"` : `You are looking at a social media post by ${postAuthorName}: "${postContent}"\n${otherComments ? `Other users have already commented: ${otherComments}` : ''}`}
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
-${otherComments ? `Other users have already commented: ${otherComments}` : ''}
-${isReply ? `You are replying to a specific comment.` : `Write a comment that fits your character perfectly.`}
-Keep it short, natural, and in character. Do not wrap in quotes. Keep it under 150 characters.`;
+${isReply ? `Write a reply that fits your character perfectly and continues the conversation naturally.` : `Write a comment that fits your character perfectly.`}
+Keep it short, natural, and in character. Focus on the topic being discussed. Do not wrap in quotes. Keep it under 150 characters.`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -289,13 +288,18 @@ Keep it short, natural, and in character. Do not wrap in quotes. Keep it under 1
 
 export async function generateDM(character: any, userDisplayName: string, relationshipContext: string = '', otherUserId?: number, context: string = '') {
   let otherUserInfo = '';
+  let recentActivity = '';
   if (otherUserId) {
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
     if (otherUser) {
-      otherUserInfo = `Their Bio: ${otherUser.bio || 'No bio provided.'}\n`;
-      // If relationship context exists, it implies some level of closeness, but let's be safe and only include backstory if it's explicitly a close relationship.
-      if (relationshipContext && relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner')) {
+      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
+      if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
         otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
+      }
+      
+      const recentPosts = db.prepare("SELECT content FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 3").all(otherUserId) as any[];
+      if (recentPosts.length > 0) {
+        recentActivity += `Their recent posts:\n${recentPosts.map(p => `- "${p.content}"`).join('\n')}\n`;
       }
     }
   }
@@ -303,9 +307,10 @@ export async function generateDM(character: any, userDisplayName: string, relati
   const prompt = `${buildCharacterPrompt(character)}
 You are sending a private direct message to ${userDisplayName}.
 ${otherUserInfo}
+${recentActivity}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
 ${context ? `Context for this message: ${context}` : ''}
-Write a short, in-character message starting a conversation. Give a good reason for reaching out (e.g., asking a question, sharing a secret, or reacting to something). Do not wrap in quotes.`;
+Write a short, in-character message starting a conversation. Give a good reason for reaching out (e.g., asking a question about a recent post, sharing a secret, or reacting to something). Do not wrap in quotes.`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -339,7 +344,7 @@ export async function replyToDM(character: any, userDisplayName: string, message
   if (otherUserId) {
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
     if (otherUser) {
-      otherUserInfo = `Their Bio: ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
       if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
         otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
       }
@@ -350,7 +355,7 @@ export async function replyToDM(character: any, userDisplayName: string, message
 You are having a private direct message conversation with ${userDisplayName}.
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
-Reply in character to their latest message. Make sure to actually write like it's a Direct Message Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character.`;
+Reply in character to their latest message. Make sure to actually write like it's a Direct Message Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character. Focus on the conversation topic.`;
 
   const messages: any[] = [
     { role: 'system', content: systemPrompt },

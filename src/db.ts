@@ -13,6 +13,7 @@ export function initDb() {
       bio TEXT,
       avatar_url TEXT,
       is_ai BOOLEAN DEFAULT 1,
+      is_active BOOLEAN DEFAULT 0,
       ai_persona TEXT, -- Description of who they are impersonating
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -205,6 +206,12 @@ export function initDb() {
     db.exec("ALTER TABLE users ADD COLUMN artstyle TEXT");
   }
 
+  try {
+    db.prepare('SELECT is_active FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 0");
+  }
+
   // Handle schema migrations for comments
   try {
     db.prepare('SELECT parent_id FROM comments').get();
@@ -266,6 +273,51 @@ export function initDb() {
       INSERT INTO users (username, display_name, bio, is_ai, ai_persona)
       VALUES (?, ?, ?, ?, ?)
     `).run('real_user', 'You', 'This is your real account.', 0, null);
+  }
+
+  // Cleanup duplicate real users, keeping the oldest one but updating its profile with the newest one's data
+  const realUsers = db.prepare('SELECT * FROM users WHERE is_ai = 0 ORDER BY id ASC').all() as any[];
+  if (realUsers.length > 1) {
+    const oldestUser = realUsers[0];
+    const newestUser = realUsers[realUsers.length - 1];
+    
+    // Update oldest user with newest user's profile data
+    db.prepare(`
+      UPDATE users 
+      SET username = ?, display_name = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?
+      WHERE id = ?
+    `).run(newestUser.username, newestUser.display_name, newestUser.bio, newestUser.avatar_url, newestUser.description, newestUser.writing_style, newestUser.physical_appearance, newestUser.clothing_style, newestUser.artstyle, oldestUser.id);
+
+    // Reassign all records from duplicates to the oldest user
+    for (let i = 1; i < realUsers.length; i++) {
+      const duplicateId = realUsers[i].id;
+      
+      const tables = [
+        { name: 'posts', col: 'user_id' },
+        { name: 'comments', col: 'user_id' },
+        { name: 'likes', col: 'user_id' },
+        { name: 'comment_likes', col: 'user_id' },
+        { name: 'follows', col: 'follower_id' },
+        { name: 'follows', col: 'followed_id' },
+        { name: 'notifications', col: 'user_id' },
+        { name: 'notifications', col: 'actor_id' },
+        { name: 'direct_messages', col: 'sender_id' },
+        { name: 'direct_messages', col: 'receiver_id' },
+        { name: 'user_tags', col: 'user_id' },
+        { name: 'relationships', col: 'user_id_1' },
+        { name: 'relationships', col: 'user_id_2' },
+        { name: 'group_chat_members', col: 'user_id' },
+        { name: 'group_chat_messages', col: 'sender_id' }
+      ];
+
+      for (const table of tables) {
+        try {
+          db.prepare(`UPDATE OR IGNORE ${table.name} SET ${table.col} = ? WHERE ${table.col} = ?`).run(oldestUser.id, duplicateId);
+        } catch (e) {}
+      }
+      
+      db.prepare('DELETE FROM users WHERE id = ?').run(duplicateId);
+    }
   }
 }
 
