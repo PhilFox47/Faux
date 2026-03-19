@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
+import { SearchableDropdown } from './components/SearchableDropdown';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
@@ -30,7 +31,9 @@ export default function App() {
   const [charPhysicalAppearance, setCharPhysicalAppearance] = useState('');
   const [charClothingStyle, setCharClothingStyle] = useState('');
   const [charArtstyle, setCharArtstyle] = useState('');
-  const [charTags, setCharTags] = useState<string[]>([]);
+  const [charUniverseId, setCharUniverseId] = useState<number | null>(null);
+  const [charNewUniverseName, setCharNewUniverseName] = useState('');
+  const [universes, setUniverses] = useState<any[]>([]);
   const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
   const [personaChatResponse, setPersonaChatResponse] = useState('');
 
@@ -52,6 +55,8 @@ export default function App() {
   // Profile Viewing
   const [viewingProfile, setViewingProfile] = useState<any>(null);
   const [viewingProfilePosts, setViewingProfilePosts] = useState<any[]>([]);
+  const [viewingUniverse, setViewingUniverse] = useState<any>(null);
+  const [viewingUniverseCharacters, setViewingUniverseCharacters] = useState<any[]>([]);
   const [viewingPostData, setViewingPostData] = useState<any>(null);
   const [highlightedPostId, setHighlightedPostId] = useState<number | null>(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState<number | null>(null);
@@ -123,7 +128,8 @@ export default function App() {
   const [profilePhysicalAppearance, setProfilePhysicalAppearance] = useState('');
   const [profileClothingStyle, setProfileClothingStyle] = useState('');
   const [profileArtstyle, setProfileArtstyle] = useState('');
-  const [profileTags, setProfileTags] = useState<string[]>([]);
+  const [profileUniverseId, setProfileUniverseId] = useState<number | null>(null);
+  const [profileNewUniverseName, setProfileNewUniverseName] = useState('');
   const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
   const [newRelUserId, setNewRelUserId] = useState('');
   const [newRelDesc, setNewRelDesc] = useState('');
@@ -160,7 +166,7 @@ export default function App() {
     setProfilePhysicalAppearance(user.physical_appearance || '');
     setProfileClothingStyle(user.clothing_style || '');
     setProfileArtstyle(user.artstyle || '');
-    setProfileTags(user.tags || []);
+    setProfileUniverseId(user.universe_id || null);
     
     // Fetch relationships
     try {
@@ -210,6 +216,20 @@ export default function App() {
     e.preventDefault();
     if (!editingProfile) return;
     
+    let finalUniverseId = profileUniverseId;
+    if (profileUniverseId === -1 && profileNewUniverseName.trim()) {
+      const res = await fetch('/api/universes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: profileNewUniverseName.trim() })
+      });
+      if (res.ok) {
+        const newUniverse = await res.json();
+        finalUniverseId = newUniverse.id;
+        fetchUniverses();
+      }
+    }
+
     const res = await fetch(`/api/users/${editingProfile.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -223,7 +243,7 @@ export default function App() {
         physical_appearance: profilePhysicalAppearance,
         clothing_style: profileClothingStyle,
         artstyle: profileArtstyle,
-        tags: profileTags
+        universe_id: finalUniverseId
       })
     });
     
@@ -234,6 +254,7 @@ export default function App() {
     }
     
     setEditingProfile(null);
+    setProfileNewUniverseName('');
     fetchUsers();
     setActiveTab('home');
     showToast('Profile updated!');
@@ -266,6 +287,10 @@ export default function App() {
 
   const fetchUsers = () => {
     fetch('/api/users').then(r => r.json()).then(setUsers);
+  };
+
+  const fetchUniverses = () => {
+    fetch('/api/universes').then(r => r.json()).then(setUniverses);
   };
 
   const fetchConversations = () => {
@@ -359,6 +384,16 @@ export default function App() {
     setViewingProfilePosts(posts);
   };
 
+  const handleViewUniverse = async (universeId: number) => {
+    const universe = universes.find(u => u.id === universeId);
+    if (!universe) return;
+    setViewingUniverse(universe);
+    const res = await fetch(`/api/universes/${universeId}/characters`);
+    const chars = await res.json();
+    setViewingUniverseCharacters(chars);
+    setActiveTab('universe_details');
+  };
+
   const [isForcingPost, setIsForcingPost] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -428,6 +463,7 @@ export default function App() {
   useEffect(() => {
     fetchPosts();
     fetchUsers();
+    fetchUniverses();
     fetchConversations();
     fetchGroupChats();
     fetchNotifications();
@@ -480,6 +516,21 @@ export default function App() {
 
   const handleAddCharacter = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    let finalUniverseId = charUniverseId;
+    if (charUniverseId === -1 && charNewUniverseName.trim()) {
+      const res = await fetch('/api/universes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: charNewUniverseName.trim() })
+      });
+      if (res.ok) {
+        const newUniverse = await res.json();
+        finalUniverseId = newUniverse.id;
+        fetchUniverses();
+      }
+    }
+
     await fetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -494,7 +545,7 @@ export default function App() {
         physical_appearance: charPhysicalAppearance,
         clothing_style: charClothingStyle,
         artstyle: charArtstyle,
-        tags: charTags
+        universe_id: finalUniverseId
       })
     });
     setCharName('');
@@ -507,7 +558,8 @@ export default function App() {
     setCharPhysicalAppearance('');
     setCharClothingStyle('');
     setCharArtstyle('');
-    setCharTags([]);
+    setCharUniverseId(null);
+    setCharNewUniverseName('');
     setPersonaChatResponse('');
     fetchUsers();
     alert('Character added!');
@@ -720,6 +772,7 @@ export default function App() {
                 active={activeTab === 'messages'} 
                 onClick={() => setActiveTab('messages')} 
               />
+              <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); }} />
               <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); }} />
             </nav>
             <button 
@@ -850,20 +903,9 @@ export default function App() {
             <div className="flex h-[calc(100vh-60px)]">
               <div className="flex-1 p-6 overflow-y-auto">
                 <h2 className="text-2xl font-bold mb-6">Add AI Character</h2>
-                <form onSubmit={handleAddCharacter} className="space-y-4 max-w-xl">
+                <form onSubmit={handleAddCharacter} className="space-y-4 max-w-3xl mx-auto">
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-gray-400">Character Name</label>
-                      <button 
-                        type="button"
-                        onClick={handleGeneratePersona}
-                        disabled={isGeneratingPersona}
-                        className="text-xs flex items-center gap-1 text-orange-500 hover:text-orange-400 disabled:opacity-50"
-                      >
-                        {isGeneratingPersona ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                        Generate Persona Chat
-                      </button>
-                    </div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">Character Name</label>
                     <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Geralt of Rivia" />
                   </div>
                   <div>
@@ -876,8 +918,24 @@ export default function App() {
                       <input required value={charUsername} onChange={e => setCharUsername(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. white_wolf" />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Tags (comma separated)</label>
-                      <input value={charTags.join(', ')} onChange={e => setCharTags(e.target.value.split(',').map(t => t.trim()).filter(Boolean))} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. witcher, monster_hunter, grumpy" />
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Universe</label>
+                      <SearchableDropdown
+                        options={universes.map(u => ({ id: u.id, name: u.name }))}
+                        value={charUniverseId}
+                        onChange={(id, newName) => {
+                          setCharUniverseId(id);
+                          if (id === -1 && newName) {
+                            setCharNewUniverseName(newName);
+                          }
+                        }}
+                        placeholder="Select a Universe (Optional)"
+                      />
+                      {charUniverseId === -1 && (
+                        <div className="mt-2 flex items-center gap-2 text-sm text-orange-400 bg-orange-500/10 p-2 rounded-lg border border-orange-500/20">
+                          <Plus size={14} />
+                          Creating new universe: <span className="font-bold">{charNewUniverseName}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -919,28 +977,6 @@ export default function App() {
                     Add Character
                   </button>
                 </form>
-              </div>
-              
-              {/* Persona Chat Sidebar */}
-              <div className="w-80 border-l border-gray-800 bg-gray-950 p-4 overflow-y-auto">
-                <h3 className="font-bold text-orange-500 mb-4 flex items-center gap-2">
-                  <Sparkles size={18} />
-                  Persona Chat
-                </h3>
-                {isGeneratingPersona ? (
-                  <div className="flex flex-col items-center justify-center h-40 text-gray-500">
-                    <Loader2 className="animate-spin mb-2" />
-                    <p className="text-sm">AI is writing...</p>
-                  </div>
-                ) : personaChatResponse ? (
-                  <div className="bg-gray-900 rounded-xl p-4 text-sm text-gray-300 whitespace-pre-wrap border border-gray-800">
-                    {personaChatResponse}
-                  </div>
-                ) : (
-                  <div className="text-center text-gray-600 mt-10">
-                    <p className="text-sm">Enter a name and click "Generate Persona Chat" to get AI suggestions for your character.</p>
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -1096,6 +1132,80 @@ export default function App() {
                   <div className="flex-1 flex items-center justify-center text-gray-500">
                     Select a conversation
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'universes' && (
+            <div className="p-6 max-w-4xl mx-auto">
+              <h2 className="text-2xl font-bold mb-6">Universes</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {universes.map(u => (
+                  <div key={u.id} onClick={() => handleViewUniverse(u.id)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition">
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className="w-16 h-16 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
+                        {u.image_url ? (
+                          <img src={u.image_url} alt={u.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <Globe size={32} className="m-auto mt-4 text-gray-500" />
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-lg">{u.name}</h3>
+                        <p className="text-sm text-gray-400">{u.character_count || 0} characters</p>
+                      </div>
+                    </div>
+                    {u.description && (
+                      <p className="text-sm text-gray-300 line-clamp-2">{u.description}</p>
+                    )}
+                  </div>
+                ))}
+                {universes.length === 0 && (
+                  <div className="col-span-full p-8 text-center text-gray-500">
+                    <p>No universes created yet. You can create one when adding or editing a character.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'universe_details' && viewingUniverse && (
+            <div className="p-6 max-w-4xl mx-auto">
+              <button onClick={() => setActiveTab('universes')} className="flex items-center gap-2 text-gray-400 hover:text-white mb-6">
+                <ArrowLeft size={20} /> Back to Universes
+              </button>
+              
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8 flex flex-col md:flex-row gap-6 items-start">
+                <div className="w-32 h-32 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
+                  {viewingUniverse.image_url ? (
+                    <img src={viewingUniverse.image_url} alt={viewingUniverse.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <Globe size={64} className="m-auto mt-8 text-gray-500" />
+                  )}
+                </div>
+                <div>
+                  <h2 className="text-3xl font-bold mb-2">{viewingUniverse.name}</h2>
+                  <p className="text-gray-400 mb-4">{viewingUniverseCharacters.length} characters</p>
+                  {viewingUniverse.description && (
+                    <p className="text-gray-300 whitespace-pre-wrap">{viewingUniverse.description}</p>
+                  )}
+                </div>
+              </div>
+
+              <h3 className="text-xl font-bold mb-4">Characters in this Universe</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {viewingUniverseCharacters.map(char => (
+                  <div key={char.id} onClick={() => handleViewProfile(char.id)} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition">
+                    <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
+                    <div className="overflow-hidden">
+                      <p className="font-bold truncate">{char.display_name}</p>
+                      <p className="text-xs text-gray-500 truncate">@{char.username}</p>
+                    </div>
+                  </div>
+                ))}
+                {viewingUniverseCharacters.length === 0 && (
+                  <p className="text-gray-500 col-span-full">No characters found in this universe.</p>
                 )}
               </div>
             </div>
@@ -1438,8 +1548,24 @@ export default function App() {
                         <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Tags (comma separated)</label>
-                        <input value={profileTags.join(', ')} onChange={e => setProfileTags(e.target.value.split(',').map(t => t.trim()).filter(Boolean))} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Universe</label>
+                        <SearchableDropdown
+                          options={universes.map(u => ({ id: u.id, name: u.name }))}
+                          value={profileUniverseId}
+                          onChange={(id, newName) => {
+                            setProfileUniverseId(id);
+                            if (id === -1 && newName) {
+                              setProfileNewUniverseName(newName);
+                            }
+                          }}
+                          placeholder="Select a Universe (Optional)"
+                        />
+                        {profileUniverseId === -1 && (
+                          <div className="mt-2 flex items-center gap-2 text-sm text-orange-400 bg-orange-500/10 p-2 rounded-lg border border-orange-500/20">
+                            <Plus size={14} />
+                            Creating new universe: <span className="font-bold">{profileNewUniverseName}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1647,6 +1773,15 @@ export default function App() {
                   <div>
                     <h2 className="text-2xl font-bold">{viewingProfile.display_name}</h2>
                     <p className="text-gray-500">@{viewingProfile.username}</p>
+                    {viewingProfile.universe_id && universes.find(u => u.id === viewingProfile.universe_id) && (
+                      <div 
+                        onClick={() => handleViewUniverse(viewingProfile.universe_id)}
+                        className="flex items-center gap-2 mt-2 text-sm text-orange-400 hover:text-orange-300 cursor-pointer w-fit bg-orange-500/10 px-3 py-1 rounded-full"
+                      >
+                        <Globe size={14} />
+                        {universes.find(u => u.id === viewingProfile.universe_id)?.name}
+                      </div>
+                    )}
                   </div>
                   {viewingProfile.username !== 'real_user' && (
                     <button 

@@ -23,7 +23,8 @@ async function triggerPostComments(postId: number, postType: string) {
     if (!post) break;
 
     const aiUsers = db.prepare("SELECT * FROM users WHERE is_ai = 1 AND is_active = 1 AND id != ?").all(post.user_id) as any[];
-    const availableAiUsers = aiUsers.filter(u => !commentedUserIds.has(u.id));
+    const existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(postId).map((r: any) => r.user_id);
+    const availableAiUsers = aiUsers.filter(u => !commentedUserIds.has(u.id) && !existingRepliers.includes(u.id));
     if (availableAiUsers.length === 0) continue;
 
     const chosenAiId = await pickBestCommenter(post, availableAiUsers);
@@ -189,7 +190,6 @@ async function startServer() {
       db.prepare("DELETE FROM notifications").run();
       db.prepare("DELETE FROM posts").run();
       db.prepare("DELETE FROM follows").run();
-      db.prepare("DELETE FROM user_tags").run();
       db.prepare("DELETE FROM relationships").run();
       db.prepare("DELETE FROM users WHERE is_ai = 1").run();
       res.json({ success: true });
@@ -225,9 +225,9 @@ async function startServer() {
   app.post("/api/generate-persona", async (req, res) => {
     try {
       const { name, extraInfo } = req.body;
-      const tags = db.prepare("SELECT name FROM tags").all().map((t: any) => t.name);
+      const universes = db.prepare("SELECT name FROM universes").all().map((u: any) => u.name);
       
-      const persona = await generatePersona(name, extraInfo, tags);
+      const persona = await generatePersona(name, extraInfo, universes);
       res.json(persona);
     } catch (e: any) {
       console.error("Error in generate-persona:", e);
@@ -278,22 +278,11 @@ async function startServer() {
       SELECT u.*, 
       (SELECT COUNT(*) FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
       (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
-      (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count,
-      (SELECT json_group_array(t.name) FROM user_tags ut JOIN tags t ON ut.tag_id = t.id WHERE ut.user_id = u.id) as tags
+      (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
       FROM users u ORDER BY u.created_at DESC
     `).all(user?.id || 0);
     
-    const parsedUsers = users.map((u: any) => ({
-      ...u,
-      tags: u.tags ? JSON.parse(u.tags).filter((t: any) => t !== null) : []
-    }));
-    
-    res.json(parsedUsers);
-  });
-
-  app.get("/api/tags", (req, res) => {
-    const tags = db.prepare("SELECT name FROM tags ORDER BY name ASC").all();
-    res.json(tags.map((t: any) => t.name));
+    res.json(users);
   });
 
   app.get("/api/users/:id/relationships", (req, res) => {
@@ -350,7 +339,6 @@ async function startServer() {
       db.prepare("DELETE FROM likes WHERE user_id = ?").run(userId);
       db.prepare("DELETE FROM notifications WHERE user_id = ? OR actor_id = ?").run(userId, userId);
       db.prepare("DELETE FROM follows WHERE follower_id = ? OR followed_id = ?").run(userId, userId);
-      db.prepare("DELETE FROM user_tags WHERE user_id = ?").run(userId);
       db.prepare("DELETE FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").run(userId, userId);
       
       // Delete comments and their likes/notifications
@@ -385,29 +373,49 @@ async function startServer() {
     }
   });
 
+  // Universes
+  app.get("/api/universes", (req, res) => {
+    const universes = db.prepare(`
+      SELECT u.*, (SELECT COUNT(*) FROM users WHERE universe_id = u.id) as character_count
+      FROM universes u
+      ORDER BY u.name ASC
+    `).all();
+    res.json(universes);
+  });
+
+  app.post("/api/universes", (req, res) => {
+    const { name, description, image_url } = req.body;
+    try {
+      const info = db.prepare("INSERT INTO universes (name, description, image_url) VALUES (?, ?, ?)").run(name, description || '', image_url || '');
+      res.json({ id: info.lastInsertRowid, name, description, image_url });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/universes/:id", (req, res) => {
+    const { description, image_url } = req.body;
+    try {
+      db.prepare("UPDATE universes SET description = ?, image_url = ? WHERE id = ?").run(description || '', image_url || '', req.params.id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/universes/:id/characters", (req, res) => {
+    const characters = db.prepare("SELECT id, username, display_name, avatar_url, bio FROM users WHERE universe_id = ?").all(req.params.id);
+    res.json(characters);
+  });
+
   app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, tags } = req.body;
+    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id } = req.body;
     try {
       db.prepare(`
         UPDATE users 
-        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?
+        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?
         WHERE id = ?
-      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, req.params.id);
-
-      if (tags && Array.isArray(tags)) {
-        db.prepare("DELETE FROM user_tags WHERE user_id = ?").run(req.params.id);
-        const insertTag = db.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)");
-        const getTag = db.prepare("SELECT id FROM tags WHERE name = ?");
-        const insertUserTag = db.prepare("INSERT INTO user_tags (user_id, tag_id) VALUES (?, ?)");
-        
-        for (const tag of tags) {
-          insertTag.run(tag);
-          const tagRecord = getTag.get(tag) as any;
-          if (tagRecord) {
-            insertUserTag.run(req.params.id, tagRecord.id);
-          }
-        }
-      }
+      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, req.params.id);
 
       res.json({ success: true });
     } catch (e: any) {
@@ -416,29 +424,15 @@ async function startServer() {
   });
 
   app.post("/api/users", (req, res) => {
-    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, tags } = req.body;
+    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id } = req.body;
     try {
       const stmt = db.prepare(`
-        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle);
+      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null);
       const userId = info.lastInsertRowid;
       
-      if (tags && Array.isArray(tags)) {
-        const insertTag = db.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)");
-        const getTag = db.prepare("SELECT id FROM tags WHERE name = ?");
-        const insertUserTag = db.prepare("INSERT INTO user_tags (user_id, tag_id) VALUES (?, ?)");
-        
-        for (const tag of tags) {
-          insertTag.run(tag);
-          const tagRecord = getTag.get(tag) as any;
-          if (tagRecord) {
-            insertUserTag.run(userId, tagRecord.id);
-          }
-        }
-      }
-
       // Real user follows new character by default, and character follows real user
       const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
       if (user) {
@@ -1020,23 +1014,19 @@ async function startServer() {
         if (otherAiUsers.length > 0) {
           let userToFollow = otherAiUsers[Math.floor(Math.random() * otherAiUsers.length)];
           
-          // Try to find someone with shared tags
-          const aiTags = db.prepare("SELECT tag_id FROM user_tags WHERE user_id = ?").all(randomAi.id).map((t: any) => t.tag_id);
-          if (aiTags.length > 0) {
-            const placeholders = aiTags.map(() => '?').join(',');
-            const similarUsers = db.prepare(`
-              SELECT user_id, COUNT(*) as shared_tags 
-              FROM user_tags 
-              WHERE tag_id IN (${placeholders}) AND user_id != ?
-              GROUP BY user_id 
-              ORDER BY shared_tags DESC 
+          // Try to find someone from the same universe
+          if (randomAi.universe_id) {
+            const sameUniverseUsers = db.prepare(`
+              SELECT id as user_id
+              FROM users 
+              WHERE universe_id = ? AND id != ? AND is_ai = 1
               LIMIT 5
-            `).all(...aiTags, randomAi.id) as any[];
+            `).all(randomAi.universe_id, randomAi.id) as any[];
             
-            if (similarUsers.length > 0) {
-              // 70% chance to pick from similar users
+            if (sameUniverseUsers.length > 0) {
+              // 70% chance to pick from same universe users
               if (Math.random() < 0.7) {
-                const pickedSimilar = similarUsers[Math.floor(Math.random() * similarUsers.length)];
+                const pickedSimilar = sameUniverseUsers[Math.floor(Math.random() * sameUniverseUsers.length)];
                 const foundUser = otherAiUsers.find(u => u.id === pickedSimilar.user_id);
                 if (foundUser) userToFollow = foundUser;
               }
@@ -1270,8 +1260,14 @@ async function startServer() {
           }
         });
 
-        if (weightedItems.length > 0) {
-          const choice = weightedItems[Math.floor(Math.random() * weightedItems.length)];
+        let choice: any = null;
+        let availableAis: any[] = [];
+        let attempts = 0;
+
+        while (weightedItems.length > 0 && attempts < 10) {
+          attempts++;
+          const choiceIndex = Math.floor(Math.random() * weightedItems.length);
+          choice = weightedItems[choiceIndex];
           
           if (choice.type === 'post' && choice.data.post_type === 'dm_invitation') {
             const otherAiUsers = activeAiUsers.filter(u => u.id !== choice.data.user_id);
@@ -1291,56 +1287,72 @@ async function startServer() {
             return;
           }
 
-          // Now pick the best commenter
-          const targetUserId = choice.type === 'post' ? choice.data.user_id : choice.data.user_id;
-          const availableAis = activeAiUsers.filter(u => u.id !== targetUserId);
+          const targetUserId = choice.data.user_id;
           
+          let existingRepliers: number[] = [];
+          if (choice.type === 'post') {
+            existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(choice.data.id).map((r: any) => r.user_id);
+          } else {
+            existingRepliers = db.prepare("SELECT user_id FROM comments WHERE parent_id = ?").all(choice.data.id).map((r: any) => r.user_id);
+          }
+
+          availableAis = activeAiUsers.filter(u => u.id !== targetUserId && !existingRepliers.includes(u.id));
+
           if (availableAis.length > 0) {
-            const chosenAiId = await pickBestCommenter(choice.data, availableAis);
-            const randomAi = availableAis.find(u => u.id === chosenAiId) || availableAis[0];
+            break; // Found a valid choice with available AIs
+          } else {
+            // Remove this choice from weightedItems and try again
+            weightedItems = weightedItems.filter(item => item.data.id !== choice.data.id || item.type !== choice.type);
+            choice = null;
+          }
+        }
 
-            if (choice.type === 'post') {
-              const randomPost = choice.data;
-              // Get other comments for context
-              const otherComments = db.prepare("SELECT content FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => c.content).join(" | ");
-              
-              // Get relationship context
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
-              const relContext = rel ? rel.description : '';
+        if (choice && availableAis.length > 0) {
+          // Now pick the best commenter
+          const chosenAiId = await pickBestCommenter(choice.data, availableAis);
+          const randomAi = availableAis.find(u => u.id === chosenAiId) || availableAis[0];
 
-              const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id);
-              if (commentContent) {
-                const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
-                  .run(randomPost.id, randomAi.id, commentContent);
-                console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
+          if (choice.type === 'post') {
+            const randomPost = choice.data;
+            // Get other comments for context
+            const otherComments = db.prepare("SELECT content FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => c.content).join(" | ");
+            
+            // Get relationship context
+            const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
+            const relContext = rel ? rel.description : '';
 
-                // Notify real user if they own the post
-                const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-                if (realUser && randomPost.user_id === realUser.id) {
-                  db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-                    .run(realUser.id, randomAi.id, info.lastInsertRowid);
-                }
+            const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id);
+            if (commentContent) {
+              const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
+                .run(randomPost.id, randomAi.id, commentContent);
+              console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
+
+              // Notify real user if they own the post
+              const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+              if (realUser && randomPost.user_id === realUser.id) {
+                db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
+                  .run(realUser.id, randomAi.id, info.lastInsertRowid);
               }
-            } else {
-              const randomComment = choice.data;
-              // Get relationship context
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
-              const relContext = rel ? rel.description : '';
+            }
+          } else {
+            const randomComment = choice.data;
+            // Get relationship context
+            const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
+            const relContext = rel ? rel.description : '';
 
-              const threadContext = buildThreadContext(randomComment.id);
+            const threadContext = buildThreadContext(randomComment.id);
 
-              const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id);
-              if (replyContent) {
-                const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
-                  .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
-                console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
+            const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id);
+            if (replyContent) {
+              const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
+                .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
+              console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
 
-                // Notify real user if they own the comment
-                const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-                if (realUser && randomComment.user_id === realUser.id) {
-                  db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-                    .run(realUser.id, randomAi.id, info.lastInsertRowid);
-                }
+              // Notify real user if they own the comment
+              const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+              if (realUser && randomComment.user_id === realUser.id) {
+                db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
+                  .run(realUser.id, randomAi.id, info.lastInsertRowid);
               }
             }
           }

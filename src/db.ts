@@ -106,17 +106,11 @@ export function initDb() {
       allow_nsfw BOOLEAN DEFAULT 0
     );
 
-    CREATE TABLE IF NOT EXISTS tags (
+    CREATE TABLE IF NOT EXISTS universes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS user_tags (
-      user_id INTEGER NOT NULL,
-      tag_id INTEGER NOT NULL,
-      PRIMARY KEY (user_id, tag_id),
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (tag_id) REFERENCES tags(id)
+      name TEXT UNIQUE NOT NULL,
+      description TEXT DEFAULT '',
+      image_url TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS relationships (
@@ -186,6 +180,12 @@ export function initDb() {
   }
 
   // Handle schema migrations for users
+  try {
+    db.prepare('SELECT universe_id FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN universe_id INTEGER REFERENCES universes(id)");
+  }
+
   try {
     db.prepare('SELECT description FROM users').get();
   } catch (e) {
@@ -303,7 +303,6 @@ export function initDb() {
         { name: 'notifications', col: 'actor_id' },
         { name: 'direct_messages', col: 'sender_id' },
         { name: 'direct_messages', col: 'receiver_id' },
-        { name: 'user_tags', col: 'user_id' },
         { name: 'relationships', col: 'user_id_1' },
         { name: 'relationships', col: 'user_id_2' },
         { name: 'group_chat_members', col: 'user_id' },

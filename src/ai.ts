@@ -57,7 +57,7 @@ export async function testConnection() {
   }
 }
 
-export async function generatePersona(name: string, extraInfo: string, existingTags: string[]) {
+export async function generatePersona(name: string, extraInfo: string, existingUniverses: string[]) {
   const prompt = `You are an expert character writer. Help me create a detailed persona for a character named "${name}".
 ${extraInfo ? `Additional context: ${extraInfo}` : ''}
 If this is a known fictional character or celebrity, use your knowledge to make it accurate.
@@ -70,7 +70,7 @@ Please provide a comprehensive profile including:
 5. Physical appearance details.
 6. Clothing style and fashion sense.
 7. Artstyle for image generation (e.g., Realistic, Anime, Pixel Art, Oil Painting, Comic Book, 3D Render, etc.).
-8. A list of 10-20 relevant tags. These tags are used to find "similar" characters. They should include character traits like what Franchise they are from, personality traits, interests, and things they can bond over with other characters.
+8. A suggested Universe name. This should be the franchise they are from (e.g., "Marvel Cinematic Universe", "Star Wars", "Real Life"). Try to pick from this list of existing universes if it fits: ${existingUniverses.join(', ')}
 
 Format your response as a friendly chat message, but make sure all the information is clearly laid out so I can copy it into the fields.`;
 
@@ -104,6 +104,20 @@ function buildCharacterPrompt(character: any) {
   if (character.physical_appearance) prompt += `\nYour physical appearance: ${character.physical_appearance}`;
   if (character.clothing_style) prompt += `\nYour clothing style: ${character.clothing_style}`;
   
+  if (character.universe_id) {
+    try {
+      const universe = db.prepare("SELECT name, description FROM universes WHERE id = ?").get(character.universe_id) as any;
+      if (universe) {
+        prompt += `\nYou are from the universe/franchise: "${universe.name}".`;
+        if (universe.description) {
+          prompt += `\nGeneral information about your universe: ${universe.description}`;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
   prompt += `\nYou are currently using "Faux", a multiversal social media platform where characters from various franchises, universes, and backgrounds interact.`;
   
   try {
@@ -199,6 +213,24 @@ export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false)
   return POST_ARCHETYPES[0];
 }
 
+function getOtherUserUniverseContext(character: any, otherUser: any): string {
+  if (!otherUser || !otherUser.universe_id) return '';
+  
+  try {
+    const otherUniverse = db.prepare("SELECT name FROM universes WHERE id = ?").get(otherUser.universe_id) as any;
+    if (otherUniverse) {
+      if (character.universe_id === otherUser.universe_id) {
+        return `You and ${otherUser.display_name} are from the same universe/franchise ("${otherUniverse.name}"). You likely know each other to some extent or share common knowledge of your world.\n`;
+      } else {
+        return `${otherUser.display_name} is from a different universe/franchise ("${otherUniverse.name}"). You do not know them from your own world, and their background might seem strange or novel to you.\n`;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return '';
+}
+
 export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false) {
   let prompt = `${buildCharacterPrompt(character)}
 ${isIntroduction ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.` : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
@@ -246,6 +278,7 @@ export async function generateComment(character: any, postContent: string, postA
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
     if (otherUser) {
       otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo += getOtherUserUniverseContext(character, otherUser);
       if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
         otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
       }
@@ -293,6 +326,7 @@ export async function generateDM(character: any, userDisplayName: string, relati
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
     if (otherUser) {
       otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo += getOtherUserUniverseContext(character, otherUser);
       if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
         otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
       }
@@ -345,6 +379,7 @@ export async function replyToDM(character: any, userDisplayName: string, message
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
     if (otherUser) {
       otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo += getOtherUserUniverseContext(character, otherUser);
       if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
         otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
       }
@@ -391,7 +426,14 @@ Reply in character to their latest message. Make sure to actually write like it'
 
 export async function generateGroupChatReply(character: any, groupName: string, messageHistory: {role: string, content: string}[], otherMembers: any[]) {
   const otherMembersStr = otherMembers.map(m => m.display_name).join(', ');
-  const otherMembersBios = otherMembers.map(m => `${m.display_name} Bio: ${m.bio || 'No bio provided.'}`).join('\n');
+  const otherMembersBios = otherMembers.map(m => {
+    let bioStr = `${m.display_name} Bio: ${m.bio || 'No bio provided.'}`;
+    const universeContext = getOtherUserUniverseContext(character, m);
+    if (universeContext) {
+      bioStr += `\n${universeContext}`;
+    }
+    return bioStr;
+  }).join('\n\n');
   
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are in a group chat named "${groupName}" with ${otherMembersStr}.
