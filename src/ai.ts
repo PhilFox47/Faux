@@ -516,7 +516,7 @@ Guidelines:
 export async function generateImage(prompt: string) {
   try {
     const model = getImageModel();
-    const sizes = ['1536x1536', '1536x1014', '1024x1536'];
+    const sizes = ['1024x1024', '1024x1536', '1024x1536'];
     const randomSize = sizes[Math.floor(Math.random() * sizes.length)];
     
     const response = await getOpenAI().images.generate({
