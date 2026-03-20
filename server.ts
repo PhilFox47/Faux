@@ -4,6 +4,69 @@ import path from "path";
 import db, { initDb } from "./src/db";
 import { generatePost, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype } from "./src/ai";
 
+function isUserOnline(user: any, timezone: string) {
+  if (!user.online_times || user.online_times === '[]') return true;
+  let onlineTimes;
+  try {
+    onlineTimes = JSON.parse(user.online_times);
+  } catch (e) {
+    return true;
+  }
+  if (!onlineTimes || onlineTimes.length === 0) return true;
+
+  const now = new Date();
+  const localTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: 'numeric',
+    hour12: false
+  }).format(now);
+  let currentHour = parseInt(localTime);
+  if (currentHour === 24) currentHour = 0;
+
+  return onlineTimes.some((window: string) => {
+    const parts = window.split('-').map(t => parseInt(t.trim().split(':')[0]));
+    if (parts.length !== 2) return false;
+    const [start, end] = parts;
+    if (start < end) {
+      return currentHour >= start && currentHour < end;
+    } else {
+      // Overnight window (e.g., 23:00 - 04:00)
+      return currentHour >= start || currentHour < end;
+    }
+  });
+}
+
+function pickWeightedRandomUser(users: any[]) {
+  if (!users || users.length === 0) return null;
+  const totalWeight = users.reduce((sum, u) => sum + (u.activity_level ?? 5), 0);
+  let random = Math.random() * totalWeight;
+  for (const user of users) {
+    random -= (user.activity_level ?? 5);
+    if (random <= 0) return user;
+  }
+  return users[users.length - 1];
+}
+
+function addLikesToPostOrComment(postId: number, commentId: number | null, count: number) {
+  const aiUsers = db.prepare("SELECT id FROM users WHERE is_ai = 1 AND is_active = 1").all() as any[];
+  if (aiUsers.length === 0) return;
+
+  const shuffled = aiUsers.sort(() => 0.5 - Math.random());
+  const selected = shuffled.slice(0, Math.min(count, aiUsers.length));
+
+  for (const user of selected) {
+    try {
+      if (commentId) {
+        db.prepare("INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)").run(commentId, user.id);
+      } else {
+        db.prepare("INSERT INTO likes (post_id, user_id) VALUES (?, ?)").run(postId, user.id);
+      }
+    } catch (e) {
+      // Already liked
+    }
+  }
+}
+
 async function triggerPostComments(postId: number, postType: string) {
   const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
   if (!settings || !settings.ai_enabled) return;
@@ -24,22 +87,28 @@ async function triggerPostComments(postId: number, postType: string) {
 
     const aiUsers = db.prepare("SELECT * FROM users WHERE is_ai = 1 AND is_active = 1 AND id != ?").all(post.user_id) as any[];
     const existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(postId).map((r: any) => r.user_id);
-    const availableAiUsers = aiUsers.filter(u => !commentedUserIds.has(u.id) && !existingRepliers.includes(u.id));
+    const availableAiUsers = aiUsers.filter(u => {
+      const isOnline = isUserOnline(u, settings.timezone || 'UTC');
+      return isOnline && !commentedUserIds.has(u.id) && !existingRepliers.includes(u.id);
+    });
     if (availableAiUsers.length === 0) continue;
 
     const chosenAiId = await pickBestCommenter(post, availableAiUsers);
     const randomAi = availableAiUsers.find(u => u.id === chosenAiId) || availableAiUsers[0];
     commentedUserIds.add(randomAi.id);
 
-    const otherComments = db.prepare("SELECT content FROM comments WHERE post_id = ? LIMIT 5").all(postId).map((c: any) => c.content).join(" | ");
+    const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(postId).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
     const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, post.user_id) as any;
     const relContext = rel ? rel.description : '';
 
-    const commentContent = await generateComment(randomAi, post.content, post.author_name, otherComments, false, relContext, post.user_id);
+    const commentContent = await generateComment(randomAi, post.content, post.author_name, otherComments, false, relContext, post.user_id, post.image_prompt, post.created_at);
     if (commentContent) {
       const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
         .run(postId, randomAi.id, commentContent);
       console.log(`${randomAi.display_name} auto-commented on post ${postId}`);
+
+      // Add 1-5 likes to the post
+      addLikesToPostOrComment(postId, null, Math.floor(Math.random() * 5) + 1);
 
       const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
       if (realUser && post.user_id === realUser.id) {
@@ -55,7 +124,7 @@ function buildThreadContext(commentId: number): string {
   let currentCommentId = commentId;
   while (currentCommentId) {
     const comment = db.prepare(`
-      SELECT c.*, u.display_name, p.content as post_content, pu.display_name as post_author
+      SELECT c.*, u.display_name, p.content as post_content, p.created_at as post_created_at, pu.display_name as post_author
       FROM comments c
       JOIN users u ON c.user_id = u.id
       JOIN posts p ON c.post_id = p.id
@@ -65,10 +134,10 @@ function buildThreadContext(commentId: number): string {
     
     if (!comment) break;
     
-    context.unshift(`${comment.display_name}: "${comment.content}"`);
+    context.unshift(`[${comment.created_at}] ${comment.display_name}: "${comment.content}"`);
     
     if (!comment.parent_id) {
-      context.unshift(`Original Post by ${comment.post_author}: "${comment.post_content}"`);
+      context.unshift(`[${comment.post_created_at}] Original Post by ${comment.post_author}: "${comment.post_content}"`);
       break;
     }
     currentCommentId = comment.parent_id;
@@ -105,16 +174,21 @@ async function handleOPReplies() {
       const opUser = db.prepare("SELECT * FROM users WHERE id = ?").get(comment.op_id) as any;
       if (!opUser) continue;
 
+      if (!isUserOnline(opUser, settings.timezone || 'UTC')) continue;
+
       const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(opUser.id, comment.user_id) as any;
       const relContext = rel ? rel.description : '';
 
       const threadContext = buildThreadContext(comment.id);
 
-      const replyContent = await generateComment(opUser, comment.content, comment.author_name, threadContext, true, relContext, comment.user_id);
+      const replyContent = await generateComment(opUser, comment.content, comment.author_name, threadContext, true, relContext, comment.user_id, undefined, comment.created_at);
       if (replyContent) {
         const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
           .run(comment.post_id, opUser.id, replyContent, comment.id);
         console.log(`OP ${opUser.display_name} replied to comment ${comment.id}`);
+
+        // Add 1-5 likes to the comment being replied to
+        addLikesToPostOrComment(comment.post_id, comment.id, Math.floor(Math.random() * 5) + 1);
 
         if (comment.author_is_ai === 0) {
           db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
@@ -187,6 +261,9 @@ async function startServer() {
       db.prepare("DELETE FROM likes").run();
       db.prepare("DELETE FROM comments").run();
       db.prepare("DELETE FROM direct_messages").run();
+      db.prepare("DELETE FROM group_chat_messages").run();
+      db.prepare("DELETE FROM group_chat_members").run();
+      db.prepare("DELETE FROM group_chats").run();
       db.prepare("DELETE FROM notifications").run();
       db.prepare("DELETE FROM posts").run();
       db.prepare("DELETE FROM follows").run();
@@ -204,6 +281,9 @@ async function startServer() {
       db.prepare("DELETE FROM likes").run();
       db.prepare("DELETE FROM comments").run();
       db.prepare("DELETE FROM direct_messages").run();
+      db.prepare("DELETE FROM group_chat_messages").run();
+      db.prepare("DELETE FROM group_chat_members").run();
+      db.prepare("DELETE FROM group_chats").run();
       db.prepare("DELETE FROM notifications").run();
       db.prepare("DELETE FROM posts").run();
       db.prepare("UPDATE users SET is_active = 0 WHERE is_ai = 1").run();
@@ -409,13 +489,13 @@ async function startServer() {
   });
 
   app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id } = req.body;
+    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level } = req.body;
     try {
       db.prepare(`
         UPDATE users 
-        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?
+        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?
         WHERE id = ?
-      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, req.params.id);
+      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, req.params.id);
 
       res.json({ success: true });
     } catch (e: any) {
@@ -424,13 +504,13 @@ async function startServer() {
   });
 
   app.post("/api/users", (req, res) => {
-    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id } = req.body;
+    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level } = req.body;
     try {
       const stmt = db.prepare(`
-        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null);
+      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5);
       const userId = info.lastInsertRowid;
       
       // Real user follows new character by default, and character follows real user
@@ -490,11 +570,11 @@ async function startServer() {
       if (!aiUser) return res.status(404).json({ error: "AI User not found" });
 
       const recentContext = db.prepare(`
-        SELECT p.content, u.display_name 
+        SELECT p.content, p.created_at, u.display_name 
         FROM posts p JOIN users u ON p.user_id = u.id 
         ORDER BY p.created_at DESC LIMIT 5
       `).all() as any[];
-      const contextStr = recentContext.map(p => p.content).join(" | ");
+      const contextStr = recentContext.map(p => `[${p.created_at}] ${p.display_name}: ${p.content}`).join(" | ");
       
       const rels = db.prepare(`
         SELECT u.display_name, r.description 
@@ -526,7 +606,7 @@ async function startServer() {
             const imagePrompt = await generateImagePrompt(aiUser, postContent);
             const imageUrl = await generateImage(imagePrompt);
             if (imageUrl) {
-              db.prepare("UPDATE posts SET image_url = ? WHERE id = ?").run(imageUrl, postId);
+              db.prepare("UPDATE posts SET image_url = ?, image_prompt = ? WHERE id = ?").run(imageUrl, imagePrompt, postId);
             }
           } catch (err) {
             console.error("Failed to generate image for post", postId, err);
@@ -574,7 +654,7 @@ async function startServer() {
         const imagePrompt = await generateImagePrompt(user, content);
         const imageUrl = await generateImage(imagePrompt);
         if (imageUrl) {
-          db.prepare("UPDATE posts SET image_url = ? WHERE id = ?").run(imageUrl, postId);
+          db.prepare("UPDATE posts SET image_url = ?, image_prompt = ? WHERE id = ?").run(imageUrl, imagePrompt, postId);
         }
       } catch (e) {
         console.error("Failed to generate image for user post:", e);
@@ -798,13 +878,26 @@ async function startServer() {
       db.prepare("UPDATE group_chat_members SET last_read_at = CURRENT_TIMESTAMP WHERE group_chat_id = ? AND user_id = ?").run(req.params.id, user.id);
     }
 
-    const messages = db.prepare(`
+    const limit = parseInt(req.query.limit as string) || 40;
+    const beforeId = req.query.before_id ? parseInt(req.query.before_id as string) : null;
+
+    let query = `
       SELECT m.*, u.display_name, u.username, u.avatar_url
       FROM group_chat_messages m
       JOIN users u ON m.sender_id = u.id
       WHERE m.group_chat_id = ?
-      ORDER BY m.created_at ASC
-    `).all(req.params.id);
+    `;
+    const params: any[] = [req.params.id];
+
+    if (beforeId) {
+      query += " AND m.id < ?";
+      params.push(beforeId);
+    }
+
+    query += ` ORDER BY m.id DESC LIMIT ?`;
+    params.push(limit);
+
+    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params);
     res.json(messages);
   });
 
@@ -831,7 +924,7 @@ async function startServer() {
       `).all(groupId) as any[];
 
       const history = db.prepare(`
-        SELECT m.sender_id, m.content, u.display_name
+        SELECT m.sender_id, m.content, u.display_name, m.created_at
         FROM group_chat_messages m
         JOIN users u ON m.sender_id = u.id
         WHERE m.group_chat_id = ?
@@ -840,13 +933,21 @@ async function startServer() {
 
       const formattedHistory = history.map((msg: any) => ({
         role: msg.sender_id === user.id ? 'user' : 'assistant',
-        content: `[${msg.display_name}]: ${msg.content}`
+        content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`
       }));
 
-      // Let each AI decide if they want to reply (e.g. 50% chance, or if mentioned)
+      // Let each AI decide if they want to reply (e.g. based on activity level or if mentioned)
+      const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
+      const timezone = settings?.timezone || 'UTC';
+
       for (const aiUser of members) {
+        if (!isUserOnline(aiUser, timezone)) continue;
+
         const isMentioned = content.toLowerCase().includes(aiUser.display_name.toLowerCase()) || content.toLowerCase().includes(aiUser.username.toLowerCase());
-        const shouldReply = isMentioned || Math.random() < 0.4;
+        const activityLevel = aiUser.activity_level ?? 5;
+        // Base probability between 5% and 50% depending on activity level
+        const baseProb = (activityLevel / 10) * 0.5;
+        const shouldReply = isMentioned || Math.random() < baseProb;
         
         if (shouldReply) {
           const otherMembers = db.prepare(`
@@ -863,7 +964,7 @@ async function startServer() {
             // Add this reply to history for the next AI
             formattedHistory.push({
               role: 'assistant',
-              content: `[${aiUser.display_name}]: ${reply}`
+              content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${reply}`
             });
           }
         }
@@ -903,17 +1004,40 @@ async function startServer() {
     const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
     if (!user) return res.status(401).json({ error: "User not found" });
 
-    const messages = db.prepare(`
+    const limit = parseInt(req.query.limit as string) || 40;
+    const beforeId = req.query.before_id ? parseInt(req.query.before_id as string) : null;
+
+    let query = `
       SELECT * FROM direct_messages
-      WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-      ORDER BY created_at ASC
-    `).all(user.id, req.params.userId, req.params.userId, user.id);
+      WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
+    `;
+    const params: any[] = [user.id, req.params.userId, req.params.userId, user.id];
+
+    if (beforeId) {
+      query += " AND id < ?";
+      params.push(beforeId);
+    }
+
+    query += ` ORDER BY id DESC LIMIT ?`;
+    params.push(limit);
+
+    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params);
     
     // Mark as read
     db.prepare("UPDATE direct_messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0")
       .run(req.params.userId, user.id);
 
     res.json(messages);
+  });
+
+  app.delete("/api/dms/:userId", (req, res) => {
+    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    db.prepare("DELETE FROM direct_messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)")
+      .run(user.id, req.params.userId, req.params.userId, user.id);
+    
+    res.json({ success: true });
   });
 
   app.post("/api/dms/:userId", async (req, res) => {
@@ -924,23 +1048,25 @@ async function startServer() {
 
       const receiverId = req.params.userId;
       db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-        .run(user.id, receiverId, content);
+        .run(user.id, receiverId, content.trim());
       
       res.json({ success: true });
 
       // AI Reply logic
       const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
-      if (receiver) {
+      const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
+      if (receiver && isUserOnline(receiver, settings?.timezone || 'UTC')) {
         // Get recent history
         const history = db.prepare(`
-          SELECT sender_id, content FROM direct_messages
+          SELECT sender_id, content, created_at FROM direct_messages
           WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
           ORDER BY created_at DESC LIMIT 10
         `).all(user.id, receiverId, receiverId, user.id).reverse();
 
         const formattedHistory = history.map((msg: any) => ({
           role: msg.sender_id === receiverId ? 'assistant' : 'user',
-          content: msg.content
+          content: msg.content,
+          created_at: msg.created_at
         }));
 
         const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
@@ -949,7 +1075,7 @@ async function startServer() {
         const reply = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id);
         if (reply) {
           db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-            .run(receiverId, user.id, reply);
+            .run(receiverId, user.id, reply.trim());
         }
       }
     } catch (e: any) {
@@ -969,7 +1095,7 @@ async function startServer() {
       if (!settings || !settings.ai_enabled) return;
 
       const allAiUsers = db.prepare("SELECT * FROM users WHERE is_ai = 1").all() as any[];
-      const activeAiUsers = allAiUsers.filter(u => u.is_active === 1);
+      const activeAiUsers = allAiUsers.filter(u => u.is_active === 1 && isUserOnline(u, settings.timezone || 'UTC'));
       if (allAiUsers.length === 0) return;
 
       const probPost = (settings.prob_post ?? 100) / 1440;
@@ -979,69 +1105,88 @@ async function startServer() {
 
       // Local actions (Likes & Follows) - Doesn't use API tokens
       if (Math.random() < 0.3 && activeAiUsers.length > 0) {
-        const randomAi = activeAiUsers[Math.floor(Math.random() * activeAiUsers.length)];
+        const randomAi = pickWeightedRandomUser(activeAiUsers);
         // 30% chance to do some local actions
-        const recentPosts = db.prepare("SELECT id, user_id FROM posts ORDER BY created_at DESC LIMIT 50").all() as any[];
+        const recentPosts = db.prepare("SELECT id, user_id FROM posts ORDER BY created_at DESC LIMIT 10").all() as any[];
         if (recentPosts.length > 0) {
           const postToLike = recentPosts[Math.floor(Math.random() * recentPosts.length)];
           try {
             db.prepare("INSERT INTO likes (post_id, user_id) VALUES (?, ?)").run(postToLike.id, randomAi.id);
-            // Notify real user if they own the post
-            const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-            if (realUser && postToLike.user_id === realUser.id) {
-              db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'like_post', ?)")
-                .run(realUser.id, randomAi.id, postToLike.id);
-            }
           } catch (e) {} // Already liked
         }
 
-        const recentComments = db.prepare("SELECT id, user_id FROM comments ORDER BY created_at DESC LIMIT 50").all() as any[];
+        const recentComments = db.prepare("SELECT id, user_id FROM comments ORDER BY created_at DESC LIMIT 10").all() as any[];
         if (recentComments.length > 0) {
           const commentToLike = recentComments[Math.floor(Math.random() * recentComments.length)];
           try {
             db.prepare("INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)").run(commentToLike.id, randomAi.id);
-            // Notify real user if they own the comment
-            const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-            if (realUser && commentToLike.user_id === realUser.id) {
-              db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'like_comment', ?)")
-                .run(realUser.id, randomAi.id, commentToLike.id);
-            }
           } catch (e) {} // Already liked
         }
 
         // Randomly follow someone
         const otherAiUsers = activeAiUsers.filter(u => u.id !== randomAi.id);
         if (otherAiUsers.length > 0) {
-          let userToFollow = otherAiUsers[Math.floor(Math.random() * otherAiUsers.length)];
+          const totalAiUsersCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE is_ai = 1").get() as any;
+          const followingCountA = db.prepare("SELECT COUNT(*) as c FROM follows WHERE follower_id = ? AND followed_id IN (SELECT id FROM users WHERE is_ai = 1)").get(randomAi.id) as any;
           
-          // Try to find someone from the same universe
-          if (randomAi.universe_id) {
-            const sameUniverseUsers = db.prepare(`
-              SELECT id as user_id
-              FROM users 
-              WHERE universe_id = ? AND id != ? AND is_ai = 1
-              LIMIT 5
-            `).all(randomAi.universe_id, randomAi.id) as any[];
+          const followingRatio = followingCountA.c / Math.max(1, totalAiUsersCount.c);
+          
+          let shouldFollow = false;
+          if (followingRatio < 0.01) {
+              shouldFollow = true;
+          } else if (followingRatio < 0.40) {
+              if (followingRatio < 0.10) {
+                  shouldFollow = Math.random() < 0.8;
+              } else if (followingRatio < 0.30) {
+                  shouldFollow = Math.random() < 0.3;
+              } else {
+                  shouldFollow = Math.random() < 0.05;
+              }
+          }
+
+          if (shouldFollow) {
+            let userToFollow = pickWeightedRandomUser(otherAiUsers);
             
-            if (sameUniverseUsers.length > 0) {
-              // 70% chance to pick from same universe users
-              if (Math.random() < 0.7) {
-                const pickedSimilar = sameUniverseUsers[Math.floor(Math.random() * sameUniverseUsers.length)];
-                const foundUser = otherAiUsers.find(u => u.id === pickedSimilar.user_id);
-                if (foundUser) userToFollow = foundUser;
+            // Try to find someone from the same universe
+            if (randomAi.universe_id) {
+              const sameUniverseUsers = db.prepare(`
+                SELECT id as user_id
+                FROM users 
+                WHERE universe_id = ? AND id != ? AND is_ai = 1
+                LIMIT 5
+              `).all(randomAi.universe_id, randomAi.id) as any[];
+              
+              if (sameUniverseUsers.length > 0) {
+                // 70% chance to pick from same universe users
+                if (Math.random() < 0.7) {
+                  const pickedSimilar = sameUniverseUsers[Math.floor(Math.random() * sameUniverseUsers.length)];
+                  const foundUser = otherAiUsers.find(u => u.id === pickedSimilar.user_id);
+                  if (foundUser) userToFollow = foundUser;
+                }
+              }
+            }
+
+            if (userToFollow) {
+              // Follower scaling for userToFollow
+              const followerCountB = db.prepare("SELECT COUNT(*) as c FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)").get(userToFollow.id) as any;
+              const followedRatio = followerCountB.c / Math.max(1, totalAiUsersCount.c);
+              
+              // The more followers, the harder to gain new ones.
+              const followSuccessProb = Math.max(0.01, 1 - followedRatio);
+
+              if (Math.random() < followSuccessProb) {
+                try {
+                  db.prepare("INSERT INTO follows (follower_id, followed_id) VALUES (?, ?)").run(randomAi.id, userToFollow.id);
+                } catch (e) {} // Already following
               }
             }
           }
-
-          try {
-            db.prepare("INSERT INTO follows (follower_id, followed_id) VALUES (?, ?)").run(randomAi.id, userToFollow.id);
-          } catch (e) {} // Already following
         }
       }
 
       const doAiPost = async (aiUser: any, isImage: boolean) => {
-        const recentContext = db.prepare("SELECT content FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 3").all(aiUser.id) as any[];
-        const contextStr = recentContext.map(p => p.content).join(" | ");
+        const recentContext = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 3").all(aiUser.id) as any[];
+        const contextStr = recentContext.map(p => `[${p.created_at}] ${p.content}`).join(" | ");
         
         const rels = db.prepare(`
           SELECT u.display_name, r.description 
@@ -1070,11 +1215,41 @@ async function startServer() {
               const imagePrompt = await generateImagePrompt(aiUser, postContent);
               const imageUrl = await generateImage(imagePrompt);
               if (imageUrl) {
-                db.prepare("UPDATE posts SET image_url = ? WHERE id = ?").run(imageUrl, postId);
+                db.prepare("UPDATE posts SET image_url = ?, image_prompt = ? WHERE id = ?").run(imageUrl, imagePrompt, postId);
                 console.log(`Image attached to post ${postId} by ${aiUser.display_name}`);
               }
             } catch (err) {
               console.error("Failed to generate image for auto post", postId, err);
+            }
+          }
+
+          if (archetype.id === 'event' || archetype.id === 'meetup') {
+            // Trigger other characters to react
+            const count = archetype.id === 'event' ? Math.floor(Math.random() * 5) + 1 : Math.floor(Math.random() * 4) + 1;
+            const otherAis = activeAiUsers.filter(u => u.id !== aiUser.id);
+            if (otherAis.length > 0) {
+              const selectedAis = [];
+              let availableAis = [...otherAis];
+              for (let i = 0; i < count && availableAis.length > 0; i++) {
+                const picked = pickWeightedRandomUser(availableAis);
+                selectedAis.push(picked);
+                availableAis = availableAis.filter(u => u.id !== picked.id);
+              }
+              
+              // These characters will comment on the post shortly
+              for (const otherAi of selectedAis) {
+                setTimeout(async () => {
+                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(otherAi.id, aiUser.id) as any;
+                  const relContext = rel ? rel.description : '';
+                  const post = db.prepare("SELECT created_at FROM posts WHERE id = ?").get(postId) as any;
+                  const commentContent = await generateComment(otherAi, postContent, aiUser.display_name, '', false, relContext, aiUser.id, undefined, post?.created_at);
+                  if (commentContent) {
+                    db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
+                      .run(postId, otherAi.id, commentContent);
+                    console.log(`${otherAi.display_name} reacted to ${archetype.id} by ${aiUser.display_name}`);
+                  }
+                }, 5000 + Math.random() * 30000);
+              }
             }
           }
 
@@ -1083,33 +1258,191 @@ async function startServer() {
       };
 
       if (Math.random() < probMessage && activeAiUsers.length > 0) {
-        const randomAi = activeAiUsers[Math.floor(Math.random() * activeAiUsers.length)];
         const realUser = db.prepare("SELECT * FROM users WHERE is_ai = 0").get() as any;
         if (realUser) {
+          let randomAi: any;
+          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          
+          // 50% chance to pick someone who talked in the last 7 days
+          if (Math.random() < 0.5) {
+            const recentContacts = db.prepare(`
+              SELECT DISTINCT u.* 
+              FROM users u
+              JOIN direct_messages dm ON (dm.sender_id = u.id AND dm.receiver_id = ?) 
+                                     OR (dm.sender_id = ? AND dm.receiver_id = u.id)
+              WHERE u.is_ai = 1 AND u.is_active = 1 AND dm.created_at > ?
+            `).all(realUser.id, realUser.id, sevenDaysAgo) as any[];
+
+            if (recentContacts.length > 0) {
+              randomAi = pickWeightedRandomUser(recentContacts);
+            } else {
+              randomAi = pickWeightedRandomUser(activeAiUsers);
+            }
+          } else {
+            randomAi = pickWeightedRandomUser(activeAiUsers);
+          }
+
           const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
           const relContext = rel ? rel.description : '';
-          const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id);
+          
+          // Fetch message history
+          const messageHistory = db.prepare(`
+            SELECT sender_id, content, created_at 
+            FROM direct_messages 
+            WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+            ORDER BY created_at ASC
+          `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
+            role: m.sender_id === randomAi.id ? 'assistant' : 'user',
+            content: m.content,
+            created_at: m.created_at
+          }));
+
+          const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
           if (dmContent) {
             db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-              .run(randomAi.id, realUser.id, dmContent);
+              .run(randomAi.id, realUser.id, dmContent.trim());
             console.log(`${randomAi.display_name} sent a DM to real_user`);
           }
         }
       } 
+
+      // Handle unreplied DMs from real user
+      const realUser = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").get() as any;
+      if (realUser && activeAiUsers.length > 0) {
+        const unrepliedDms = db.prepare(`
+          SELECT dm.*, u.online_times
+          FROM direct_messages dm
+          JOIN users u ON dm.receiver_id = u.id
+          WHERE dm.receiver_id IN (SELECT id FROM users WHERE is_ai = 1 AND is_active = 1)
+          AND dm.sender_id = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM direct_messages reply 
+            WHERE reply.sender_id = dm.receiver_id AND reply.receiver_id = dm.sender_id AND reply.id > dm.id
+          )
+        `).all(realUser.id) as any[];
+
+        const onlineUnrepliedDms = unrepliedDms.filter(dm => isUserOnline(dm, settings.timezone || 'UTC'));
+        
+        for (const dm of onlineUnrepliedDms) {
+          if (Math.random() < 0.5) { // 50% chance to reply per worker tick to not spam
+            const aiUser = activeAiUsers.find(u => u.id === dm.receiver_id);
+            if (aiUser) {
+              const history = db.prepare(`
+                SELECT sender_id, content, created_at FROM direct_messages
+                WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                ORDER BY created_at DESC LIMIT 10
+              `).all(realUser.id, aiUser.id, aiUser.id, realUser.id).reverse();
+
+              const formattedHistory = history.map((msg: any) => ({
+                role: msg.sender_id === aiUser.id ? 'assistant' : 'user',
+                content: msg.content,
+                created_at: msg.created_at
+              }));
+
+              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(aiUser.id, realUser.id) as any;
+              const relContext = rel ? rel.description : '';
+
+              const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true);
+              if (reply) {
+                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+                  .run(aiUser.id, realUser.id, reply);
+                console.log(`${aiUser.display_name} replied to pending DM from real_user`);
+              }
+            }
+          }
+        }
+      }
       
       if (Math.random() < probPost && allAiUsers.length > 0) {
-        const randomAi = allAiUsers[Math.floor(Math.random() * allAiUsers.length)];
-        await doAiPost(randomAi, false);
+        const onlineAiUsers = allAiUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+        if (onlineAiUsers.length > 0) {
+          const randomAi = pickWeightedRandomUser(onlineAiUsers);
+          await doAiPost(randomAi, false);
+        }
       }
       
       if (Math.random() < probImagePost && allAiUsers.length > 0) {
-        const randomAi = allAiUsers[Math.floor(Math.random() * allAiUsers.length)];
-        await doAiPost(randomAi, true);
+        const onlineAiUsers = allAiUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+        if (onlineAiUsers.length > 0) {
+          const randomAi = pickWeightedRandomUser(onlineAiUsers);
+          await doAiPost(randomAi, true);
+        }
+      }
+
+      // Handle Group Chat Replies (AI talking to AI or continuing conversation)
+      if (Math.random() < 0.3 && activeAiUsers.length > 0) {
+        // Find a recent group chat
+        const recentGroups = db.prepare(`
+          SELECT gc.id, gc.name, MAX(gcm.created_at) as last_msg_time
+          FROM group_chats gc
+          JOIN group_chat_messages gcm ON gc.id = gcm.group_chat_id
+          GROUP BY gc.id
+          ORDER BY last_msg_time DESC LIMIT 5
+        `).all() as any[];
+
+        if (recentGroups.length > 0) {
+          const group = recentGroups[Math.floor(Math.random() * recentGroups.length)];
+          
+          // Get members
+          const members = db.prepare(`
+            SELECT u.* FROM users u
+            JOIN group_chat_members gcm ON u.id = gcm.user_id
+            WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1
+          `).all(group.id) as any[];
+
+          const onlineMembers = members.filter(m => isUserOnline(m, settings.timezone || 'UTC'));
+          
+          if (onlineMembers.length > 0) {
+            // Pick an AI to reply based on activity level
+            const totalActivity = onlineMembers.reduce((sum, m) => sum + (m.activity_level ?? 5), 0);
+            let random = Math.random() * totalActivity;
+            let selectedAi = onlineMembers[0];
+            for (const m of onlineMembers) {
+              random -= (m.activity_level ?? 5);
+              if (random <= 0) {
+                selectedAi = m;
+                break;
+              }
+            }
+
+            // Check if the last message was already from this AI
+            const lastMsg = db.prepare("SELECT sender_id FROM group_chat_messages WHERE group_chat_id = ? ORDER BY created_at DESC LIMIT 1").get(group.id) as any;
+            
+            if (lastMsg && lastMsg.sender_id !== selectedAi.id) {
+              const history = db.prepare(`
+                SELECT m.sender_id, m.content, u.display_name, m.created_at
+                FROM group_chat_messages m
+                JOIN users u ON m.sender_id = u.id
+                WHERE m.group_chat_id = ?
+                ORDER BY m.created_at DESC LIMIT 15
+              `).all(group.id).reverse();
+
+              const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+              const formattedHistory = history.map((msg: any) => ({
+                role: msg.sender_id === realUser?.id ? 'user' : 'assistant',
+                content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`
+              }));
+
+              const otherMembers = db.prepare(`
+                SELECT u.* FROM users u
+                JOIN group_chat_members gcm ON u.id = gcm.user_id
+                WHERE gcm.group_chat_id = ? AND u.id != ?
+              `).all(group.id, selectedAi.id) as any[];
+
+              const reply = await generateGroupChatReply(selectedAi, group.name, formattedHistory, otherMembers);
+              if (reply) {
+                db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
+                  .run(group.id, selectedAi.id, reply);
+                console.log(`${selectedAi.display_name} replied in group chat ${group.name}`);
+              }
+            }
+          }
+        }
       }
       
       // Handle mentions
       const unrepliedMentions = db.prepare(`
-        SELECT p.id as post_id, NULL as comment_id, p.content, u.id as ai_user_id, p.user_id as author_id
+        SELECT p.id as post_id, NULL as comment_id, p.content, u.id as ai_user_id, p.user_id as author_id, u.online_times
         FROM posts p
         JOIN users u ON p.content LIKE '%@' || u.username || '%'
         WHERE u.is_ai = 1 AND u.is_active = 1
@@ -1117,7 +1450,7 @@ async function startServer() {
           SELECT 1 FROM comments c WHERE c.post_id = p.id AND c.user_id = u.id AND c.parent_id IS NULL
         )
         UNION ALL
-        SELECT c.post_id, c.id as comment_id, c.content, u.id as ai_user_id, c.user_id as author_id
+        SELECT c.post_id, c.id as comment_id, c.content, u.id as ai_user_id, c.user_id as author_id, u.online_times
         FROM comments c
         JOIN users u ON c.content LIKE '%@' || u.username || '%'
         WHERE u.is_ai = 1 AND u.is_active = 1
@@ -1126,9 +1459,11 @@ async function startServer() {
         )
       `).all() as any[];
 
+      const onlineMentions = unrepliedMentions.filter(m => isUserOnline(m, settings.timezone || 'UTC'));
+
       let handledMention = false;
-      if (unrepliedMentions.length > 0 && Math.random() < 0.8 && activeAiUsers.length > 0) { // 80% chance to prioritize a mention if one exists
-        const mention = unrepliedMentions[Math.floor(Math.random() * unrepliedMentions.length)];
+      if (onlineMentions.length > 0 && Math.random() < 0.8 && activeAiUsers.length > 0) { // 80% chance to prioritize a mention if one exists
+        const mention = onlineMentions[Math.floor(Math.random() * onlineMentions.length)];
         const randomAi = activeAiUsers.find(u => u.id === mention.ai_user_id);
         if (randomAi && mention.author_id !== randomAi.id) {
           handledMention = true;
@@ -1154,10 +1489,13 @@ async function startServer() {
               `).all(randomAi.id, commentData.user_id) as any[];
               const relStr = rels.length > 0 ? rels[0].description : '';
 
-              const commentContent = await generateComment(randomAi, commentData.content, commentData.author_name, threadContext, true, relStr, commentData.user_id);
+              const commentContent = await generateComment(randomAi, commentData.content, commentData.author_name, threadContext, true, relStr, commentData.user_id, undefined, commentData.created_at);
               if (commentContent) {
                 const info = db.prepare("INSERT INTO comments (post_id, user_id, parent_id, content) VALUES (?, ?, ?, ?)").run(commentData.post_id, randomAi.id, commentData.id, commentContent);
                 console.log(`${randomAi.display_name} replied to mention in comment ${commentData.id}`);
+
+                // Add 1-5 likes to the comment being replied to
+                addLikesToPostOrComment(commentData.post_id, commentData.id, Math.floor(Math.random() * 5) + 1);
 
                 const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
                 if (realUser && commentData.user_id === realUser.id) {
@@ -1187,10 +1525,13 @@ async function startServer() {
               `).all(randomAi.id, postData.user_id) as any[];
               const relStr = rels.length > 0 ? rels[0].description : '';
 
-              const commentContent = await generateComment(randomAi, postData.content, postData.author_name, commentsStr, false, relStr, postData.user_id);
+              const commentContent = await generateComment(randomAi, postData.content, postData.author_name, commentsStr, false, relStr, postData.user_id, postData.image_prompt, postData.created_at);
               if (commentContent) {
                 const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)").run(postData.id, randomAi.id, commentContent);
                 console.log(`${randomAi.display_name} replied to mention in post ${postData.id}`);
+
+                // Add 1-5 likes to the post being replied to
+                addLikesToPostOrComment(postData.id, null, Math.floor(Math.random() * 5) + 1);
 
                 const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
                 if (realUser && postData.user_id === realUser.id) {
@@ -1272,12 +1613,25 @@ async function startServer() {
           if (choice.type === 'post' && choice.data.post_type === 'dm_invitation') {
             const otherAiUsers = activeAiUsers.filter(u => u.id !== choice.data.user_id);
             if (otherAiUsers.length > 0) {
-              const randomAi = otherAiUsers[Math.floor(Math.random() * otherAiUsers.length)];
+              const randomAi = pickWeightedRandomUser(otherAiUsers);
               const author = db.prepare("SELECT * FROM users WHERE id = ?").get(choice.data.user_id) as any;
               const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, author.id) as any;
               const relContext = rel ? rel.description : '';
               const dmContext = `You saw their post: "${choice.data.content}" and decided to DM them about it.`;
-              const dmContent = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext);
+              
+              // Fetch message history
+              const messageHistory = db.prepare(`
+                SELECT sender_id, content, created_at 
+                FROM direct_messages 
+                WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                ORDER BY created_at ASC
+              `).all(randomAi.id, author.id, author.id, randomAi.id).map((m: any) => ({
+                role: m.sender_id === randomAi.id ? 'assistant' : 'user',
+                content: m.content,
+                created_at: m.created_at
+              }));
+
+              const dmContent = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext, messageHistory);
               if (dmContent) {
                 db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
                   .run(randomAi.id, author.id, dmContent);
@@ -1315,17 +1669,20 @@ async function startServer() {
           if (choice.type === 'post') {
             const randomPost = choice.data;
             // Get other comments for context
-            const otherComments = db.prepare("SELECT content FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => c.content).join(" | ");
+            const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
             
             // Get relationship context
             const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
             const relContext = rel ? rel.description : '';
 
-            const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id);
+            const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id, randomPost.image_prompt, randomPost.created_at);
             if (commentContent) {
               const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
                 .run(randomPost.id, randomAi.id, commentContent);
               console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
+
+              // Add 1-5 likes to the post
+              addLikesToPostOrComment(randomPost.id, null, Math.floor(Math.random() * 5) + 1);
 
               // Notify real user if they own the post
               const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
@@ -1342,11 +1699,14 @@ async function startServer() {
 
             const threadContext = buildThreadContext(randomComment.id);
 
-            const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id);
+            const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id, undefined, randomComment.created_at);
             if (replyContent) {
               const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
                 .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
               console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
+
+              // Add 1-5 likes to the comment
+              addLikesToPostOrComment(randomComment.post_id, randomComment.id, Math.floor(Math.random() * 5) + 1);
 
               // Notify real user if they own the comment
               const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
@@ -1358,6 +1718,9 @@ async function startServer() {
           }
         }
       }
+      
+      // Clean up old API logs
+      db.prepare("DELETE FROM api_logs WHERE created_at < datetime('now', '-1 day')").run();
     } catch (error) {
       console.error("Error in AI worker:", error);
     }

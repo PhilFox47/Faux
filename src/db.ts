@@ -15,6 +15,8 @@ export function initDb() {
       is_ai BOOLEAN DEFAULT 1,
       is_active BOOLEAN DEFAULT 0,
       ai_persona TEXT, -- Description of who they are impersonating
+      online_times TEXT DEFAULT '[]', -- JSON array of time windows
+      activity_level INTEGER DEFAULT 5, -- Scale of 1-10
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -23,9 +25,20 @@ export function initDb() {
       user_id INTEGER NOT NULL,
       content TEXT NOT NULL,
       image_url TEXT,
+      image_prompt TEXT,
       post_type TEXT DEFAULT 'life_update',
+      event_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (event_id) REFERENCES events(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      description TEXT NOT NULL,
+      participants TEXT NOT NULL, -- JSON array of user IDs
+      remaining_participants TEXT NOT NULL, -- JSON array of user IDs who haven't posted yet
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS comments (
@@ -212,6 +225,24 @@ export function initDb() {
     db.exec("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 0");
   }
 
+  try {
+    db.prepare('SELECT online_times FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN online_times TEXT DEFAULT '[]'");
+  }
+
+  try {
+    db.prepare('SELECT activity_level FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN activity_level INTEGER DEFAULT 5");
+  }
+
+  try {
+    db.prepare('SELECT event_id FROM posts').get();
+  } catch (e) {
+    db.exec("ALTER TABLE posts ADD COLUMN event_id INTEGER REFERENCES events(id)");
+  }
+
   // Handle schema migrations for comments
   try {
     db.prepare('SELECT parent_id FROM comments').get();
@@ -230,6 +261,12 @@ export function initDb() {
     db.prepare('SELECT image_url FROM posts').get();
   } catch (e) {
     db.exec("ALTER TABLE posts ADD COLUMN image_url TEXT");
+  }
+
+  try {
+    db.prepare('SELECT image_prompt FROM posts').get();
+  } catch (e) {
+    db.exec("ALTER TABLE posts ADD COLUMN image_prompt TEXT");
   }
 
   try {

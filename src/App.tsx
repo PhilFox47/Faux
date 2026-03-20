@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
@@ -19,6 +19,28 @@ export default function App() {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<number[]>([]);
+  const [groupSearchQuery, setGroupSearchQuery] = useState('');
+
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const skipNextScroll = useRef(false);
+
+  const scrollToBottom = useCallback(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'messages' && activeChat) {
+      if (skipNextScroll.current) {
+        skipNextScroll.current = false;
+        return;
+      }
+      scrollToBottom();
+    }
+  }, [chatMessages, activeTab, activeChat, scrollToBottom]);
 
   // Add Character Form
   const [charName, setCharName] = useState('');
@@ -32,6 +54,8 @@ export default function App() {
   const [charClothingStyle, setCharClothingStyle] = useState('');
   const [charArtstyle, setCharArtstyle] = useState('');
   const [charUniverseId, setCharUniverseId] = useState<number | null>(null);
+  const [charOnlineTimes, setCharOnlineTimes] = useState<string[]>([]);
+  const [charActivityLevel, setCharActivityLevel] = useState<number>(5);
   const [charNewUniverseName, setCharNewUniverseName] = useState('');
   const [universes, setUniverses] = useState<any[]>([]);
   const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
@@ -129,11 +153,18 @@ export default function App() {
   const [profileClothingStyle, setProfileClothingStyle] = useState('');
   const [profileArtstyle, setProfileArtstyle] = useState('');
   const [profileUniverseId, setProfileUniverseId] = useState<number | null>(null);
+  const [profileOnlineTimes, setProfileOnlineTimes] = useState<string[]>([]);
+  const [profileActivityLevel, setProfileActivityLevel] = useState<number>(5);
   const [profileNewUniverseName, setProfileNewUniverseName] = useState('');
   const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
   const [newRelUserId, setNewRelUserId] = useState('');
   const [newRelDesc, setNewRelDesc] = useState('');
   const [relSearch, setRelSearch] = useState('');
+
+  // Universe Editing
+  const [isEditingUniverse, setIsEditingUniverse] = useState(false);
+  const [editUniverseDescription, setEditUniverseDescription] = useState('');
+  const [editUniverseImageUrl, setEditUniverseImageUrl] = useState('');
 
   // API Logs
   const [apiLogs, setApiLogs] = useState<any[]>([]);
@@ -154,6 +185,56 @@ export default function App() {
       });
   };
 
+  const isUserOnline = (user: any) => {
+    if (!user || user.is_ai === 0) return true;
+    let onlineTimes = [];
+    try {
+      onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : (user.online_times || []);
+    } catch (e) {
+      onlineTimes = [];
+    }
+    
+    if (onlineTimes.length === 0) return true;
+    
+    const now = new Date();
+    const userTime = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false
+    }).format(now);
+    
+    const [currentHour, currentMinute] = userTime.split(':').map(Number);
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+
+    return onlineTimes.some((window: string) => {
+      const parts = window.split('-');
+      if (parts.length !== 2) return false;
+      const [start, end] = parts;
+      const [startH, startM] = start.split(':').map(Number);
+      const [endH, endM] = end.split(':').map(Number);
+      
+      const startTotal = startH * 60 + startM;
+      const endTotal = endH * 60 + endM;
+      
+      if (startTotal < endTotal) {
+        return currentTimeInMinutes >= startTotal && currentTimeInMinutes < endTotal;
+      } else {
+        // Overlaps midnight (e.g., 23:00 - 04:00)
+        return currentTimeInMinutes >= startTotal || currentTimeInMinutes < endTotal;
+      }
+    });
+  };
+
+  const ONLINE_TIME_WINDOWS = [
+    { label: '04:00 - 07:00', value: '04:00-07:00' },
+    { label: '07:00 - 12:00', value: '07:00-12:00' },
+    { label: '12:00 - 17:00', value: '12:00-17:00' },
+    { label: '17:00 - 20:00', value: '17:00-20:00' },
+    { label: '20:00 - 23:00', value: '20:00-23:00' },
+    { label: '23:00 - 04:00', value: '23:00-04:00' },
+  ];
+
   const handleEditProfile = async (user: any) => {
     if (!user) return;
     setEditingProfile(user);
@@ -167,6 +248,15 @@ export default function App() {
     setProfileClothingStyle(user.clothing_style || '');
     setProfileArtstyle(user.artstyle || '');
     setProfileUniverseId(user.universe_id || null);
+    setProfileActivityLevel(user.activity_level ?? 5);
+    
+    let onlineTimes = [];
+    try {
+      onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : (user.online_times || []);
+    } catch (e) {
+      onlineTimes = [];
+    }
+    setProfileOnlineTimes(onlineTimes);
     
     // Fetch relationships
     try {
@@ -243,7 +333,9 @@ export default function App() {
         physical_appearance: profilePhysicalAppearance,
         clothing_style: profileClothingStyle,
         artstyle: profileArtstyle,
-        universe_id: finalUniverseId
+        universe_id: finalUniverseId,
+        online_times: JSON.stringify(profileOnlineTimes),
+        activity_level: profileActivityLevel
       })
     });
     
@@ -305,12 +397,26 @@ export default function App() {
     fetch('/api/notifications').then(r => r.json()).then(setNotifications);
   };
 
-  const fetchChatMessages = (id: number, isGroup: boolean = false) => {
-    if (isGroup) {
-      fetch(`/api/group-chats/${id}/messages`).then(r => r.json()).then(setChatMessages);
-    } else {
-      fetch(`/api/dms/${id}`).then(r => r.json()).then(setChatMessages);
+  const fetchChatMessages = (id: number, isGroup: boolean = false, beforeId?: number) => {
+    const limit = 40;
+    const url = isGroup 
+      ? `/api/group-chats/${id}/messages?limit=${limit}${beforeId ? `&before_id=${beforeId}` : ''}`
+      : `/api/dms/${id}?limit=${limit}${beforeId ? `&before_id=${beforeId}` : ''}`;
+    
+    if (beforeId) {
+      setIsLoadingMoreMessages(true);
+      skipNextScroll.current = true;
     }
+    
+    fetch(url).then(r => r.json()).then(data => {
+      if (beforeId) {
+        setChatMessages(prev => [...data, ...prev]);
+        setIsLoadingMoreMessages(false);
+      } else {
+        setChatMessages(data);
+      }
+      setHasMoreMessages(data.length === limit);
+    });
   };
 
   const fetchSettings = () => {
@@ -388,10 +494,42 @@ export default function App() {
     const universe = universes.find(u => u.id === universeId);
     if (!universe) return;
     setViewingUniverse(universe);
+    setEditUniverseDescription(universe.description || '');
+    setEditUniverseImageUrl(universe.image_url || '');
+    setIsEditingUniverse(false);
     const res = await fetch(`/api/universes/${universeId}/characters`);
     const chars = await res.json();
     setViewingUniverseCharacters(chars);
     setActiveTab('universe_details');
+  };
+
+  const handleUpdateUniverse = async () => {
+    if (!viewingUniverse) return;
+    try {
+      const res = await fetch(`/api/universes/${viewingUniverse.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: editUniverseDescription,
+          image_url: editUniverseImageUrl
+        })
+      });
+      if (res.ok) {
+        const updatedUniverse = {
+          ...viewingUniverse,
+          description: editUniverseDescription,
+          image_url: editUniverseImageUrl
+        };
+        setViewingUniverse(updatedUniverse);
+        setUniverses(prev => prev.map(u => u.id === viewingUniverse.id ? updatedUniverse : u));
+        setIsEditingUniverse(false);
+        showToast("Universe updated successfully");
+      } else {
+        showToast("Failed to update universe");
+      }
+    } catch (e) {
+      showToast("Error updating universe");
+    }
   };
 
   const [isForcingPost, setIsForcingPost] = useState(false);
@@ -545,7 +683,9 @@ export default function App() {
         physical_appearance: charPhysicalAppearance,
         clothing_style: charClothingStyle,
         artstyle: charArtstyle,
-        universe_id: finalUniverseId
+        universe_id: finalUniverseId,
+        online_times: JSON.stringify(charOnlineTimes),
+        activity_level: charActivityLevel
       })
     });
     setCharName('');
@@ -559,6 +699,8 @@ export default function App() {
     setCharClothingStyle('');
     setCharArtstyle('');
     setCharUniverseId(null);
+    setCharOnlineTimes([]);
+    setCharActivityLevel(5);
     setCharNewUniverseName('');
     setPersonaChatResponse('');
     fetchUsers();
@@ -605,7 +747,7 @@ export default function App() {
     if (!newChatMsg.trim() || !activeChat) return;
     
     // Optimistic update
-    const msg = newChatMsg;
+    const msg = newChatMsg.trim();
     setNewChatMsg('');
     const realUser = users.find(u => u.is_ai === 0);
     setChatMessages(prev => [...prev, { sender_id: realUser?.id || 1, content: msg, created_at: new Date().toISOString() }]);
@@ -672,6 +814,21 @@ export default function App() {
     setIsTestingApi(false);
   };
 
+  const handleResetChat = async () => {
+    if (!activeChat || isGroupChat) return;
+    setConfirmModal({
+      isOpen: true,
+      title: "Reset Conversation",
+      message: "Are you sure you want to delete all messages in this conversation? This cannot be undone.",
+      onConfirm: async () => {
+        await fetch(`/api/dms/${activeChat.id}`, { method: 'DELETE' });
+        setChatMessages([]);
+        fetchConversations();
+        setConfirmModal(null);
+      }
+    });
+  };
+
   const markNotificationsRead = async () => {
     await fetch('/api/notifications/read', { method: 'POST' });
     fetchNotifications();
@@ -682,6 +839,7 @@ export default function App() {
 
   const formatTimestamp = (ts: string) => {
     try {
+      const utcTs = ts.replace(' ', 'T') + (ts.endsWith('Z') ? '' : 'Z');
       return new Intl.DateTimeFormat('en-GB', {
         timeZone: timezone,
         hour: '2-digit',
@@ -689,7 +847,7 @@ export default function App() {
         day: '2-digit',
         month: 'short',
         year: 'numeric'
-      }).format(new Date(ts));
+      }).format(new Date(utcTs));
     } catch (e) {
       return new Date(ts).toLocaleString();
     }
@@ -737,7 +895,18 @@ export default function App() {
         <div className="w-20 xl:w-64 border-r border-gray-800 p-4 flex flex-col justify-between h-full sticky top-0">
           <div>
             <div className="flex items-center justify-center xl:justify-start mb-8 p-2">
-              <span className="text-3xl font-bold text-orange-500 tracking-tighter">Faux</span>
+              <img 
+                src="https://i.imgur.com/8FO0ENo.png" 
+                alt="Faux Logo" 
+                className="w-10 h-10 object-contain xl:hidden" 
+                referrerPolicy="no-referrer"
+              />
+              <img 
+                src="https://i.imgur.com/tI0YtLX.png" 
+                alt="Faux Logo" 
+                className="hidden xl:block h-10 object-contain" 
+                referrerPolicy="no-referrer"
+              />
             </div>
             <nav className="space-y-2">
               <NavItem icon={<Home />} label="Home" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
@@ -973,6 +1142,43 @@ export default function App() {
                     <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle (Private)</label>
                     <textarea value={charArtstyle} onChange={e => setCharArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Anime, Realistic, Pixel Art, Oil Painting..."></textarea>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Online Time (Optional - Default: Always Online)</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+                      {ONLINE_TIME_WINDOWS.map(window => (
+                        <label key={window.value} className="flex items-center gap-2 cursor-pointer group">
+                          <input 
+                            type="checkbox" 
+                            checked={charOnlineTimes.includes(window.value)}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setCharOnlineTimes(prev => [...prev, window.value]);
+                              } else {
+                                setCharOnlineTimes(prev => prev.filter(t => t !== window.value));
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-orange-500 focus:ring-orange-500 focus:ring-offset-gray-900"
+                          />
+                          <span className="text-sm text-gray-300 group-hover:text-white transition">{window.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
+                    <div className="flex items-center gap-4">
+                      <input 
+                        type="range" 
+                        min="1" max="10" 
+                        value={charActivityLevel} 
+                        onChange={e => setCharActivityLevel(parseInt(e.target.value))}
+                        className="w-full accent-orange-500"
+                      />
+                      <span className="text-white font-bold w-6 text-center">{charActivityLevel}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
+                  </div>
                   <button type="submit" className="w-full bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold py-3 rounded-full hover:from-orange-600 hover:to-yellow-600 transition shadow-lg">
                     Add Character
                   </button>
@@ -1015,125 +1221,156 @@ export default function App() {
           {activeTab === 'messages' && (
             <div className="flex h-[calc(100vh-60px)]">
               {/* Conversation List */}
-              <div className="w-1/3 border-r border-gray-800 flex flex-col">
-                <div className="p-4 border-b border-gray-800 flex justify-between items-center">
-                  <h2 className="font-bold text-lg">Messages</h2>
-                  <button onClick={() => setShowCreateGroupModal(true)} className="p-2 hover:bg-gray-800 rounded-full" title="New Group Chat">
-                    <Plus size={20} />
-                  </button>
-                </div>
-                <div className="overflow-y-auto flex-1">
-                  {groupChats.map(group => (
-                    <div 
-                      key={`group-${group.id}`} 
-                      onClick={() => { setActiveChat({ id: group.id, name: group.name, isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true); }}
-                      className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-gray-900' : ''}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
-                          <Users size={24} />
-                        </div>
-                        <div className="overflow-hidden flex-1">
-                          <div className="flex justify-between items-center">
-                            <p className="font-bold truncate">{group.name}</p>
-                            {group.unread_count > 0 && (
-                              <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                                {group.unread_count}
-                              </span>
-                            )}
+              {!activeChat && (
+                <div className="w-full flex flex-col">
+                  <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+                    <h2 className="font-bold text-lg">Messages</h2>
+                    <button onClick={() => setShowCreateGroupModal(true)} className="p-2 hover:bg-gray-800 rounded-full" title="New Group Chat">
+                      <Plus size={20} />
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto flex-1">
+                    {groupChats.map(group => (
+                      <div 
+                        key={`group-${group.id}`} 
+                        onClick={() => { setActiveChat({ id: group.id, name: group.name, isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true); }}
+                        className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-gray-900' : ''}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
+                            <Users size={24} />
                           </div>
-                          <p className={`text-sm truncate ${group.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
-                            {group.last_message || 'No messages yet'}
-                          </p>
+                          <div className="overflow-hidden flex-1">
+                            <div className="flex justify-between items-center">
+                              <p className="font-bold truncate">{group.name}</p>
+                              {group.unread_count > 0 && (
+                                <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                  {group.unread_count}
+                                </span>
+                              )}
+                            </div>
+                            <p className={`text-sm truncate ${group.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
+                              {group.last_message || 'No messages yet'}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  {conversations.map(conv => (
-                    <div 
-                      key={`dm-${conv.other_user_id}`} 
-                      onClick={() => { setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false); }}
-                      className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-gray-900' : ''}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
-                          {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
-                        </div>
-                        <div className="overflow-hidden flex-1">
-                          <div className="flex justify-between items-center">
-                            <p className="font-bold truncate">{conv.display_name}</p>
-                            {conv.unread_count > 0 && (
-                              <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                                {conv.unread_count}
-                              </span>
-                            )}
+                    ))}
+                    {conversations.map(conv => (
+                      <div 
+                        key={`dm-${conv.other_user_id}`} 
+                        onClick={() => { setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false); }}
+                        className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-gray-900' : ''}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
+                            {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
                           </div>
-                          <p className={`text-sm truncate ${conv.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
-                            {conv.last_message}
-                          </p>
+                          <div className="overflow-hidden flex-1">
+                            <div className="flex justify-between items-center">
+                              <p className="font-bold truncate">{conv.display_name}</p>
+                              {conv.unread_count > 0 && (
+                                <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                  {conv.unread_count}
+                                </span>
+                              )}
+                            </div>
+                            <p className={`text-sm truncate ${conv.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
+                              {conv.last_message}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  {conversations.length === 0 && groupChats.length === 0 && (
-                    <div className="p-4 text-center text-gray-500 text-sm">No messages yet.</div>
-                  )}
+                    ))}
+                    {conversations.length === 0 && groupChats.length === 0 && (
+                      <div className="p-4 text-center text-gray-500 text-sm">No messages yet.</div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Chat Area */}
-              <div className="w-2/3 flex flex-col">
-                {activeChat ? (
-                  <>
-                    <div className="p-4 border-b border-gray-800 font-bold flex items-center gap-3">
+              {activeChat && (
+                <div className="w-full flex flex-col">
+                  <div className="p-4 border-b border-gray-800 font-bold flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => setActiveChat(null)} className="p-2 hover:bg-gray-800 rounded-full">
+                        <ArrowLeft size={20} />
+                      </button>
                       <div className="w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
                         {activeChat.avatar_url ? <img src={activeChat.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
                       </div>
                       {activeChat.name}
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                      {chatMessages.map((msg, i) => {
-                        const isMe = msg.sender_id !== activeChat.id;
-                        return (
-                          <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
+                    {!isGroupChat && (
+                      <button 
+                        onClick={handleResetChat}
+                        className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-full transition"
+                        title="Reset Conversation"
+                      >
+                        <Trash2 size={20} />
+                      </button>
+                    )}
+                  </div>
+                  <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {hasMoreMessages && (
+                      <div className="flex justify-center py-2">
+                        <button 
+                          onClick={() => fetchChatMessages(activeChat.id, isGroupChat, chatMessages[0]?.id)}
+                          disabled={isLoadingMoreMessages}
+                          className="text-xs font-bold text-orange-500 hover:text-orange-400 bg-orange-500/10 px-4 py-2 rounded-full transition disabled:opacity-50"
+                        >
+                          {isLoadingMoreMessages ? 'Loading...' : 'Load older messages'}
+                        </button>
+                      </div>
+                    )}
+                    {chatMessages.map((msg, i) => {
+                      const currentUser = users.find(u => u.is_ai === 0);
+                      const isMe = msg.sender_id === currentUser?.id;
+                      const sender = users.find(u => u.id === msg.sender_id);
+                      return (
+                        <div key={i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} gap-1 w-full`}>
+                          {!isMe && isGroupChat && sender && (
+                            <span className="text-xs text-gray-400 ml-9">{sender.display_name}</span>
+                          )}
+                          <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
                             {!isMe && (
-                              <img src={activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0 mb-1" />
+                              <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0 mb-1" />
                             )}
-                            <div className={`max-w-[70%] rounded-2xl p-3 ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
-                              {msg.content}
+                            <div className={`max-w-[75%] rounded-2xl p-3 whitespace-pre-wrap break-words ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
+                              {(msg.content || '').trim()}
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                    <div className="p-4 border-t border-gray-800">
-                      <form onSubmit={handleSendMsg} className="flex gap-2 items-center">
-                        <TagTextarea 
-                          users={users}
-                          value={newChatMsg}
-                          onValueChange={setNewChatMsg}
-                          placeholder="Start a new message" 
-                          className="flex-1 bg-gray-900 border border-gray-700 rounded-2xl px-4 py-2 outline-none focus:border-orange-500 resize-none min-h-[40px] max-h-[120px]"
-                          rows={1}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              handleSendMsg(e);
-                            }
-                          }}
-                        />
-                        <button type="submit" className="bg-orange-500 text-white p-2 rounded-full hover:bg-orange-600 flex-shrink-0">
-                          <Send size={20} />
-                        </button>
-                      </form>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center text-gray-500">
-                    Select a conversation
+                          <span className="text-[10px] text-gray-500 px-2">
+                            {formatTimestamp(msg.created_at)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-              </div>
+                  <div className="p-4 border-t border-gray-800">
+                    <form onSubmit={handleSendMsg} className="flex gap-2 items-end">
+                      <TagTextarea 
+                        users={users}
+                        value={newChatMsg}
+                        onValueChange={setNewChatMsg}
+                        placeholder="Start a new message" 
+                        className="flex-1 bg-gray-900 border border-gray-700 rounded-2xl px-4 py-3 outline-none focus:border-orange-500 resize-none min-h-[100px] max-h-[300px]"
+                        rows={3}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendMsg(e);
+                          }
+                        }}
+                      />
+                      <button type="submit" className="bg-orange-500 text-white p-3 rounded-full hover:bg-orange-600 flex-shrink-0 mb-1">
+                        <Send size={24} />
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1172,25 +1409,77 @@ export default function App() {
 
           {activeTab === 'universe_details' && viewingUniverse && (
             <div className="p-6 max-w-4xl mx-auto">
-              <button onClick={() => setActiveTab('universes')} className="flex items-center gap-2 text-gray-400 hover:text-white mb-6">
-                <ArrowLeft size={20} /> Back to Universes
-              </button>
+              <div className="flex justify-between items-center mb-6">
+                <button onClick={() => setActiveTab('universes')} className="flex items-center gap-2 text-gray-400 hover:text-white">
+                  <ArrowLeft size={20} /> Back to Universes
+                </button>
+                {!isEditingUniverse && (
+                  <button 
+                    onClick={() => setIsEditingUniverse(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition"
+                  >
+                    <Settings size={18} /> Edit Universe
+                  </button>
+                )}
+              </div>
               
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8 flex flex-col md:flex-row gap-6 items-start">
-                <div className="w-32 h-32 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
-                  {viewingUniverse.image_url ? (
-                    <img src={viewingUniverse.image_url} alt={viewingUniverse.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  ) : (
-                    <Globe size={64} className="m-auto mt-8 text-gray-500" />
-                  )}
-                </div>
-                <div>
-                  <h2 className="text-3xl font-bold mb-2">{viewingUniverse.name}</h2>
-                  <p className="text-gray-400 mb-4">{viewingUniverseCharacters.length} characters</p>
-                  {viewingUniverse.description && (
-                    <p className="text-gray-300 whitespace-pre-wrap">{viewingUniverse.description}</p>
-                  )}
-                </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8">
+                {isEditingUniverse ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Universe Image URL</label>
+                      <input
+                        type="text"
+                        value={editUniverseImageUrl}
+                        onChange={(e) => setEditUniverseImageUrl(e.target.value)}
+                        placeholder="https://example.com/image.jpg"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Lore / Description</label>
+                      <textarea
+                        value={editUniverseDescription}
+                        onChange={(e) => setEditUniverseDescription(e.target.value)}
+                        placeholder="Describe the lore and context of this universe..."
+                        className="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 h-32 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
+                      />
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                      <button
+                        onClick={handleUpdateUniverse}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-bold transition"
+                      >
+                        Save Changes
+                      </button>
+                      <button
+                        onClick={() => setIsEditingUniverse(false)}
+                        className="flex-1 bg-gray-800 hover:bg-gray-700 py-3 rounded-xl font-bold transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col md:flex-row gap-6 items-start">
+                    <div className="w-32 h-32 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
+                      {viewingUniverse.image_url ? (
+                        <img src={viewingUniverse.image_url} alt={viewingUniverse.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <Globe size={64} className="m-auto mt-8 text-gray-500" />
+                      )}
+                    </div>
+                    <div>
+                      <h2 className="text-3xl font-bold mb-2">{viewingUniverse.name}</h2>
+                      <p className="text-gray-400 mb-4">{viewingUniverseCharacters.length} characters</p>
+                      {viewingUniverse.description ? (
+                        <p className="text-gray-300 whitespace-pre-wrap">{viewingUniverse.description}</p>
+                      ) : (
+                        <p className="text-gray-500 italic">No lore information added yet.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <h3 className="text-xl font-bold mb-4">Characters in this Universe</h3>
@@ -1567,6 +1856,43 @@ export default function App() {
                           </div>
                         )}
                       </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-2">Online Time (Optional - Default: Always Online)</label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+                          {ONLINE_TIME_WINDOWS.map(window => (
+                            <label key={window.value} className="flex items-center gap-2 cursor-pointer group">
+                              <input 
+                                type="checkbox" 
+                                checked={profileOnlineTimes.includes(window.value)}
+                                onChange={e => {
+                                  if (e.target.checked) {
+                                    setProfileOnlineTimes(prev => [...prev, window.value]);
+                                  } else {
+                                    setProfileOnlineTimes(prev => prev.filter(t => t !== window.value));
+                                  }
+                                }}
+                                className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-orange-500 focus:ring-orange-500 focus:ring-offset-gray-900"
+                              />
+                              <span className="text-sm text-gray-300 group-hover:text-white transition">{window.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
+                        <div className="flex items-center gap-4">
+                          <input 
+                            type="range" 
+                            min="1" max="10" 
+                            value={profileActivityLevel} 
+                            onChange={e => setProfileActivityLevel(parseInt(e.target.value))}
+                            className="w-full accent-orange-500"
+                          />
+                          <span className="text-white font-bold w-6 text-center">{profileActivityLevel}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1680,9 +2006,12 @@ export default function App() {
                 <div key={u.id} className={`flex items-center gap-3 group ${!u.is_active ? 'opacity-50 grayscale' : ''}`}>
                   <div 
                     onClick={() => handleViewProfile(u.id)}
-                    className="w-10 h-10 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
+                    className="relative w-10 h-10 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
                   >
                     {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
+                    {u.is_ai === 1 && (
+                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-900 ${isUserOnline(u) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(u) ? 'Online' : 'Offline'}></div>
+                    )}
                   </div>
                   <div 
                     onClick={() => handleViewProfile(u.id)}
@@ -1764,14 +2093,24 @@ export default function App() {
               <div className="h-32 bg-gradient-to-r from-orange-500 to-yellow-500"></div>
               <div className="px-6 pb-6">
                 <div className="relative -mt-12 mb-4">
-                  <div className="w-24 h-24 rounded-full border-4 border-gray-900 bg-gray-800 overflow-hidden">
+                  <div className="relative w-24 h-24 rounded-full border-4 border-gray-900 bg-gray-800 overflow-hidden">
                     {viewingProfile.avatar_url ? <img src={viewingProfile.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={48} className="m-auto mt-4" />}
                   </div>
+                  {viewingProfile.is_ai === 1 && (
+                    <div className={`absolute bottom-1 left-1 w-6 h-6 rounded-full border-4 border-gray-900 ${isUserOnline(viewingProfile) ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}`} title={isUserOnline(viewingProfile) ? 'Online' : 'Offline'}></div>
+                  )}
                 </div>
                 
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h2 className="text-2xl font-bold">{viewingProfile.display_name}</h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-2xl font-bold">{viewingProfile.display_name}</h2>
+                      {viewingProfile.is_ai === 1 && (
+                        <span className={`text-[10px] uppercase tracking-widest font-black px-2 py-0.5 rounded-full ${isUserOnline(viewingProfile) ? 'bg-green-500/20 text-green-500 border border-green-500/30' : 'bg-gray-500/20 text-gray-500 border border-gray-500/30'}`}>
+                          {isUserOnline(viewingProfile) ? 'Online' : 'Offline'}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-gray-500">@{viewingProfile.username}</p>
                     {viewingProfile.universe_id && universes.find(u => u.id === viewingProfile.universe_id) && (
                       <div 
@@ -1784,12 +2123,25 @@ export default function App() {
                     )}
                   </div>
                   {viewingProfile.username !== 'real_user' && (
-                    <button 
-                      onClick={() => handleFollow(viewingProfile.id)}
-                      className={`font-bold px-6 py-2 rounded-full transition ${viewingProfile.is_followed ? 'bg-gray-800 text-white' : 'bg-white text-black'}`}
-                    >
-                      {viewingProfile.is_followed ? 'Following' : 'Follow'}
-                    </button>
+                    <div className="flex gap-2">
+                      {viewingProfile.is_ai === 1 && (
+                        <button 
+                          onClick={() => {
+                            setViewingProfile(null);
+                            handleEditProfile(viewingProfile);
+                          }}
+                          className="font-bold px-4 py-2 rounded-full transition bg-gray-800 text-white hover:bg-gray-700 flex items-center gap-2"
+                        >
+                          <Settings size={16} /> Edit
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => handleFollow(viewingProfile.id)}
+                        className={`font-bold px-6 py-2 rounded-full transition ${viewingProfile.is_followed ? 'bg-gray-800 text-white' : 'bg-white text-black'}`}
+                      >
+                        {viewingProfile.is_followed ? 'Following' : 'Follow'}
+                      </button>
+                    </div>
                   )}
                 </div>
                 
@@ -1950,8 +2302,15 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-2">Select Members</label>
+                  <input
+                    type="text"
+                    value={groupSearchQuery}
+                    onChange={e => setGroupSearchQuery(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 mb-2 outline-none focus:border-orange-500 text-sm"
+                    placeholder="Search characters..."
+                  />
                   <div className="max-h-60 overflow-y-auto space-y-2 border border-gray-800 rounded-xl p-2">
-                    {users.filter(u => u.is_ai === 1).map(user => (
+                    {users.filter(u => u.is_ai === 1 && u.display_name.toLowerCase().includes(groupSearchQuery.toLowerCase())).map(user => (
                       <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer">
                         <input 
                           type="checkbox" 

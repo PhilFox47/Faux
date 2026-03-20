@@ -18,6 +18,10 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Extract flex-1 from className to apply to container
+  const isFlex1 = className?.includes('flex-1');
+  const textareaClassName = className?.replace('flex-1', '').trim();
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -85,12 +89,12 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
     .slice(0, 5);
 
   return (
-    <div className="relative w-full" ref={containerRef}>
+    <div className={`relative ${isFlex1 ? 'flex-1' : 'w-full'}`} ref={containerRef}>
       <textarea
         ref={textareaRef}
         value={value}
         onChange={handleInput}
-        className={className}
+        className={`w-full ${textareaClassName}`}
         {...props}
       />
       {showDropdown && filteredUsers.length > 0 && (
