@@ -840,7 +840,7 @@ async function startServer() {
 
     for (const group of groups as any[]) {
       group.members = db.prepare(`
-        SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_ai
+        SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times
         FROM users u
         JOIN group_chat_members gcm ON u.id = gcm.user_id
         WHERE gcm.group_chat_id = ?
@@ -983,7 +983,7 @@ async function startServer() {
     // Get latest message per conversation
     const conversations = db.prepare(`
       SELECT 
-        u.id as other_user_id, u.username, u.display_name, u.avatar_url,
+        u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times,
         dm.content as last_message, dm.created_at, dm.is_read,
         dm.sender_id,
         (SELECT COUNT(*) FROM direct_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread_count

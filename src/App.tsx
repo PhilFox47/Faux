@@ -204,15 +204,16 @@ export default function App() {
       hour12: false
     }).format(now);
     
-    const [currentHour, currentMinute] = userTime.split(':').map(Number);
+    let [currentHour, currentMinute] = userTime.split(':').map(Number);
+    if (currentHour === 24) currentHour = 0;
     const currentTimeInMinutes = currentHour * 60 + currentMinute;
 
     return onlineTimes.some((window: string) => {
       const parts = window.split('-');
       if (parts.length !== 2) return false;
       const [start, end] = parts;
-      const [startH, startM] = start.split(':').map(Number);
-      const [endH, endM] = end.split(':').map(Number);
+      const [startH, startM] = start.trim().split(':').map(Number);
+      const [endH, endM] = end.trim().split(':').map(Number);
       
       const startTotal = startH * 60 + startM;
       const endTotal = endH * 60 + endM;
@@ -1237,8 +1238,13 @@ export default function App() {
                         className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-gray-900' : ''}`}
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
-                            <Users size={24} />
+                          <div className="relative w-12 h-12 flex-shrink-0 cursor-pointer">
+                            <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                              <Users size={24} />
+                            </div>
+                            {group.members?.some((m: any) => m.is_ai === 1 && isUserOnline(m)) && (
+                              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-gray-800 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" title="AI Member Online"></div>
+                            )}
                           </div>
                           <div className="overflow-hidden flex-1">
                             <div className="flex justify-between items-center">
@@ -1263,8 +1269,13 @@ export default function App() {
                         className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-gray-900' : ''}`}
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
-                            {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
+                          <div className="relative w-12 h-12 flex-shrink-0 cursor-pointer">
+                            <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                              {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
+                            </div>
+                            {conv.is_ai === 1 && (
+                              <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-gray-800 ${isUserOnline(conv) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(conv) ? 'Online' : 'Offline'}></div>
+                            )}
                           </div>
                           <div className="overflow-hidden flex-1">
                             <div className="flex justify-between items-center">
@@ -1297,8 +1308,24 @@ export default function App() {
                       <button onClick={() => setActiveChat(null)} className="p-2 hover:bg-gray-800 rounded-full">
                         <ArrowLeft size={20} />
                       </button>
-                      <div className="w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
-                        {activeChat.avatar_url ? <img src={activeChat.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
+                      <div className="relative w-8 h-8 flex-shrink-0">
+                        <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                          {activeChat.avatar_url ? <img src={activeChat.avatar_url} alt="" className="w-full h-full object-cover" /> : (isGroupChat ? <Users size={16} /> : <User size={16} />)}
+                        </div>
+                        {(() => {
+                          if (isGroupChat) {
+                            const group = groupChats.find(g => g.id === activeChat.id);
+                            if (group?.members?.some((m: any) => m.is_ai === 1 && isUserOnline(m))) {
+                              return <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-gray-900 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" title="AI Member Online"></div>;
+                            }
+                          } else {
+                            const user = users.find(u => u.id === activeChat.id);
+                            if (user?.is_ai === 1) {
+                              return <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-gray-900 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>;
+                            }
+                          }
+                          return null;
+                        })()}
                       </div>
                       {activeChat.name}
                     </div>
@@ -1335,7 +1362,12 @@ export default function App() {
                           )}
                           <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
                             {!isMe && (
-                              <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0 mb-1" />
+                              <div className="relative">
+                                <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0 mb-1" />
+                                {sender?.is_ai === 1 && (
+                                  <div className={`absolute bottom-1 -right-0.5 w-2 h-2 rounded-full border border-gray-900 ${isUserOnline(sender) ? 'bg-green-500' : 'bg-gray-500'}`} title={isUserOnline(sender) ? 'Online' : 'Offline'}></div>
+                                )}
+                              </div>
                             )}
                             <div className={`max-w-[75%] rounded-2xl p-3 whitespace-pre-wrap break-words ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
                               {(msg.content || '').trim()}
@@ -2006,9 +2038,11 @@ export default function App() {
                 <div key={u.id} className={`flex items-center gap-3 group ${!u.is_active ? 'opacity-50 grayscale' : ''}`}>
                   <div 
                     onClick={() => handleViewProfile(u.id)}
-                    className="relative w-10 h-10 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
+                    className="relative w-10 h-10 flex-shrink-0 cursor-pointer"
                   >
-                    {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
+                    <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                      {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
+                    </div>
                     {u.is_ai === 1 && (
                       <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-900 ${isUserOnline(u) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(u) ? 'Online' : 'Offline'}></div>
                     )}
@@ -2324,8 +2358,11 @@ export default function App() {
                           }}
                           className="w-5 h-5 rounded border-gray-700 text-orange-500 focus:ring-orange-500 bg-gray-900"
                         />
-                        <div className="w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
+                        <div className="relative w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
                           {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
+                          {user.is_ai === 1 && (
+                            <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-gray-900 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>
+                          )}
                         </div>
                         <span className="font-medium">{user.display_name}</span>
                       </label>
