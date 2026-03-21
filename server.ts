@@ -110,10 +110,10 @@ async function triggerPostComments(postId: number, postType: string) {
       // Add 1-5 likes to the post
       addLikesToPostOrComment(postId, null, Math.floor(Math.random() * 5) + 1);
 
-      const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-      if (realUser && post.user_id === realUser.id) {
+      const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(post.user_id) as any;
+      if (postAuthor && postAuthor.is_ai === 0) {
         db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-          .run(realUser.id, randomAi.id, info.lastInsertRowid);
+          .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
       }
     }
   }
@@ -212,9 +212,54 @@ async function startServer() {
   // Initialize Database
   initDb();
 
+  const getRealUser = (req: any) => {
+    const userId = req.headers['x-user-id'];
+    if (userId) {
+      return db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
+    }
+    return db.prepare("SELECT * FROM users WHERE is_ai = 0 ORDER BY id ASC LIMIT 1").get() as any;
+  };
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  app.get("/api/real-users", (req, res) => {
+    const users = db.prepare("SELECT id, username, display_name, avatar_url, role, pin IS NOT NULL AND pin != '' as has_pin FROM users WHERE is_ai = 0 ORDER BY id ASC").all();
+    res.json(users);
+  });
+
+  app.post("/api/login", (req, res) => {
+    const { userId, pin } = req.body;
+    const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (user.pin && user.pin !== pin) {
+      return res.status(401).json({ error: "Invalid PIN" });
+    }
+
+    res.json({ success: true, user: { id: user.id, username: user.username, display_name: user.display_name, avatar_url: user.avatar_url, role: user.role } });
+  });
+
+  app.post("/api/real-users", (req, res) => {
+    const { username, display_name, pin } = req.body;
+    const adminUser = getRealUser(req);
+    
+    if (!adminUser || adminUser.role !== 'admin') {
+      return res.status(403).json({ error: "Only admins can create real users" });
+    }
+
+    try {
+      const stmt = db.prepare("INSERT INTO users (username, display_name, pin, is_ai, role) VALUES (?, ?, ?, 0, 'user')");
+      const info = stmt.run(username, display_name || username, pin || null);
+      res.json({ success: true, id: info.lastInsertRowid });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
   });
 
   // Settings
@@ -317,7 +362,7 @@ async function startServer() {
 
   // Users
   app.get("/api/users/:id/posts", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     const userId = user ? user.id : 0;
     const posts = db.prepare(`
       SELECT p.*, u.username, u.display_name, u.avatar_url,
@@ -353,9 +398,10 @@ async function startServer() {
   });
 
   app.get("/api/users", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     const users = db.prepare(`
       SELECT u.*, 
+      (u.pin IS NOT NULL AND u.pin != '') as has_pin,
       (SELECT COUNT(*) FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
       (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
       (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
@@ -489,14 +535,31 @@ async function startServer() {
   });
 
   app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level } = req.body;
+    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin } = req.body;
     try {
       db.prepare(`
         UPDATE users 
-        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?
+        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?
         WHERE id = ?
-      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, req.params.id);
+      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, req.params.id);
 
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/users/:id/pin", (req, res) => {
+    const { pin } = req.body;
+    const userId = req.params.id;
+    const loggedInUser = getRealUser(req);
+
+    if (!loggedInUser || (loggedInUser.id !== parseInt(userId) && loggedInUser.role !== 'admin')) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    try {
+      db.prepare("UPDATE users SET pin = ? WHERE id = ?").run(pin || null, userId);
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
@@ -513,10 +576,9 @@ async function startServer() {
       const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5);
       const userId = info.lastInsertRowid;
       
-      // Real user follows new character by default, and character follows real user
-      const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+      // AI character follows real user by default, but real user does NOT follow AI character by default
+      const user = getRealUser(req);
       if (user) {
-        db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user.id, userId);
         db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(userId, user.id);
       }
 
@@ -527,7 +589,7 @@ async function startServer() {
   });
 
   app.post("/api/users/:id/follow", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     try {
@@ -541,7 +603,7 @@ async function startServer() {
 
   // Notifications
   app.get("/api/notifications", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const notifications = db.prepare(`
@@ -556,7 +618,7 @@ async function startServer() {
   });
 
   app.post("/api/notifications/read", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     db.prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?").run(user.id);
@@ -622,7 +684,7 @@ async function startServer() {
 
   // Posts
   app.get("/api/posts", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     const userId = user ? user.id : 0;
     
     const posts = db.prepare(`
@@ -632,15 +694,16 @@ async function startServer() {
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
+      WHERE p.user_id = ? OR p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?)
       ORDER BY p.created_at DESC
       LIMIT 50
-    `).all(userId);
+    `).all(userId, userId, userId);
     res.json(posts);
   });
 
   app.post("/api/posts", async (req, res) => {
     const { content, post_type } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const stmt = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, ?)");
@@ -666,7 +729,7 @@ async function startServer() {
 
   // Comments
   app.get("/api/posts/:id/comments", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     const userId = user ? user.id : 0;
 
     const comments = db.prepare(`
@@ -683,7 +746,7 @@ async function startServer() {
 
   app.post("/api/posts/:id/comments", (req, res) => {
     const { content, parent_id } = req.body;
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const stmt = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)");
@@ -713,15 +776,16 @@ async function startServer() {
 
   // Delete and Edit Posts
   app.get("/api/posts/:id", (req, res) => {
+    const user = getRealUser(req);
     const post = db.prepare(`
       SELECT p.*, u.username, u.display_name, u.avatar_url,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as likes,
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments,
-      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = (SELECT id FROM users WHERE is_ai = 0)) as is_liked
+      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
       WHERE p.id = ?
-    `).get(req.params.id);
+    `).get(user?.id || 0, req.params.id);
     if (post) {
       res.json(post);
     } else {
@@ -796,7 +860,7 @@ async function startServer() {
 
   // Likes
   app.post("/api/posts/:id/like", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     try {
@@ -810,7 +874,7 @@ async function startServer() {
   });
 
   app.post("/api/comments/:id/like", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     try {
@@ -824,7 +888,7 @@ async function startServer() {
 
   // Group Chats
   app.get("/api/group-chats", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const groups = db.prepare(`
@@ -852,7 +916,7 @@ async function startServer() {
 
   app.post("/api/group-chats", (req, res) => {
     const { name, member_ids } = req.body;
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     try {
@@ -873,7 +937,7 @@ async function startServer() {
   });
 
   app.get("/api/group-chats/:id/messages", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (user) {
       db.prepare("UPDATE group_chat_members SET last_read_at = CURRENT_TIMESTAMP WHERE group_chat_id = ? AND user_id = ?").run(req.params.id, user.id);
     }
@@ -903,7 +967,7 @@ async function startServer() {
 
   app.post("/api/group-chats/:id/messages", async (req, res) => {
     const { content } = req.body;
-    const user = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const groupId = req.params.id;
@@ -977,7 +1041,7 @@ async function startServer() {
 
   // DMs
   app.get("/api/dms", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     // Get latest message per conversation
@@ -1001,7 +1065,7 @@ async function startServer() {
   });
 
   app.get("/api/dms/:userId", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const limit = parseInt(req.query.limit as string) || 40;
@@ -1031,7 +1095,7 @@ async function startServer() {
   });
 
   app.delete("/api/dms/:userId", (req, res) => {
-    const user = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
+    const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     db.prepare("DELETE FROM direct_messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)")
@@ -1043,7 +1107,7 @@ async function startServer() {
   app.post("/api/dms/:userId", async (req, res) => {
     try {
       const { content } = req.body;
-      const user = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").get() as any;
+      const user = getRealUser(req);
       if (!user) return res.status(401).json({ error: "User not found" });
 
       const receiverId = req.params.userId;
@@ -1258,8 +1322,9 @@ async function startServer() {
       };
 
       if (Math.random() < probMessage && activeAiUsers.length > 0) {
-        const realUser = db.prepare("SELECT * FROM users WHERE is_ai = 0").get() as any;
-        if (realUser) {
+        const realUsers = db.prepare("SELECT * FROM users WHERE is_ai = 0").all() as any[];
+        if (realUsers.length > 0) {
+          const realUser = realUsers[Math.floor(Math.random() * realUsers.length)];
           let randomAi: any;
           const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
           
@@ -1301,15 +1366,16 @@ async function startServer() {
           if (dmContent) {
             db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
               .run(randomAi.id, realUser.id, dmContent.trim());
-            console.log(`${randomAi.display_name} sent a DM to real_user`);
+            console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
           }
         }
       } 
 
       // Handle unreplied DMs from real user
-      const realUser = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").get() as any;
-      if (realUser && activeAiUsers.length > 0) {
-        const unrepliedDms = db.prepare(`
+      const realUsers = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").all() as any[];
+      for (const realUser of realUsers) {
+        if (activeAiUsers.length > 0) {
+          const unrepliedDms = db.prepare(`
           SELECT dm.*, u.online_times
           FROM direct_messages dm
           JOIN users u ON dm.receiver_id = u.id
@@ -1346,12 +1412,13 @@ async function startServer() {
               if (reply) {
                 db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
                   .run(aiUser.id, realUser.id, reply);
-                console.log(`${aiUser.display_name} replied to pending DM from real_user`);
+                console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
               }
             }
           }
         }
       }
+    }
       
       if (Math.random() < probPost && allAiUsers.length > 0) {
         const onlineAiUsers = allAiUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
@@ -1410,16 +1477,15 @@ async function startServer() {
             
             if (lastMsg && lastMsg.sender_id !== selectedAi.id) {
               const history = db.prepare(`
-                SELECT m.sender_id, m.content, u.display_name, m.created_at
+                SELECT m.sender_id, m.content, u.display_name, m.created_at, u.is_ai
                 FROM group_chat_messages m
                 JOIN users u ON m.sender_id = u.id
                 WHERE m.group_chat_id = ?
                 ORDER BY m.created_at DESC LIMIT 15
               `).all(group.id).reverse();
 
-              const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
               const formattedHistory = history.map((msg: any) => ({
-                role: msg.sender_id === realUser?.id ? 'user' : 'assistant',
+                role: msg.is_ai === 0 ? 'user' : 'assistant',
                 content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`
               }));
 
@@ -1497,10 +1563,10 @@ async function startServer() {
                 // Add 1-5 likes to the comment being replied to
                 addLikesToPostOrComment(commentData.post_id, commentData.id, Math.floor(Math.random() * 5) + 1);
 
-                const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-                if (realUser && commentData.user_id === realUser.id) {
+                const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(commentData.user_id) as any;
+                if (commentAuthor && commentAuthor.is_ai === 0) {
                   db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-                    .run(realUser.id, randomAi.id, info.lastInsertRowid);
+                    .run(commentAuthor.id, randomAi.id, info.lastInsertRowid);
                 }
               }
             }
@@ -1533,10 +1599,10 @@ async function startServer() {
                 // Add 1-5 likes to the post being replied to
                 addLikesToPostOrComment(postData.id, null, Math.floor(Math.random() * 5) + 1);
 
-                const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-                if (realUser && postData.user_id === realUser.id) {
+                const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(postData.user_id) as any;
+                if (postAuthor && postAuthor.is_ai === 0) {
                   db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-                    .run(realUser.id, randomAi.id, info.lastInsertRowid);
+                    .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
                 }
               }
             }
@@ -1685,10 +1751,10 @@ async function startServer() {
               addLikesToPostOrComment(randomPost.id, null, Math.floor(Math.random() * 5) + 1);
 
               // Notify real user if they own the post
-              const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-              if (realUser && randomPost.user_id === realUser.id) {
+              const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomPost.user_id) as any;
+              if (postAuthor && postAuthor.is_ai === 0) {
                 db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-                  .run(realUser.id, randomAi.id, info.lastInsertRowid);
+                  .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
               }
             }
           } else {
@@ -1709,10 +1775,10 @@ async function startServer() {
               addLikesToPostOrComment(randomComment.post_id, randomComment.id, Math.floor(Math.random() * 5) + 1);
 
               // Notify real user if they own the comment
-              const realUser = db.prepare("SELECT id FROM users WHERE is_ai = 0").get() as any;
-              if (realUser && randomComment.user_id === realUser.id) {
+              const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomComment.user_id) as any;
+              if (commentAuthor && commentAuthor.is_ai === 0) {
                 db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-                  .run(realUser.id, randomAi.id, info.lastInsertRowid);
+                  .run(commentAuthor.id, randomAi.id, info.lastInsertRowid);
               }
             }
           }

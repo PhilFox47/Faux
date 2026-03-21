@@ -1,9 +1,53 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 
 export default function App() {
+  const [loggedInUser, setLoggedInUser] = useState<any>(null);
+  const [realUsers, setRealUsers] = useState<any[]>([]);
+  const [loginPin, setLoginPin] = useState('');
+  const [selectedLoginUser, setSelectedLoginUser] = useState<any>(null);
+
+  const apiFetch = useCallback(async (resource: RequestInfo | URL, config?: RequestInit) => {
+    const headers = new Headers(config?.headers);
+    if (loggedInUser) {
+      headers.set('x-user-id', loggedInUser.id.toString());
+    }
+    return window.fetch(resource, { ...config, headers });
+  }, [loggedInUser]);
+
+  useEffect(() => {
+    if (!loggedInUser) {
+      apiFetch('/api/real-users')
+        .then(res => res.json())
+        .then(data => setRealUsers(data))
+        .catch(err => console.error(err));
+    }
+  }, [loggedInUser, apiFetch]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLoginUser) return;
+    try {
+      const res = await apiFetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: selectedLoginUser.id, pin: loginPin })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLoggedInUser(data.user);
+        setLoginPin('');
+        setSelectedLoginUser(null);
+      } else {
+        showToast(data.error || "Login failed");
+      }
+    } catch (e) {
+      showToast("Error logging in");
+    }
+  };
+
   const [activeTab, setActiveTab] = useState('home');
   const [posts, setPosts] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -87,7 +131,7 @@ export default function App() {
 
   const handleViewPost = async (postId: number) => {
     try {
-      const res = await fetch(`/api/posts/${postId}`);
+      const res = await apiFetch(`/api/posts/${postId}`);
       if (res.ok) {
         const post = await res.json();
         setViewingPostData(post);
@@ -103,7 +147,7 @@ export default function App() {
   const handleNotificationClick = async (notif: any) => {
     // Mark as read immediately
     if (!notif.is_read) {
-      fetch(`/api/notifications/${notif.id}/read`, { method: 'POST' });
+      apiFetch(`/api/notifications/${notif.id}/read`, { method: 'POST' });
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: 1 } : n));
     }
 
@@ -113,7 +157,7 @@ export default function App() {
     } else if (notif.type === 'like_comment' || notif.type === 'comment' || notif.type === 'reply') {
       // For comment-related notifications, reference_id is the comment ID
       try {
-        const res = await fetch(`/api/comments/${notif.reference_id}`);
+        const res = await apiFetch(`/api/comments/${notif.reference_id}`);
         if (res.ok) {
           const comment = await res.json();
           setHighlightedPostId(comment.post_id);
@@ -145,6 +189,7 @@ export default function App() {
   const [editingProfile, setEditingProfile] = useState<any>(null);
   const [profileName, setProfileName] = useState('');
   const [profileUsername, setProfileUsername] = useState('');
+  const [profilePin, setProfilePin] = useState('');
   const [profileBio, setProfileBio] = useState('');
   const [profileAvatar, setProfileAvatar] = useState('');
   const [profileDescription, setProfileDescription] = useState('');
@@ -170,7 +215,7 @@ export default function App() {
   const [apiLogs, setApiLogs] = useState<any[]>([]);
 
   const fetchApiLogs = () => {
-    fetch('/api/logs')
+    apiFetch('/api/logs')
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -238,9 +283,11 @@ export default function App() {
 
   const handleEditProfile = async (user: any) => {
     if (!user) return;
+    setActiveTab('profile');
     setEditingProfile(user);
     setProfileName(user.display_name || '');
     setProfileUsername(user.username || '');
+    setProfilePin(user.pin || '');
     setProfileBio(user.bio || '');
     setProfileAvatar(user.avatar_url || '');
     setProfileDescription(user.description || '');
@@ -261,7 +308,7 @@ export default function App() {
     
     // Fetch relationships
     try {
-      const res = await fetch(`/api/users/${user.id}/relationships`);
+      const res = await apiFetch(`/api/users/${user.id}/relationships`);
       const data = await res.json();
       setProfileRelationships(data);
     } catch (e) {
@@ -275,14 +322,14 @@ export default function App() {
     e.preventDefault();
     if (!newRelUserId || !newRelDesc) return;
     try {
-      await fetch(`/api/users/${editingProfile.id}/relationships`, {
+      await apiFetch(`/api/users/${editingProfile.id}/relationships`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id_2: newRelUserId, description: newRelDesc })
       });
       setNewRelUserId('');
       setNewRelDesc('');
-      const res = await fetch(`/api/users/${editingProfile.id}/relationships`);
+      const res = await apiFetch(`/api/users/${editingProfile.id}/relationships`);
       setProfileRelationships(await res.json());
       showToast('Relationship added!');
     } catch (e) {
@@ -292,10 +339,10 @@ export default function App() {
 
   const handleDeleteRelationship = async (otherId: number) => {
     try {
-      await fetch(`/api/users/${editingProfile.id}/relationships/${otherId}`, {
+      await apiFetch(`/api/users/${editingProfile.id}/relationships/${otherId}`, {
         method: 'DELETE'
       });
-      const res = await fetch(`/api/users/${editingProfile.id}/relationships`);
+      const res = await apiFetch(`/api/users/${editingProfile.id}/relationships`);
       setProfileRelationships(await res.json());
       showToast('Relationship deleted!');
     } catch (e) {
@@ -309,7 +356,7 @@ export default function App() {
     
     let finalUniverseId = profileUniverseId;
     if (profileUniverseId === -1 && profileNewUniverseName.trim()) {
-      const res = await fetch('/api/universes', {
+      const res = await apiFetch('/api/universes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: profileNewUniverseName.trim() })
@@ -321,7 +368,7 @@ export default function App() {
       }
     }
 
-    const res = await fetch(`/api/users/${editingProfile.id}`, {
+    const res = await apiFetch(`/api/users/${editingProfile.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -336,7 +383,8 @@ export default function App() {
         artstyle: profileArtstyle,
         universe_id: finalUniverseId,
         online_times: JSON.stringify(profileOnlineTimes),
-        activity_level: profileActivityLevel
+        activity_level: profileActivityLevel,
+        pin: profilePin
       })
     });
     
@@ -346,6 +394,15 @@ export default function App() {
       return;
     }
     
+    if (loggedInUser && loggedInUser.id === editingProfile.id) {
+      setLoggedInUser({
+        ...loggedInUser,
+        display_name: profileName,
+        username: profileUsername,
+        avatar_url: profileAvatar
+      });
+    }
+
     setEditingProfile(null);
     setProfileNewUniverseName('');
     fetchUsers();
@@ -361,7 +418,7 @@ export default function App() {
       title: "Delete Character",
       message: `Are you sure you want to delete ${editingProfile.display_name}? This action cannot be undone.`,
       onConfirm: async () => {
-        await fetch(`/api/users/${editingProfile.id}`, {
+        await apiFetch(`/api/users/${editingProfile.id}`, {
           method: 'DELETE'
         });
         setEditingProfile(null);
@@ -375,27 +432,27 @@ export default function App() {
   };
 
   const fetchPosts = () => {
-    fetch('/api/posts').then(r => r.json()).then(setPosts);
+    apiFetch('/api/posts').then(r => r.json()).then(setPosts);
   };
 
   const fetchUsers = () => {
-    fetch('/api/users').then(r => r.json()).then(setUsers);
+    apiFetch('/api/users').then(r => r.json()).then(setUsers);
   };
 
   const fetchUniverses = () => {
-    fetch('/api/universes').then(r => r.json()).then(setUniverses);
+    apiFetch('/api/universes').then(r => r.json()).then(setUniverses);
   };
 
   const fetchConversations = () => {
-    fetch('/api/dms').then(r => r.json()).then(setConversations);
+    apiFetch('/api/dms').then(r => r.json()).then(setConversations);
   };
 
   const fetchGroupChats = () => {
-    fetch('/api/group-chats').then(r => r.json()).then(setGroupChats);
+    apiFetch('/api/group-chats').then(r => r.json()).then(setGroupChats);
   };
 
   const fetchNotifications = () => {
-    fetch('/api/notifications').then(r => r.json()).then(setNotifications);
+    apiFetch('/api/notifications').then(r => r.json()).then(setNotifications);
   };
 
   const fetchChatMessages = (id: number, isGroup: boolean = false, beforeId?: number) => {
@@ -409,7 +466,7 @@ export default function App() {
       skipNextScroll.current = true;
     }
     
-    fetch(url).then(r => r.json()).then(data => {
+    apiFetch(url).then(r => r.json()).then(data => {
       if (beforeId) {
         setChatMessages(prev => [...data, ...prev]);
         setIsLoadingMoreMessages(false);
@@ -421,7 +478,7 @@ export default function App() {
   };
 
   const fetchSettings = () => {
-    fetch('/api/settings').then(r => r.json()).then(data => {
+    apiFetch('/api/settings').then(r => r.json()).then(data => {
       if (data) {
         setAiEnabled(data.ai_enabled === 1);
         if (data.model_name) setModelName(data.model_name);
@@ -440,7 +497,7 @@ export default function App() {
   const toggleNsfw = async () => {
     const newVal = !allowNsfw;
     setAllowNsfw(newVal);
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ allow_nsfw: newVal ? 1 : 0 })
@@ -453,7 +510,7 @@ export default function App() {
     if (newSettings.prob_image_post !== undefined) setProbImagePost(newSettings.prob_image_post);
     if (newSettings.prob_comment !== undefined) setProbComment(newSettings.prob_comment);
     if (newSettings.prob_message !== undefined) setProbMessage(newSettings.prob_message);
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newSettings)
@@ -463,7 +520,7 @@ export default function App() {
   const [showResetConfirm, setShowResetConfirm] = useState<'all' | 'content' | null>(null);
 
   const handleResetDb = async () => {
-    await fetch('/api/reset-db', { method: 'POST' });
+    await apiFetch('/api/reset-db', { method: 'POST' });
     fetchPosts();
     fetchUsers();
     fetchConversations();
@@ -473,7 +530,7 @@ export default function App() {
   };
 
   const handleResetContent = async () => {
-    await fetch('/api/reset-content', { method: 'POST' });
+    await apiFetch('/api/reset-content', { method: 'POST' });
     fetchPosts();
     fetchConversations();
     fetchNotifications();
@@ -486,7 +543,7 @@ export default function App() {
     if (!user) return;
     setViewingProfile(user);
     setVisibleProfilePosts(30);
-    const res = await fetch(`/api/users/${userId}/posts`);
+    const res = await apiFetch(`/api/users/${userId}/posts`);
     const posts = await res.json();
     setViewingProfilePosts(posts);
   };
@@ -498,7 +555,7 @@ export default function App() {
     setEditUniverseDescription(universe.description || '');
     setEditUniverseImageUrl(universe.image_url || '');
     setIsEditingUniverse(false);
-    const res = await fetch(`/api/universes/${universeId}/characters`);
+    const res = await apiFetch(`/api/universes/${universeId}/characters`);
     const chars = await res.json();
     setViewingUniverseCharacters(chars);
     setActiveTab('universe_details');
@@ -507,7 +564,7 @@ export default function App() {
   const handleUpdateUniverse = async () => {
     if (!viewingUniverse) return;
     try {
-      const res = await fetch(`/api/universes/${viewingUniverse.id}`, {
+      const res = await apiFetch(`/api/universes/${viewingUniverse.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -547,7 +604,7 @@ export default function App() {
     if (!targetId) return;
     setIsForcingPost(true);
     try {
-      const res = await fetch(`/api/users/${targetId}/force-post`, {
+      const res = await apiFetch(`/api/users/${targetId}/force-post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type })
@@ -571,7 +628,7 @@ export default function App() {
   };
 
   const handleShowLikers = async (type: 'post' | 'comment', id: number) => {
-    const res = await fetch(`/api/${type}s/${id}/likers`);
+    const res = await apiFetch(`/api/${type}s/${id}/likers`);
     const data = await res.json();
     setLikersModal({ type, id, users: data });
   };
@@ -588,7 +645,7 @@ export default function App() {
 
   const handleReply = async (postId: number, parentId: number) => {
     if (!replyContent.trim()) return;
-    await fetch(`/api/posts/${postId}/comments`, {
+    await apiFetch(`/api/posts/${postId}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: replyContent, parent_id: parentId })
@@ -600,6 +657,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!loggedInUser) return;
     fetchPosts();
     fetchUsers();
     fetchUniverses();
@@ -616,12 +674,12 @@ export default function App() {
       if (activeChat) fetchChatMessages(activeChat.id, isGroupChat);
     }, 10000); // Poll every 10s
     return () => clearInterval(interval);
-  }, [activeChat, isGroupChat]);
+  }, [activeChat, isGroupChat, loggedInUser]);
 
   const handleCreateGroupChat = async () => {
     if (!newGroupName.trim() || selectedGroupMembers.length === 0) return;
     try {
-      const res = await fetch('/api/group-chats', {
+      const res = await apiFetch('/api/group-chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newGroupName, member_ids: selectedGroupMembers })
@@ -643,7 +701,7 @@ export default function App() {
 
   const handleCreatePost = async () => {
     if (!newPostContent.trim()) return;
-    await fetch('/api/posts', {
+    await apiFetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: newPostContent, post_type: newPostType })
@@ -658,7 +716,7 @@ export default function App() {
     
     let finalUniverseId = charUniverseId;
     if (charUniverseId === -1 && charNewUniverseName.trim()) {
-      const res = await fetch('/api/universes', {
+      const res = await apiFetch('/api/universes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: charNewUniverseName.trim() })
@@ -670,7 +728,7 @@ export default function App() {
       }
     }
 
-    await fetch('/api/users', {
+    await apiFetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -716,7 +774,7 @@ export default function App() {
     setIsGeneratingPersona(true);
     setPersonaChatResponse('');
     try {
-      const res = await fetch('/api/generate-persona', {
+      const res = await apiFetch('/api/generate-persona', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: charName, extraInfo: charPersona })
@@ -734,12 +792,12 @@ export default function App() {
   };
 
   const handleLike = async (postId: number) => {
-    await fetch(`/api/posts/${postId}/like`, { method: 'POST' });
+    await apiFetch(`/api/posts/${postId}/like`, { method: 'POST' });
     fetchPosts();
   };
 
   const handleFollow = async (userId: number) => {
-    await fetch(`/api/users/${userId}/follow`, { method: 'POST' });
+    await apiFetch(`/api/users/${userId}/follow`, { method: 'POST' });
     fetchUsers();
   };
 
@@ -750,12 +808,12 @@ export default function App() {
     // Optimistic update
     const msg = newChatMsg.trim();
     setNewChatMsg('');
-    const realUser = users.find(u => u.is_ai === 0);
+    const realUser = loggedInUser;
     setChatMessages(prev => [...prev, { sender_id: realUser?.id || 1, content: msg, created_at: new Date().toISOString() }]);
 
     const endpoint = isGroupChat ? `/api/group-chats/${activeChat.id}/messages` : `/api/dms/${activeChat.id}`;
     
-    await fetch(endpoint, {
+    await apiFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: msg })
@@ -768,7 +826,7 @@ export default function App() {
   const toggleAiEnabled = async () => {
     const newVal = !aiEnabled;
     setAiEnabled(newVal);
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ai_enabled: newVal })
@@ -776,7 +834,7 @@ export default function App() {
   };
 
   const saveModelName = async () => {
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model_name: modelName })
@@ -785,7 +843,7 @@ export default function App() {
   };
 
   const saveImageModelName = async () => {
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image_model_name: imageModelName })
@@ -794,7 +852,7 @@ export default function App() {
   };
 
   const saveApiKey = async () => {
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ api_key: apiKey })
@@ -806,7 +864,7 @@ export default function App() {
     setIsTestingApi(true);
     setTestResult(null);
     try {
-      const res = await fetch('/api/test-ai', { method: 'POST' });
+      const res = await apiFetch('/api/test-ai', { method: 'POST' });
       const data = await res.json();
       setTestResult(data);
     } catch (e: any) {
@@ -822,7 +880,7 @@ export default function App() {
       title: "Reset Conversation",
       message: "Are you sure you want to delete all messages in this conversation? This cannot be undone.",
       onConfirm: async () => {
-        await fetch(`/api/dms/${activeChat.id}`, { method: 'DELETE' });
+        await apiFetch(`/api/dms/${activeChat.id}`, { method: 'DELETE' });
         setChatMessages([]);
         fetchConversations();
         setConfirmModal(null);
@@ -831,7 +889,7 @@ export default function App() {
   };
 
   const markNotificationsRead = async () => {
-    await fetch('/api/notifications/read', { method: 'POST' });
+    await apiFetch('/api/notifications/read', { method: 'POST' });
     fetchNotifications();
   };
 
@@ -858,6 +916,77 @@ export default function App() {
   const [visibleCharacters, setVisibleCharacters] = useState(20);
   const [visiblePosts, setVisiblePosts] = useState(30);
   const [visibleProfilePosts, setVisibleProfilePosts] = useState(30);
+
+  if (!loggedInUser) {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center font-sans">
+        {toastMessage && (
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-full shadow-xl font-bold animate-pulse">
+            {toastMessage}
+          </div>
+        )}
+        <div className="mb-12">
+          <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-16 object-contain" referrerPolicy="no-referrer" />
+        </div>
+        <h1 className="text-4xl font-bold mb-10 text-center">Who's watching?</h1>
+        <div className="flex flex-wrap justify-center gap-8 max-w-4xl px-4">
+          {realUsers.map(user => (
+            <div 
+              key={user.id} 
+              className="flex flex-col items-center gap-4 cursor-pointer group"
+              onClick={() => setSelectedLoginUser(user)}
+            >
+              <div className={`w-32 h-32 rounded-xl overflow-hidden border-4 transition-all duration-200 ${selectedLoginUser?.id === user.id ? 'border-white scale-110' : 'border-transparent group-hover:border-gray-400 group-hover:scale-105'}`}>
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt={user.display_name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+                    <User size={64} className="text-gray-500" />
+                  </div>
+                )}
+              </div>
+              <span className={`text-xl font-medium transition-colors ${selectedLoginUser?.id === user.id ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>
+                {user.display_name}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {selectedLoginUser && (
+          <div className="mt-16 w-full max-w-md px-4 animate-in fade-in slide-in-from-bottom-4">
+            <form onSubmit={handleLogin} className="flex flex-col gap-4">
+              {selectedLoginUser.has_pin && (
+                <div className="flex flex-col gap-2">
+                  <label className="text-center text-gray-400 font-medium">Enter PIN for {selectedLoginUser.display_name}</label>
+                  <input 
+                    type="password" 
+                    value={loginPin}
+                    onChange={e => setLoginPin(e.target.value)}
+                    className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-center text-2xl tracking-widest text-white focus:outline-none focus:border-orange-500"
+                    placeholder="••••"
+                    autoFocus
+                  />
+                </div>
+              )}
+              <button 
+                type="submit"
+                className="w-full bg-white text-black font-bold text-lg py-3 rounded-xl hover:bg-gray-200 transition"
+              >
+                Continue
+              </button>
+              <button 
+                type="button"
+                onClick={() => { setSelectedLoginUser(null); setLoginPin(''); }}
+                className="w-full bg-transparent text-gray-400 font-medium py-2 rounded-xl hover:text-white transition"
+              >
+                Cancel
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black text-white flex justify-center font-sans">
@@ -890,7 +1019,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="w-full max-w-7xl flex h-screen">
+      <div className="w-full max-w-7xl flex min-h-screen">
         
         {/* Left Sidebar */}
         <div className="w-20 xl:w-64 border-r border-gray-800 p-4 flex flex-col justify-between h-full sticky top-0">
@@ -952,21 +1081,29 @@ export default function App() {
               Post
             </button>
           </div>
-          <div 
-            onClick={() => handleEditProfile(users.find(u => u.is_ai === 0))}
-            className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
-          >
-            <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
-              {users.find(u => u.is_ai === 0)?.avatar_url ? (
-                <img src={users.find(u => u.is_ai === 0)?.avatar_url} alt="" className="w-full h-full object-cover" />
-              ) : (
-                users.find(u => u.is_ai === 0)?.display_name?.[0] || 'Y'
-              )}
+          <div className="flex flex-col gap-2">
+            <div 
+              onClick={() => handleEditProfile(loggedInUser)}
+              className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
+            >
+              <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
+                {loggedInUser?.avatar_url ? (
+                  <img src={loggedInUser.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  loggedInUser?.display_name?.[0] || 'Y'
+                )}
+              </div>
+              <div className="hidden xl:block">
+                <p className="font-bold text-sm">{loggedInUser?.display_name || 'You'}</p>
+                <p className="text-gray-500 text-sm">@{loggedInUser?.username || 'real_user'}</p>
+              </div>
             </div>
-            <div className="hidden xl:block">
-              <p className="font-bold text-sm">{users.find(u => u.is_ai === 0)?.display_name || 'You'}</p>
-              <p className="text-gray-500 text-sm">@{users.find(u => u.is_ai === 0)?.username || 'real_user'}</p>
-            </div>
+            <button 
+              onClick={() => setLoggedInUser(null)}
+              className="text-xs text-gray-500 hover:text-white transition text-center py-2"
+            >
+              Log out
+            </button>
           </div>
         </div>
 
@@ -981,10 +1118,10 @@ export default function App() {
               {/* Compose Post */}
               <div className="border-b border-gray-800 p-4 flex gap-4">
                 <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
-                  {users.find(u => u.is_ai === 0)?.avatar_url ? (
-                    <img src={users.find(u => u.is_ai === 0)?.avatar_url} alt="" className="w-full h-full object-cover" />
+                  {loggedInUser?.avatar_url ? (
+                    <img src={loggedInUser?.avatar_url} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    users.find(u => u.is_ai === 0)?.display_name?.[0] || 'Y'
+                    loggedInUser?.display_name?.[0] || 'Y'
                   )}
                 </div>
                 <div className="flex-1">
@@ -1033,6 +1170,8 @@ export default function App() {
               <div>
                 {posts.slice(0, visiblePosts).map(post => (
                   <PostItem 
+                    apiFetch={apiFetch}
+                    loggedInUser={loggedInUser}
                     key={post.id} 
                     post={post} 
                     onLike={() => handleLike(post.id)} 
@@ -1352,7 +1491,7 @@ export default function App() {
                       </div>
                     )}
                     {chatMessages.map((msg, i) => {
-                      const currentUser = users.find(u => u.is_ai === 0);
+                      const currentUser = loggedInUser;
                       const isMe = msg.sender_id === currentUser?.id;
                       const sender = users.find(u => u.id === msg.sender_id);
                       return (
@@ -1538,6 +1677,54 @@ export default function App() {
               <div className="space-y-8">
                 <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
                   <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                    <Lock size={20} className="text-orange-500" />
+                    Security
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Update Login PIN</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="password" 
+                          maxLength={4}
+                          placeholder="New 4-digit PIN"
+                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                          id="settings-pin-input"
+                        />
+                        <button 
+                          onClick={async () => {
+                            const pinInput = document.getElementById('settings-pin-input') as HTMLInputElement;
+                            const newPin = pinInput.value;
+                            if (newPin && !/^\d{4}$/.test(newPin)) {
+                              return showToast("PIN must be 4 digits");
+                            }
+                            const res = await apiFetch(`/api/users/${loggedInUser?.id}/pin`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ pin: newPin || null })
+                            });
+                            if (res.ok) {
+                              showToast("PIN updated successfully!");
+                              pinInput.value = '';
+                              fetchUsers();
+                              apiFetch('/api/real-users').then(r => r.json()).then(setRealUsers);
+                            } else {
+                              const err = await res.json();
+                              showToast(err.error || "Failed to update PIN");
+                            }
+                          }}
+                          className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition"
+                        >
+                          Update
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">Leave empty to remove PIN. Only 4-digit numeric PINs are supported.</p>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                     <Globe size={20} className="text-orange-500" />
                     Localization
                   </h3>
@@ -1559,167 +1746,253 @@ export default function App() {
                   </div>
                 </section>
 
-                <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                    <Settings size={20} className="text-orange-500" />
-                    AI Generation
-                  </h3>
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <p className="font-medium">Enable AI Background Worker</p>
-                      <p className="text-sm text-gray-500 mt-1">When enabled, AI characters will automatically post, comment, and send DMs.</p>
-                    </div>
-                    <button 
-                      onClick={toggleAiEnabled}
-                      className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${aiEnabled ? 'bg-orange-500' : 'bg-gray-700'}`}
-                    >
-                      <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${aiEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <p className="font-medium">Allow NSFW Content</p>
-                      <p className="text-sm text-gray-500 mt-1">When enabled, AI characters may generate explicit language and mature themes.</p>
-                    </div>
-                    <button 
-                      onClick={toggleNsfw}
-                      className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${allowNsfw ? 'bg-orange-500' : 'bg-gray-700'}`}
-                    >
-                      <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${allowNsfw ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-400 mb-1">NanoGPT API Key</label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="password" 
-                        value={apiKey}
-                        onChange={e => setApiKey(e.target.value)}
-                        placeholder="sk-nano-..."
-                        className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
-                      />
-                      <button onClick={saveApiKey} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
-                        Save
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mb-6">
-                    <h4 className="text-md font-bold mb-2">AI Activity Probabilities (per Day)</h4>
-                    <p className="text-sm text-gray-400 mb-4">Adjust how often AI characters perform actions on average per day.</p>
+                {loggedInUser?.role === 'admin' && (
+                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <Users size={20} className="text-orange-500" />
+                      User Management
+                    </h3>
+                    <p className="text-sm text-gray-400 mb-4">Add new real users to the platform. They will have their own profile, timeline, and messages.</p>
                     
-                    <div className="space-y-4">
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      const form = e.target as HTMLFormElement;
+                      const username = (form.elements.namedItem('username') as HTMLInputElement).value;
+                      const display_name = (form.elements.namedItem('display_name') as HTMLInputElement).value;
+                      const pin = (form.elements.namedItem('pin') as HTMLInputElement).value;
+                      
+                      try {
+                        const res = await apiFetch('/api/real-users', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ username, display_name, pin })
+                        });
+                        if (res.ok) {
+                          showToast("User added successfully!");
+                          form.reset();
+                          apiFetch('/api/real-users').then(r => r.json()).then(setRealUsers);
+                        } else {
+                          const err = await res.json();
+                          showToast(err.error || "Failed to add user");
+                        }
+                      } catch (err) {
+                        showToast("Error adding user");
+                      }
+                    }} className="space-y-4 border border-gray-800 p-4 rounded-xl">
+                      <h4 className="font-bold text-sm">Add New User</h4>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Text Posts ({probPost}/day)</label>
-                        <input 
-                          type="range" min="0" max="500" value={probPost} 
-                          onChange={e => handleUpdateSettings({ prob_post: parseInt(e.target.value) })}
-                          className="w-full accent-orange-500" 
-                        />
+                        <label className="block text-xs font-medium text-gray-400 mb-1">Username (Required)</label>
+                        <input name="username" required type="text" className="w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm" />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Image Posts ({probImagePost}/day)</label>
-                        <input 
-                          type="range" min="0" max="100" value={probImagePost} 
-                          onChange={e => handleUpdateSettings({ prob_image_post: parseInt(e.target.value) })}
-                          className="w-full accent-orange-500" 
-                        />
+                        <label className="block text-xs font-medium text-gray-400 mb-1">Display Name</label>
+                        <input name="display_name" type="text" className="w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm" />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Comments ({probComment}/day)</label>
-                        <input 
-                          type="range" min="0" max="2000" value={probComment} 
-                          onChange={e => handleUpdateSettings({ prob_comment: parseInt(e.target.value) })}
-                          className="w-full accent-orange-500" 
-                        />
+                        <label className="block text-xs font-medium text-gray-400 mb-1">PIN (Optional, 4 digits recommended)</label>
+                        <input name="pin" type="password" className="w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm" />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Direct Messages ({probMessage}/day)</label>
-                        <input 
-                          type="range" min="0" max="50" value={probMessage} 
-                          onChange={e => handleUpdateSettings({ prob_message: parseInt(e.target.value) })}
-                          className="w-full accent-orange-500" 
-                        />
+                      <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm flex items-center gap-2">
+                        <UserPlus size={16} /> Add User
+                      </button>
+                    </form>
+
+                    <div className="mt-6">
+                      <h4 className="font-bold text-sm mb-2">Existing Real Users</h4>
+                      <div className="space-y-2">
+                        {realUsers.map(u => (
+                          <div key={u.id} className="flex items-center justify-between bg-gray-950 p-3 rounded-lg border border-gray-800">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-gray-800 overflow-hidden">
+                                {u.avatar_url ? <img src={u.avatar_url} className="w-full h-full object-cover" /> : <User size={16} className="m-2 text-gray-500" />}
+                              </div>
+                              <div>
+                                <div className="font-bold text-sm">{u.display_name} {u.role === 'admin' && <span className="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded ml-1">ADMIN</span>}</div>
+                                <div className="text-xs text-gray-500">@{u.username}</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {u.has_pin && <span className="text-xs text-green-500 flex items-center gap-1"><UserCheck size={12} /> PIN Set</span>}
+                              <button 
+                                onClick={() => handleEditProfile(u)}
+                                className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition"
+                                title="Edit User"
+                              >
+                                <Settings size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
+                  </section>
+                )}
 
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-400 mb-1">LLM Model (NanoGPT)</label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        value={modelName}
-                        onChange={e => setModelName(e.target.value)}
-                        className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
-                      />
-                      <button onClick={saveModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
-                        Save
+                {loggedInUser?.role === 'admin' && (
+                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <Settings size={20} className="text-orange-500" />
+                      AI Generation
+                    </h3>
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <p className="font-medium">Enable AI Background Worker</p>
+                        <p className="text-sm text-gray-500 mt-1">When enabled, AI characters will automatically post, comment, and send DMs.</p>
+                      </div>
+                      <button 
+                        onClick={toggleAiEnabled}
+                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${aiEnabled ? 'bg-orange-500' : 'bg-gray-700'}`}
+                      >
+                        <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${aiEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                     </div>
-                  </div>
-                  
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Image Model (NanoGPT)</label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        value={imageModelName}
-                        onChange={e => setImageModelName(e.target.value)}
-                        className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
-                      />
-                      <button onClick={saveImageModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
-                        Save
+
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <p className="font-medium">Allow NSFW Content</p>
+                        <p className="text-sm text-gray-500 mt-1">When enabled, AI characters may generate explicit language and mature themes.</p>
+                      </div>
+                      <button 
+                        onClick={toggleNsfw}
+                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${allowNsfw ? 'bg-orange-500' : 'bg-gray-700'}`}
+                      >
+                        <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${allowNsfw ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-4">
-                    <button 
-                      onClick={handleTestApi}
-                      disabled={isTestingApi}
-                      className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2"
-                    >
-                      {isTestingApi && <Loader2 size={16} className="animate-spin" />}
-                      Test Connection
-                    </button>
-                    <button onClick={fetchApiLogs} className="text-sm text-gray-500 hover:text-orange-500 transition">Refresh Logs</button>
-                  </div>
-
-                  {testResult && (
-                    <div className={`mt-4 p-4 rounded-lg ${testResult.success ? 'bg-green-900/30 text-green-400 border border-green-900' : 'bg-red-900/30 text-red-400 border border-red-900'}`}>
-                      {testResult.success ? (
-                        <p className="text-sm">Connection Successful! {testResult.message}</p>
-                      ) : (
-                        <p className="text-sm">Connection Failed: {testResult.error}</p>
-                      )}
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-gray-400 mb-1">NanoGPT API Key</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="password" 
+                          value={apiKey}
+                          onChange={e => setApiKey(e.target.value)}
+                          placeholder="sk-nano-..."
+                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                        />
+                        <button onClick={saveApiKey} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                          Save
+                        </button>
+                      </div>
                     </div>
-                  )}
-                </section>
 
-                <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-500">
-                    <Trash2 size={20} />
-                    Danger Zone
-                  </h3>
-                  <p className="text-sm text-gray-400 mb-4">Resetting the database will delete data. This action cannot be undone.</p>
-                  <div className="flex gap-4">
-                    <button 
-                      onClick={() => setShowResetConfirm('content')}
-                      className="bg-orange-500/10 text-orange-500 border border-orange-500/50 px-6 py-3 rounded-xl font-bold hover:bg-orange-500 hover:text-white transition"
-                    >
-                      Delete All Posts, Comments & Messages
-                    </button>
-                    <button 
-                      onClick={() => setShowResetConfirm('all')}
-                      className="bg-red-500/10 text-red-500 border border-red-500/50 px-6 py-3 rounded-xl font-bold hover:bg-red-500 hover:text-white transition"
-                    >
-                      Delete All (Purge Everything)
-                    </button>
-                  </div>
-                </section>
+                    <div className="mb-6">
+                      <h4 className="text-md font-bold mb-2">AI Activity Probabilities (per Day)</h4>
+                      <p className="text-sm text-gray-400 mb-4">Adjust how often AI characters perform actions on average per day.</p>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Text Posts ({probPost}/day)</label>
+                          <input 
+                            type="range" min="0" max="500" value={probPost} 
+                            onChange={e => handleUpdateSettings({ prob_post: parseInt(e.target.value) })}
+                            className="w-full accent-orange-500" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Image Posts ({probImagePost}/day)</label>
+                          <input 
+                            type="range" min="0" max="100" value={probImagePost} 
+                            onChange={e => handleUpdateSettings({ prob_image_post: parseInt(e.target.value) })}
+                            className="w-full accent-orange-500" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Comments ({probComment}/day)</label>
+                          <input 
+                            type="range" min="0" max="2000" value={probComment} 
+                            onChange={e => handleUpdateSettings({ prob_comment: parseInt(e.target.value) })}
+                            className="w-full accent-orange-500" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Direct Messages ({probMessage}/day)</label>
+                          <input 
+                            type="range" min="0" max="50" value={probMessage} 
+                            onChange={e => handleUpdateSettings({ prob_message: parseInt(e.target.value) })}
+                            className="w-full accent-orange-500" 
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-gray-400 mb-1">LLM Model (NanoGPT)</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={modelName}
+                          onChange={e => setModelName(e.target.value)}
+                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                        />
+                        <button onClick={saveModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Image Model (NanoGPT)</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={imageModelName}
+                          onChange={e => setImageModelName(e.target.value)}
+                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                        />
+                        <button onClick={saveImageModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                          Save
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <button 
+                        onClick={handleTestApi}
+                        disabled={isTestingApi}
+                        className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2"
+                      >
+                        {isTestingApi && <Loader2 size={16} className="animate-spin" />}
+                        Test Connection
+                      </button>
+                      <button onClick={fetchApiLogs} className="text-sm text-gray-500 hover:text-orange-500 transition">Refresh Logs</button>
+                    </div>
+
+                    {testResult && (
+                      <div className={`mt-4 p-4 rounded-lg ${testResult.success ? 'bg-green-900/30 text-green-400 border border-green-900' : 'bg-red-900/30 text-red-400 border border-red-900'}`}>
+                        {testResult.success ? (
+                          <p className="text-sm">Connection Successful! {testResult.message}</p>
+                        ) : (
+                          <p className="text-sm">Connection Failed: {testResult.error}</p>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                )}
+
+                {loggedInUser?.role === 'admin' && (
+                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-500">
+                      <Trash2 size={20} />
+                      Danger Zone
+                    </h3>
+                    <p className="text-sm text-gray-400 mb-4">Resetting the database will delete data. This action cannot be undone.</p>
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={() => setShowResetConfirm('content')}
+                        className="bg-orange-500/10 text-orange-500 border border-orange-500/50 px-6 py-3 rounded-xl font-bold hover:bg-orange-500 hover:text-white transition"
+                      >
+                        Delete All Posts, Comments & Messages
+                      </button>
+                      <button 
+                        onClick={() => setShowResetConfirm('all')}
+                        className="bg-red-500/10 text-red-500 border border-red-500/50 px-6 py-3 rounded-xl font-bold hover:bg-red-500 hover:text-white transition"
+                      >
+                        Delete All (Purge Everything)
+                      </button>
+                    </div>
+                  </section>
+                )}
 
                 {showResetConfirm && (
                   <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1750,68 +2023,72 @@ export default function App() {
                   </div>
                 )}
 
-                <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-orange-400">
-                    <Zap size={20} />
-                    AI Controls
-                  </h3>
-                  <p className="text-sm text-gray-400 mb-4">Force a random AI character to generate a new post immediately.</p>
-                  <div className="flex gap-4">
-                    <button 
-                      onClick={async () => {
-                        const aiUsers = users.filter(u => u.is_ai);
-                        if (aiUsers.length === 0) return showToast("No AI characters available");
-                        const randomUser = aiUsers[Math.floor(Math.random() * aiUsers.length)];
-                        await handleForcePost('text', randomUser.id);
-                      }}
-                      disabled={isForcingPost}
-                      className="bg-gray-800 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-700 transition disabled:opacity-50"
-                    >
-                      Force Random Text Post
-                    </button>
-                    <button 
-                      onClick={async () => {
-                        const aiUsers = users.filter(u => u.is_ai);
-                        if (aiUsers.length === 0) return showToast("No AI characters available");
-                        const randomUser = aiUsers[Math.floor(Math.random() * aiUsers.length)];
-                        await handleForcePost('image', randomUser.id);
-                      }}
-                      disabled={isForcingPost}
-                      className="bg-gray-800 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-700 transition disabled:opacity-50"
-                    >
-                      Force Random Image Post
-                    </button>
-                  </div>
-                </section>
+                {loggedInUser?.role === 'admin' && (
+                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-orange-400">
+                      <Zap size={20} />
+                      AI Controls
+                    </h3>
+                    <p className="text-sm text-gray-400 mb-4">Force a random AI character to generate a new post immediately.</p>
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={async () => {
+                          const aiUsers = users.filter(u => u.is_ai);
+                          if (aiUsers.length === 0) return showToast("No AI characters available");
+                          const randomUser = aiUsers[Math.floor(Math.random() * aiUsers.length)];
+                          await handleForcePost('text', randomUser.id);
+                        }}
+                        disabled={isForcingPost}
+                        className="bg-gray-800 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-700 transition disabled:opacity-50"
+                      >
+                        Force Random Text Post
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          const aiUsers = users.filter(u => u.is_ai);
+                          if (aiUsers.length === 0) return showToast("No AI characters available");
+                          const randomUser = aiUsers[Math.floor(Math.random() * aiUsers.length)];
+                          await handleForcePost('image', randomUser.id);
+                        }}
+                        disabled={isForcingPost}
+                        className="bg-gray-800 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-700 transition disabled:opacity-50"
+                      >
+                        Force Random Image Post
+                      </button>
+                    </div>
+                  </section>
+                )}
 
-                <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-blue-400">
-                    <MessageSquare size={20} />
-                    API Logs
-                  </h3>
-                  <p className="text-sm text-gray-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
-                  <div className="space-y-4 max-h-96 overflow-y-auto">
-                    {apiLogs.map((log: any) => (
-                      <div key={log.id} className="bg-gray-800 p-4 rounded-lg text-xs font-mono">
-                        <div className="flex justify-between text-gray-400 mb-2">
-                          <span className="font-bold text-orange-400">{log.endpoint}</span>
-                          <span>{formatTimestamp(log.created_at)}</span>
+                {loggedInUser?.role === 'admin' && (
+                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-blue-400">
+                      <MessageSquare size={20} />
+                      API Logs
+                    </h3>
+                    <p className="text-sm text-gray-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
+                    <div className="space-y-4 max-h-96 overflow-y-auto">
+                      {apiLogs.map((log: any) => (
+                        <div key={log.id} className="bg-gray-800 p-4 rounded-lg text-xs font-mono">
+                          <div className="flex justify-between text-gray-400 mb-2">
+                            <span className="font-bold text-orange-400">{log.endpoint}</span>
+                            <span>{formatTimestamp(log.created_at)}</span>
+                          </div>
+                          <div className="mb-2">
+                            <span className="text-gray-500">Request:</span>
+                            <pre className="whitespace-pre-wrap overflow-x-auto mt-1 p-2 bg-black rounded">{log.request_payload}</pre>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Response:</span>
+                            <pre className="whitespace-pre-wrap overflow-x-auto mt-1 p-2 bg-black rounded">{log.response_payload}</pre>
+                          </div>
                         </div>
-                        <div className="mb-2">
-                          <span className="text-gray-500">Request:</span>
-                          <pre className="whitespace-pre-wrap overflow-x-auto mt-1 p-2 bg-black rounded">{log.request_payload}</pre>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Response:</span>
-                          <pre className="whitespace-pre-wrap overflow-x-auto mt-1 p-2 bg-black rounded">{log.response_payload}</pre>
-                        </div>
-                      </div>
-                    ))}
-                    {apiLogs.length === 0 && (
-                      <p className="text-center text-gray-500 py-4">No logs found. Click refresh to load.</p>
-                    )}
-                  </div>
-                </section>
+                      ))}
+                      {apiLogs.length === 0 && (
+                        <p className="text-center text-gray-500 py-4">No logs found. Click refresh to load.</p>
+                      )}
+                    </div>
+                  </section>
+                )}
               </div>
             </div>
           )}
@@ -1828,6 +2105,12 @@ export default function App() {
                   <label className="block text-sm font-medium text-gray-400 mb-1">Username</label>
                   <input required value={profileUsername} onChange={e => setProfileUsername(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
                 </div>
+                {editingProfile.is_ai === 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">Login PIN (Optional)</label>
+                    <input value={profilePin} onChange={e => setProfilePin(e.target.value)} type="password" maxLength={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="4-digit PIN" />
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Profile Picture (URL or Upload)</label>
                   <div className="flex gap-2">
@@ -2104,6 +2387,8 @@ export default function App() {
               </button>
               <div className="p-6 pt-12">
                 <PostItem 
+                  apiFetch={apiFetch}
+                  loggedInUser={loggedInUser}
                   post={viewingPostData} 
                   onLike={() => handleLike(viewingPostData.id)} 
                   onViewProfile={(id) => { setViewingPostData(null); handleViewProfile(id); }}
@@ -2156,9 +2441,9 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {viewingProfile.username !== 'real_user' && (
+                  {viewingProfile.id !== loggedInUser?.id && (
                     <div className="flex gap-2">
-                      {viewingProfile.is_ai === 1 && (
+                      {(viewingProfile.is_ai === 1 || loggedInUser?.role === 'admin') && (
                         <button 
                           onClick={() => {
                             setViewingProfile(null);
@@ -2175,6 +2460,24 @@ export default function App() {
                       >
                         {viewingProfile.is_followed ? 'Following' : 'Follow'}
                       </button>
+                      <button 
+                        onClick={() => {
+                          setActiveTab('messages');
+                          const existingChat = conversations.find(c => c.other_user.id === viewingProfile.id);
+                          if (existingChat) {
+                            setActiveChat(existingChat);
+                            setIsGroupChat(false);
+                            fetchChatMessages(existingChat.id, false);
+                          } else {
+                            setActiveChat({ id: viewingProfile.id, other_user: viewingProfile } as any);
+                            setIsGroupChat(false);
+                            setChatMessages([]);
+                          }
+                        }}
+                        className="bg-gray-800 hover:bg-gray-700 text-white font-bold px-6 py-2 rounded-full transition"
+                      >
+                        Message
+                      </button>
                     </div>
                   )}
                 </div>
@@ -2185,7 +2488,7 @@ export default function App() {
                   <span 
                     className="cursor-pointer hover:underline"
                     onClick={async () => {
-                      const res = await fetch(`/api/users/${viewingProfile.id}/following`);
+                      const res = await apiFetch(`/api/users/${viewingProfile.id}/following`);
                       const data = await res.json();
                       setFollowersModal({ users: data, title: 'Following' });
                     }}
@@ -2195,7 +2498,7 @@ export default function App() {
                   <span 
                     className="cursor-pointer hover:underline"
                     onClick={async () => {
-                      const res = await fetch(`/api/users/${viewingProfile.id}/followers`);
+                      const res = await apiFetch(`/api/users/${viewingProfile.id}/followers`);
                       const data = await res.json();
                       setFollowersModal({ users: data, title: 'Followers' });
                     }}
@@ -2235,6 +2538,8 @@ export default function App() {
                   <div className="space-y-4">
                     {viewingProfilePosts.slice(0, visibleProfilePosts).map(post => (
                       <PostItem 
+                        apiFetch={apiFetch}
+                        loggedInUser={loggedInUser}
                         key={post.id} 
                         post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
                         onLike={() => handleLike(post.id)} 
@@ -2344,7 +2649,7 @@ export default function App() {
                     placeholder="Search characters..."
                   />
                   <div className="max-h-60 overflow-y-auto space-y-2 border border-gray-800 rounded-xl p-2">
-                    {users.filter(u => u.is_ai === 1 && u.display_name.toLowerCase().includes(groupSearchQuery.toLowerCase())).map(user => (
+                    {users.filter(u => u.id !== loggedInUser?.id && u.display_name.toLowerCase().includes(groupSearchQuery.toLowerCase())).map(user => (
                       <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer">
                         <input 
                           type="checkbox" 
@@ -2360,8 +2665,10 @@ export default function App() {
                         />
                         <div className="relative w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
                           {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
-                          {user.is_ai === 1 && (
+                          {user.is_ai === 1 ? (
                             <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-gray-900 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>
+                          ) : (
+                            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-gray-900 bg-blue-500" title="Real User"></div>
                           )}
                         </div>
                         <span className="font-medium">{user.display_name}</span>
@@ -2398,7 +2705,7 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
-function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[] }) {
+function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -2441,7 +2748,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   }, [highlightedPostId, highlightedCommentId, post.id, showComments]);
 
   const fetchComments = () => {
-    fetch(`/api/posts/${post.id}/comments`).then(r => r.json()).then(data => {
+    apiFetch(`/api/posts/${post.id}/comments`).then(r => r.json()).then(data => {
       setComments(data);
       if (highlightedPostId === post.id && highlightedCommentId) {
         setTimeout(() => {
@@ -2464,12 +2771,12 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   }, [showComments]);
 
   const handleDelete = async () => {
-    await fetch(`/api/posts/${post.id}`, { method: 'DELETE' });
+    await apiFetch(`/api/posts/${post.id}`, { method: 'DELETE' });
     onRefresh();
   };
 
   const handleEdit = async () => {
-    await fetch(`/api/posts/${post.id}`, {
+    await apiFetch(`/api/posts/${post.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: editContent })
@@ -2483,7 +2790,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
     const content = parentId ? replyingTo.content : newComment;
     if (!content.trim()) return;
     
-    await fetch(`/api/posts/${post.id}/comments`, {
+    await apiFetch(`/api/posts/${post.id}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content, parent_id: parentId })
@@ -2498,7 +2805,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   };
 
   const handleCommentLike = async (commentId: number) => {
-    await fetch(`/api/comments/${commentId}/like`, { method: 'POST' });
+    await apiFetch(`/api/comments/${commentId}/like`, { method: 'POST' });
     fetchComments();
   };
 
@@ -2610,6 +2917,8 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
         <div className="mt-4 pl-10 space-y-4 border-l-2 border-gray-800 ml-5">
           {rootComments.map(comment => (
             <CommentItem 
+              apiFetch={apiFetch}
+              loggedInUser={loggedInUser}
               key={comment.id} 
               comment={comment} 
               onLike={handleCommentLike} 
@@ -2626,10 +2935,10 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
           
           <form onSubmit={(e) => handleAddComment(e)} className="flex gap-2 mt-4 items-end">
             <div className="w-8 h-8 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs mb-1 overflow-hidden">
-              {users.find(u => u.is_ai === 0)?.avatar_url ? (
-                <img src={users.find(u => u.is_ai === 0)?.avatar_url} alt="" className="w-full h-full object-cover" />
+              {loggedInUser?.avatar_url ? (
+                <img src={loggedInUser?.avatar_url} alt="" className="w-full h-full object-cover" />
               ) : (
-                users.find(u => u.is_ai === 0)?.display_name?.[0] || 'Y'
+                loggedInUser?.display_name?.[0] || 'Y'
               )}
             </div>
             <div className="flex-1">
@@ -2677,7 +2986,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   );
 }
 
-function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[] }) {
+function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users, loggedInUser, apiFetch }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(comment.content);
@@ -2687,12 +2996,12 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
   }, [comment.content]);
 
   const handleDelete = async () => {
-    await fetch(`/api/comments/${comment.id}`, { method: 'DELETE' });
+    await apiFetch(`/api/comments/${comment.id}`, { method: 'DELETE' });
     onRefresh();
   };
 
   const handleEdit = async () => {
-    await fetch(`/api/comments/${comment.id}`, {
+    await apiFetch(`/api/comments/${comment.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: editContent })
@@ -2766,6 +3075,8 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
         <div className="pl-6 space-y-3 border-l border-gray-800 ml-4">
           {comment.replies.map((reply: any) => (
             <CommentItem 
+              apiFetch={apiFetch}
+              loggedInUser={loggedInUser}
               key={reply.id} 
               comment={reply} 
               onLike={onLike}
