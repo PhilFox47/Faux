@@ -221,6 +221,11 @@ async function startServer() {
   };
 
   // API Routes
+  app.get("/api/logs", (req, res) => {
+    const logs = db.prepare("SELECT * FROM api_logs ORDER BY created_at DESC LIMIT 50").all();
+    res.json(logs);
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });

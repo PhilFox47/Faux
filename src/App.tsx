@@ -365,6 +365,10 @@ export default function App() {
         const newUniverse = await res.json();
         finalUniverseId = newUniverse.id;
         fetchUniverses();
+      } else {
+        const err = await res.json();
+        showToast(err.error || "Failed to create universe");
+        return;
       }
     }
 
@@ -725,10 +729,14 @@ export default function App() {
         const newUniverse = await res.json();
         finalUniverseId = newUniverse.id;
         fetchUniverses();
+      } else {
+        const err = await res.json();
+        showToast(err.error || "Failed to create universe");
+        return;
       }
     }
 
-    await apiFetch('/api/users', {
+    const res = await apiFetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -747,6 +755,13 @@ export default function App() {
         activity_level: charActivityLevel
       })
     });
+
+    if (!res.ok) {
+      const err = await res.json();
+      showToast(err.error || "Failed to add character");
+      return;
+    }
+
     setCharName('');
     setCharUsername('');
     setCharBio('');
@@ -763,7 +778,7 @@ export default function App() {
     setCharNewUniverseName('');
     setPersonaChatResponse('');
     fetchUsers();
-    alert('Character added!');
+    showToast('Character added!');
   };
 
   const handleGeneratePersona = async () => {
@@ -2061,10 +2076,18 @@ export default function App() {
 
                 {loggedInUser?.role === 'admin' && (
                   <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-blue-400">
-                      <MessageSquare size={20} />
-                      API Logs
-                    </h3>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold flex items-center gap-2 text-blue-400">
+                        <MessageSquare size={20} />
+                        API Logs
+                      </h3>
+                      <button 
+                        onClick={fetchApiLogs}
+                        className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1 rounded-lg transition-colors"
+                      >
+                        Refresh Logs
+                      </button>
+                    </div>
                     <p className="text-sm text-gray-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
                     <div className="space-y-4 max-h-96 overflow-y-auto">
                       {apiLogs.map((log: any) => (

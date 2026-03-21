@@ -81,17 +81,22 @@ Format your response as a friendly chat message, but make sure all the informati
       max_tokens: 1000,
       temperature: 0.8,
     });
-    const content = response.choices[0].message.content?.trim() || "Failed to generate persona.";
+    const content = response.choices[0].message.content?.trim();
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePersona",
-      JSON.stringify({ model: getModel(), prompt }),
-      content
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8 }),
+      content || "Empty Response"
     );
     
-    return content;
+    return content || "Failed to generate persona.";
   } catch (error: any) {
     console.error("Error generating persona:", error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generatePersona",
+      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+    );
     return "Error: " + error.message;
   }
 }
@@ -172,10 +177,22 @@ Reply with ONLY the ID of the chosen user.`;
       temperature: 0.2,
     });
     const content = response.choices[0].message.content?.trim();
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "pickBestCommenter",
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 10, temperature: 0.2 }),
+      content || "Empty Response"
+    );
+
     const id = parseInt(content || '');
     if (!isNaN(id)) return id;
-  } catch (e) {
-    console.error('Error picking commenter:', e);
+  } catch (error: any) {
+    console.error('Error picking commenter:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "pickBestCommenter",
+      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error")
+    );
   }
   return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
 }
@@ -260,8 +277,8 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePost",
-      JSON.stringify({ model: getModel(), prompt }),
-      content || "Failed"
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 150, temperature: 0.9, archetype: postTypeObj.id }),
+      content || "Empty Response"
     );
     
     return content;
@@ -269,8 +286,8 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
     console.error('Error generating post:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePost",
-      JSON.stringify({ model: getModel(), prompt }),
-      "Error: " + error.message
+      JSON.stringify({ model: getModel(), prompt, archetype: postTypeObj.id, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;
   }
@@ -307,8 +324,8 @@ Keep it short, natural, and in character. Focus on the topic being discussed. Do
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateComment",
-      JSON.stringify({ model: getModel(), prompt }),
-      content || "Failed"
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 100, temperature: 0.8, isReply }),
+      content || "Empty Response"
     );
     
     return content;
@@ -316,8 +333,8 @@ Keep it short, natural, and in character. Focus on the topic being discussed. Do
     console.error('Error generating comment:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateComment",
-      JSON.stringify({ model: getModel(), prompt }),
-      "Error: " + error.message
+      JSON.stringify({ model: getModel(), prompt, isReply, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;
   }
@@ -376,8 +393,8 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not w
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateDM",
-      JSON.stringify({ model: getModel(), prompt }),
-      content || "Failed"
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 300, temperature: 0.8 }),
+      content || "Empty Response"
     );
     
     return content;
@@ -385,8 +402,8 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not w
     console.error('Error generating DM:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateDM",
-      JSON.stringify({ model: getModel(), prompt }),
-      "Error: " + error.message
+      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;
   }
@@ -437,8 +454,8 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "replyToDM",
-      JSON.stringify({ model: getModel(), messages }),
-      content || "Failed"
+      JSON.stringify({ model: getModel(), messages, max_tokens: 600, temperature: 0.8 }),
+      content || "Empty Response"
     );
     
     return content;
@@ -446,8 +463,8 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
     console.error('Error replying to DM:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "replyToDM",
-      JSON.stringify({ model: getModel(), messages }),
-      "Error: " + error.message
+      JSON.stringify({ model: getModel(), messages, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;
   }
@@ -540,10 +557,22 @@ Guidelines:
       max_tokens: 500,
       temperature: 0.7,
     });
-    let content = response.choices[0].message.content?.trim() || "";
-    return content;
-  } catch (error) {
+    let content = response.choices[0].message.content?.trim();
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generateImagePrompt",
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 500, temperature: 0.7 }),
+      content || "Empty Response"
+    );
+
+    return content || "";
+  } catch (error: any) {
     console.error('Error generating image prompt:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generateImagePrompt",
+      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+    );
     return "";
   }
 }
@@ -593,8 +622,8 @@ export async function generateImage(prompt: string) {
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImage",
-      JSON.stringify({ model: model, prompt }),
-      url || "Failed"
+      JSON.stringify({ model: model, prompt, steps: 28, guidance: 3.5 }),
+      url || "Empty Response (No Image Data)"
     );
     
     return url;
@@ -602,8 +631,8 @@ export async function generateImage(prompt: string) {
     console.error('Error generating image:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImage",
-      JSON.stringify({ model: getImageModel(), prompt }),
-      "Error: " + error.message
+      JSON.stringify({ model: getImageModel(), prompt, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;
   }
