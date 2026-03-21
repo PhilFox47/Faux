@@ -22,6 +22,10 @@ function getOpenAI() {
   return new OpenAI({
     apiKey: apiKey,
     baseURL: 'https://nano-gpt.com/api/v1',
+    defaultHeaders: {
+      'X-Title': 'Faux Social Media',
+      'Referer': process.env.APP_URL || 'https://faux-social.run.app',
+    }
   });
 }
 
@@ -45,14 +49,28 @@ function getImageModel() {
 
 export async function testConnection() {
   try {
+    const model = getModel();
     const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
+      model: model,
       messages: [{ role: 'user', content: 'Reply with exactly "API Connection Successful".' }],
       max_tokens: 10,
     });
-    return { success: true, message: response.choices[0].message.content?.trim() };
+    const content = response.choices[0].message.content?.trim();
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "testConnection",
+      JSON.stringify({ model, max_tokens: 10 }),
+      content || "Empty Response"
+    );
+
+    return { success: true, message: content };
   } catch (error: any) {
     console.error('API Test Error:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "testConnection",
+      JSON.stringify({ model: getModel(), error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+    );
     return { success: false, error: error.message };
   }
 }
@@ -82,10 +100,11 @@ Format your response as a friendly chat message, but make sure all the informati
       temperature: 0.8,
     });
     const content = response.choices[0].message.content?.trim();
+    const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePersona",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8 }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8, finish_reason: finishReason }),
       content || "Empty Response"
     );
     
@@ -177,10 +196,11 @@ Reply with ONLY the ID of the chosen user.`;
       temperature: 0.2,
     });
     const content = response.choices[0].message.content?.trim();
+    const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "pickBestCommenter",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10, temperature: 0.2 }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 10, temperature: 0.2, finish_reason: finishReason }),
       content || "Empty Response"
     );
 
@@ -274,11 +294,12 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
       temperature: 0.9,
     });
     const content = response.choices[0].message.content?.trim();
+    const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePost",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 150, temperature: 0.9, archetype: postTypeObj.id }),
-      content || "Empty Response"
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 150, temperature: 0.9, archetype: postTypeObj.id, finish_reason: finishReason }),
+      content || "Empty Response. Full Response: " + JSON.stringify(response)
     );
     
     return content;
@@ -321,10 +342,11 @@ Keep it short, natural, and in character. Focus on the topic being discussed. Do
       temperature: 0.8,
     });
     const content = response.choices[0].message.content?.trim();
+    const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateComment",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 100, temperature: 0.8, isReply }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 100, temperature: 0.8, isReply, finish_reason: finishReason }),
       content || "Empty Response"
     );
     
@@ -390,10 +412,11 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not w
       temperature: 0.8,
     });
     const content = response.choices[0].message.content?.trim();
+    const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateDM",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 300, temperature: 0.8 }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 300, temperature: 0.8, finish_reason: finishReason }),
       content || "Empty Response"
     );
     
@@ -451,10 +474,11 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
       temperature: 0.8,
     });
     const content = response.choices[0].message.content?.trim();
+    const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "replyToDM",
-      JSON.stringify({ model: getModel(), messages, max_tokens: 600, temperature: 0.8 }),
+      JSON.stringify({ model: getModel(), messages, max_tokens: 600, temperature: 0.8, finish_reason: finishReason }),
       content || "Empty Response"
     );
     
@@ -558,10 +582,11 @@ Guidelines:
       temperature: 0.7,
     });
     let content = response.choices[0].message.content?.trim();
+    const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImagePrompt",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 500, temperature: 0.7 }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 500, temperature: 0.7, finish_reason: finishReason }),
       content || "Empty Response"
     );
 

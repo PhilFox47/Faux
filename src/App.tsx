@@ -2089,25 +2089,40 @@ export default function App() {
                       </button>
                     </div>
                     <p className="text-sm text-gray-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
-                    <div className="space-y-4 max-h-96 overflow-y-auto">
-                      {apiLogs.map((log: any) => (
-                        <div key={log.id} className="bg-gray-800 p-4 rounded-lg text-xs font-mono">
-                          <div className="flex justify-between text-gray-400 mb-2">
-                            <span className="font-bold text-orange-400">{log.endpoint}</span>
-                            <span>{formatTimestamp(log.created_at)}</span>
+                    <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                      {apiLogs.map((log: any) => {
+                        let requestObj = {};
+                        try {
+                          requestObj = JSON.parse(log.request_payload);
+                        } catch (e) {}
+                        
+                        return (
+                          <div key={log.id} className="bg-gray-800 p-4 rounded-xl text-xs font-mono border border-gray-700 hover:border-blue-500 transition-colors">
+                            <div className="flex justify-between text-gray-400 mb-3 items-center">
+                              <span className="font-bold text-blue-400 text-sm">{log.endpoint}</span>
+                              <span className="text-[10px] opacity-60">{formatTimestamp(log.created_at)}</span>
+                            </div>
+                            <div className="mb-3 space-y-1">
+                              <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Request Details</div>
+                              <div className="bg-black/30 p-2 rounded border border-white/5 overflow-x-auto whitespace-pre-wrap">
+                                {Object.entries(requestObj).map(([key, val]) => (
+                                  <div key={key} className="mb-1 last:mb-0">
+                                    <span className="text-orange-400">{key}:</span> <span className="text-gray-300">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
+                              <div className={`p-2 rounded border ${log.response_payload.includes('Error') || log.response_payload === 'Empty Response' ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
+                                {log.response_payload}
+                              </div>
+                            </div>
                           </div>
-                          <div className="mb-2">
-                            <span className="text-gray-500">Request:</span>
-                            <pre className="whitespace-pre-wrap overflow-x-auto mt-1 p-2 bg-black rounded">{log.request_payload}</pre>
-                          </div>
-                          <div>
-                            <span className="text-gray-500">Response:</span>
-                            <pre className="whitespace-pre-wrap overflow-x-auto mt-1 p-2 bg-black rounded">{log.response_payload}</pre>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                       {apiLogs.length === 0 && (
-                        <p className="text-center text-gray-500 py-4">No logs found. Click refresh to load.</p>
+                        <p className="text-center text-gray-500 py-4 italic">No logs found. Click refresh to load.</p>
                       )}
                     </div>
                   </section>

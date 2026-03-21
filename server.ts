@@ -355,6 +355,11 @@ async function startServer() {
   app.post("/api/generate-persona", async (req, res) => {
     try {
       const { name, extraInfo } = req.body;
+      db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+        "ROUTE_GENERATE_PERSONA",
+        JSON.stringify({ name, extraInfo }),
+        "Request Received"
+      );
       const universes = db.prepare("SELECT name FROM universes").all().map((u: any) => u.name);
       
       const persona = await generatePersona(name, extraInfo, universes);
@@ -573,7 +578,17 @@ async function startServer() {
 
   app.post("/api/users", (req, res) => {
     const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level } = req.body;
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "ROUTE_ADD_USER",
+      JSON.stringify({ username, display_name, universe_id }),
+      "Request Received"
+    );
     try {
+      const existingUser = db.prepare("SELECT id FROM users WHERE username = ?").get(username);
+      if (existingUser) {
+        return res.status(400).json({ error: "Username already taken. Please choose another one." });
+      }
+
       const stmt = db.prepare(`
         INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level)
         VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
