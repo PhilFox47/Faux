@@ -24,7 +24,7 @@ function getOpenAI() {
     baseURL: 'https://nano-gpt.com/api/v1',
     defaultHeaders: {
       'X-Title': 'Faux Social Media',
-      'Referer': process.env.APP_URL || 'https://faux-social.run.app',
+      'Referer': process.env.APP_URL || 'http://localhost:3000',
     }
   });
 }
@@ -53,13 +53,13 @@ export async function testConnection() {
     const response = await getOpenAI().chat.completions.create({
       model: model,
       messages: [{ role: 'user', content: 'Reply with exactly "API Connection Successful".' }],
-      max_tokens: 10,
+      max_tokens: 100,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "testConnection",
-      JSON.stringify({ model, max_tokens: 10 }),
+      JSON.stringify({ model, max_tokens: 100 }),
       content || "Empty Response"
     );
 
@@ -99,7 +99,7 @@ Format your response as a friendly chat message, but make sure all the informati
       max_tokens: 1000,
       temperature: 0.8,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
@@ -192,15 +192,15 @@ Reply with ONLY the ID of the chosen user.`;
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 10,
+      max_tokens: 100,
       temperature: 0.2,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "pickBestCommenter",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10, temperature: 0.2, finish_reason: finishReason }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 100, temperature: 0.2, finish_reason: finishReason }),
       content || "Empty Response"
     );
 
@@ -290,15 +290,15 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 150,
+      max_tokens: 1000,
       temperature: 0.9,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePost",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 150, temperature: 0.9, archetype: postTypeObj.id, finish_reason: finishReason }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.9, archetype: postTypeObj.id, finish_reason: finishReason }),
       content || "Empty Response. Full Response: " + JSON.stringify(response)
     );
     
@@ -338,15 +338,15 @@ Keep it short, natural, and in character. Focus on the topic being discussed. Do
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 100,
+      max_tokens: 1000,
       temperature: 0.8,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateComment",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 100, temperature: 0.8, isReply, finish_reason: finishReason }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8, isReply, finish_reason: finishReason }),
       content || "Empty Response"
     );
     
@@ -408,15 +408,15 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not w
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 300,
+      max_tokens: 1000,
       temperature: 0.8,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateDM",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 300, temperature: 0.8, finish_reason: finishReason }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8, finish_reason: finishReason }),
       content || "Empty Response"
     );
     
@@ -470,15 +470,15 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
       messages: messages,
-      max_tokens: 600,
+      max_tokens: 1000,
       temperature: 0.8,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "replyToDM",
-      JSON.stringify({ model: getModel(), messages, max_tokens: 600, temperature: 0.8, finish_reason: finishReason }),
+      JSON.stringify({ model: getModel(), messages, max_tokens: 1000, temperature: 0.8, finish_reason: finishReason }),
       content || "Empty Response"
     );
     
@@ -529,13 +529,14 @@ Notice the timestamps to understand the flow of time between messages.`;
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
       messages: messages as any,
+      max_tokens: 1000,
       temperature: 0.8,
     });
-    const content = response.choices[0].message.content?.trim();
+    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateGroupChatReply",
-      JSON.stringify({ model: getModel(), messages }),
+      JSON.stringify({ model: getModel(), messages, max_tokens: 1000 }),
       content || "Failed"
     );
     
@@ -578,15 +579,15 @@ Guidelines:
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 500,
+      max_tokens: 1000,
       temperature: 0.7,
     });
-    let content = response.choices[0].message.content?.trim();
+    let content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
     const finishReason = response.choices[0].finish_reason;
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImagePrompt",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 500, temperature: 0.7, finish_reason: finishReason }),
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.7, finish_reason: finishReason }),
       content || "Empty Response"
     );
 
