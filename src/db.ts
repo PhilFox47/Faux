@@ -170,7 +170,41 @@ export function initDb() {
       response_payload TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS post_archetypes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      probability REAL NOT NULL
+    );
   `);
+
+  // Initialize default archetypes if table is empty
+  const archetypeCount = db.prepare("SELECT COUNT(*) as count FROM post_archetypes").get() as any;
+  if (archetypeCount.count === 0) {
+    const defaultArchetypes = [
+      { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30 },
+      { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15 },
+      { id: 'question', name: 'Question', description: 'A Character asking a question.', probability: 10 },
+      { id: 'random_thought', name: 'Random Thought', description: 'A random thought a character had they want to share on Faux.', probability: 10 },
+      { id: 'discussion', name: 'Discussion', description: 'Similar to a Question, but with more arguing in the comments.', probability: 5 },
+      { id: 'recommendation', name: 'Recommendation', description: 'A Character recommending a Book, TV Show, Movie and so on.', probability: 5 },
+      { id: 'follow_up', name: 'Follow up', description: 'A character following up on a previous post. Sharing an update on their previous live update, thanking users for answering a previous question and so on. Always make sure it references a previous post of that character in some way.', probability: 5 },
+      { id: 'picking_up_trend', name: 'Picking up a Trend', description: 'Check what other characters have been posing about recently. If you notice a pattern, comment on it or even continue the "Trend".', probability: 5 },
+      { id: 'mention', name: 'Mention', description: 'A Character mentioning another character (with their @username) about something which leads to that mentioned character to react in a comment.', probability: 5 },
+      { id: 'joke', name: 'Joke', description: 'A character making a joke, that fits their personality.', probability: 5 },
+      { id: 'shitpost', name: 'Shitpost / Rage Bait', description: 'A shitpost or rage bait.', probability: 5 },
+      { id: 'venting', name: 'Venting', description: 'A character venting about something that made them angry.', probability: 5 },
+      { id: 'dm_invitation', name: 'DM Invitation', description: 'A Character mentions something and invites other users to contact them via DM.', probability: 2 },
+      { id: 'event', name: 'Event', description: 'Something that affects multiple characters has happened and they are now reacting to it.', probability: 2 },
+      { id: 'meetup', name: 'Meetup', description: 'A meetup between 2-5 characters.', probability: 2 }
+    ];
+    
+    const insertArchetype = db.prepare("INSERT INTO post_archetypes (id, name, description, probability) VALUES (?, ?, ?, ?)");
+    for (const arch of defaultArchetypes) {
+      insertArchetype.run(arch.id, arch.name, arch.description, arch.probability);
+    }
+  }
 
   // Add last_read_at column if it doesn't exist
   try {

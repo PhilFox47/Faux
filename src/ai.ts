@@ -205,7 +205,40 @@ export async function pickBestCommenter(post: any, availableUsers: any[]) {
     WHERE user_id_1 = ? OR user_id_2 = ?
   `).all(post.user_id, post.user_id) as any[];
 
-  const userContexts = availableUsers.map(u => {
+  // 1. ALL Users who the OP has a relationship with (but that have not commented yet - availableUsers already filters out those who commented)
+  const relatedUserIds = new Set(
+    relationships.flatMap(r => [r.user_id_1, r.user_id_2]).filter(id => id !== post.user_id)
+  );
+  
+  const relatedUsers = availableUsers.filter(u => relatedUserIds.has(u.id));
+
+  // 2. Up to 20 Users who are following OP
+  const followers = db.prepare(`
+    SELECT follower_id 
+    FROM follows 
+    WHERE followed_id = ?
+  `).all(post.user_id) as any[];
+  
+  const followerIds = new Set(followers.map(f => f.follower_id));
+  const followerUsers = availableUsers
+    .filter(u => followerIds.has(u.id) && !relatedUserIds.has(u.id))
+    .sort(() => 0.5 - Math.random())
+    .slice(0, 20);
+
+  // 3. 20 Additional, random Users
+  const alreadySelectedIds = new Set([...relatedUsers.map(u => u.id), ...followerUsers.map(u => u.id)]);
+  const randomUsers = availableUsers
+    .filter(u => !alreadySelectedIds.has(u.id))
+    .sort(() => 0.5 - Math.random())
+    .slice(0, 20);
+
+  const candidateUsers = [...relatedUsers, ...followerUsers, ...randomUsers];
+
+  if (candidateUsers.length === 0) {
+    return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
+  }
+
+  const userContexts = candidateUsers.map(u => {
     let relDesc = "No established relationship.";
     const rel = relationships.find(r => (r.user_id_1 === u.id && r.user_id_2 === post.user_id) || (r.user_id_2 === u.id && r.user_id_1 === post.user_id));
     if (rel) relDesc = rel.description;
@@ -258,42 +291,27 @@ Reply with ONLY the ID of the chosen user.`;
       "Error: " + (error.message || "Unknown error")
     );
   }
-  return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
+  return candidateUsers[Math.floor(Math.random() * candidateUsers.length)].id;
 }
-
-export const POST_ARCHETYPES = [
-  { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30 },
-  { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15 },
-  { id: 'question', name: 'Question', description: 'A Character asking a question.', probability: 10 },
-  { id: 'random_thought', name: 'Random Thought', description: 'A random thought a character had they want to share on Faux.', probability: 10 },
-  { id: 'discussion', name: 'Discussion', description: 'Similar to a Question, but with more arguing in the comments.', probability: 5 },
-  { id: 'recommendation', name: 'Recommendation', description: 'A Character recommending a Book, TV Show, Movie and so on.', probability: 5 },
-  { id: 'follow_up', name: 'Follow up', description: 'A character following up on a previous post. Sharing an update on their previous live update, thanking users for answering a previous question and so on. Always make sure it references a previous post of that character in some way.', probability: 5 },
-  { id: 'picking_up_trend', name: 'Picking up a Trend', description: 'Check what other characters have been posing about recently. If you notice a pattern, comment on it or even continue the "Trend".', probability: 5 },
-  { id: 'mention', name: 'Mention', description: 'A Character mentioning another character (with their @username) about something which leads to that mentioned character to react in a comment.', probability: 5 },
-  { id: 'joke', name: 'Joke', description: 'A character making a joke, that fits their personality.', probability: 5 },
-  { id: 'shitpost', name: 'Shitpost / Rage Bait', description: 'A shitpost or rage bait.', probability: 5 },
-  { id: 'venting', name: 'Venting', description: 'A character venting about something that made them angry.', probability: 5 },
-  { id: 'dm_invitation', name: 'DM Invitation', description: 'A Character mentions something and invites other users to contact them via DM.', probability: 2 },
-  { id: 'event', name: 'Event', description: 'Something that affects multiple characters has happened and they are now reacting to it.', probability: 2 },
-  { id: 'meetup', name: 'Meetup', description: 'A meetup between 2-5 characters.', probability: 2 }
-];
 
 export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false) {
   if (isFirstPost) {
     return { id: 'introduction', name: 'Introduction', description: 'Make them "introduce" themselves on Faux or write about that they just joined Faux. Whatever fits their character.' };
   }
+
+  const archetypes = db.prepare("SELECT * FROM post_archetypes").all() as any[];
+  
   if (forceImage) {
-    return POST_ARCHETYPES.find(a => a.id === 'image_post')!;
+    return archetypes.find(a => a.id === 'image_post') || { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15 };
   }
   
-  const totalWeight = POST_ARCHETYPES.reduce((sum, a) => sum + a.probability, 0);
+  const totalWeight = archetypes.reduce((sum, a) => sum + a.probability, 0);
   let random = Math.random() * totalWeight;
-  for (const archetype of POST_ARCHETYPES) {
+  for (const archetype of archetypes) {
     random -= archetype.probability;
     if (random <= 0) return archetype;
   }
-  return POST_ARCHETYPES[0];
+  return archetypes[0] || { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30 };
 }
 
 function getOtherUserUniverseContext(character: any, otherUser: any): string {

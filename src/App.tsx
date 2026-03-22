@@ -113,9 +113,9 @@ export default function App() {
   const [timezone, setTimezone] = useState('UTC');
   const [allowNsfw, setAllowNsfw] = useState(false);
   const [probPost, setProbPost] = useState(100);
-  const [probImagePost, setProbImagePost] = useState(30);
   const [probComment, setProbComment] = useState(1000);
   const [probMessage, setProbMessage] = useState(5);
+  const [archetypes, setArchetypes] = useState<any[]>([]);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean, message?: string, error?: string} | null>(null);
   const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
@@ -491,10 +491,26 @@ export default function App() {
         if (data.api_key !== undefined) setApiKey(data.api_key);
         if (data.allow_nsfw !== undefined) setAllowNsfw(data.allow_nsfw === 1);
         if (data.prob_post !== undefined) setProbPost(data.prob_post);
-        if (data.prob_image_post !== undefined) setProbImagePost(data.prob_image_post);
         if (data.prob_comment !== undefined) setProbComment(data.prob_comment);
         if (data.prob_message !== undefined) setProbMessage(data.prob_message);
       }
+    });
+  };
+
+  const fetchArchetypes = () => {
+    apiFetch('/api/archetypes').then(r => r.json()).then(data => {
+      if (data && Array.isArray(data)) {
+        setArchetypes(data);
+      }
+    });
+  };
+
+  const handleUpdateArchetypes = async (updatedArchetypes: any[]) => {
+    setArchetypes(updatedArchetypes);
+    await apiFetch('/api/archetypes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archetypes: updatedArchetypes })
     });
   };
 
@@ -511,7 +527,6 @@ export default function App() {
   const handleUpdateSettings = async (newSettings: any) => {
     if (newSettings.timezone) setTimezone(newSettings.timezone);
     if (newSettings.prob_post !== undefined) setProbPost(newSettings.prob_post);
-    if (newSettings.prob_image_post !== undefined) setProbImagePost(newSettings.prob_image_post);
     if (newSettings.prob_comment !== undefined) setProbComment(newSettings.prob_comment);
     if (newSettings.prob_message !== undefined) setProbMessage(newSettings.prob_message);
     await apiFetch('/api/settings', {
@@ -669,6 +684,7 @@ export default function App() {
     fetchGroupChats();
     fetchNotifications();
     fetchSettings();
+    fetchArchetypes();
     fetchApiLogs();
     const interval = setInterval(() => {
       fetchPosts();
@@ -1897,18 +1913,10 @@ export default function App() {
                       
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Text Posts ({probPost}/day)</label>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Posts ({probPost}/day)</label>
                           <input 
                             type="range" min="0" max="500" value={probPost} 
                             onChange={e => handleUpdateSettings({ prob_post: parseInt(e.target.value) })}
-                            className="w-full accent-orange-500" 
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Image Posts ({probImagePost}/day)</label>
-                          <input 
-                            type="range" min="0" max="100" value={probImagePost} 
-                            onChange={e => handleUpdateSettings({ prob_image_post: parseInt(e.target.value) })}
                             className="w-full accent-orange-500" 
                           />
                         </div>
@@ -1928,6 +1936,28 @@ export default function App() {
                             className="w-full accent-orange-500" 
                           />
                         </div>
+                      </div>
+                    </div>
+
+                    <div className="mb-6">
+                      <h4 className="text-md font-bold mb-2">Post Archetype Probabilities</h4>
+                      <p className="text-sm text-gray-400 mb-4">Adjust the relative likelihood of each post type when an AI decides to post.</p>
+                      <div className="space-y-4">
+                        {archetypes.map((arch, index) => (
+                          <div key={arch.id}>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">{arch.name} ({arch.probability})</label>
+                            <input 
+                              type="range" min="0" max="100" value={arch.probability} 
+                              onChange={e => {
+                                const newArchetypes = [...archetypes];
+                                newArchetypes[index].probability = parseInt(e.target.value);
+                                handleUpdateArchetypes(newArchetypes);
+                              }}
+                              className="w-full accent-orange-500" 
+                            />
+                            <p className="text-xs text-gray-500 mt-1">{arch.description}</p>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
