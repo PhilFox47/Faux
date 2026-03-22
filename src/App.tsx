@@ -2114,9 +2114,32 @@ export default function App() {
                             </div>
                             <div className="space-y-1">
                               <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
-                              <div className={`p-2 rounded border ${log.response_payload.includes('Error') || log.response_payload === 'Empty Response' ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
-                                {log.response_payload}
-                              </div>
+                              {(() => {
+                                try {
+                                  const resObj = JSON.parse(log.response_payload);
+                                  return (
+                                    <div className="space-y-2">
+                                      {resObj.reasoning && (
+                                        <div className="bg-blue-900/10 border border-blue-500/20 p-2 rounded">
+                                          <div className="text-[10px] text-blue-400 font-bold mb-1 uppercase tracking-tighter">Thinking / Reasoning</div>
+                                          <div className="text-gray-400 italic">{resObj.reasoning}</div>
+                                        </div>
+                                      )}
+                                      <div className={`p-2 rounded border ${!resObj.content ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
+                                        <div className="text-[10px] opacity-50 font-bold mb-1 uppercase tracking-tighter">Final Output</div>
+                                        {resObj.content || "Empty Response"}
+                                      </div>
+                                    </div>
+                                  );
+                                } catch (e) {
+                                  const payload = log.response_payload || "";
+                                  return (
+                                    <div className={`p-2 rounded border ${payload.includes('Error') || payload === 'Empty Response' ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
+                                      {payload}
+                                    </div>
+                                  );
+                                }
+                              })()}
                             </div>
                           </div>
                         );

@@ -203,7 +203,8 @@ async function handleOPReplies() {
 }
 
 async function startServer() {
-  const app = express();
+  try {
+    const app = express();
   const PORT = 3000;
 
   app.use(express.json());
@@ -1812,11 +1813,6 @@ async function startServer() {
     }
   }, 60000); // Every 60 seconds
 
-  app.get("/api/logs", (req, res) => {
-    const logs = db.prepare("SELECT * FROM api_logs ORDER BY created_at DESC LIMIT 50").all();
-    res.json(logs);
-  });
-
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -1834,7 +1830,13 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+  }).on('error', (err) => {
+    console.error("CRITICAL: Server listen error:", err);
   });
+  } catch (error) {
+    console.error("CRITICAL: Failed to start server:", error);
+    process.exit(1);
+  }
 }
 
 startServer();

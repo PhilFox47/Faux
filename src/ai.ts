@@ -29,6 +29,15 @@ function getOpenAI() {
   });
 }
 
+function stripReasoning(text: string): string {
+  if (!text) return "";
+  // Remove <think>...</think> tags and their content
+  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Remove common prefixes if they appear at the start
+  cleaned = cleaned.replace(/^(Thought|Reasoning|Thinking):\s*/i, '');
+  return cleaned.trim();
+}
+
 function getModel() {
   try {
     const settings = db.prepare("SELECT model_name FROM settings WHERE id = 1").get() as any;
@@ -50,20 +59,31 @@ function getImageModel() {
 export async function testConnection() {
   try {
     const model = getModel();
-    const response = await getOpenAI().chat.completions.create({
-      model: model,
-      messages: [{ role: 'user', content: 'Reply with exactly "API Connection Successful".' }],
-      max_tokens: 100,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: model,
+        messages: [{ role: 'user', content: 'Reply with exactly "API Connection Successful".' }],
+        max_tokens: 100,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      
+      if (content || !reasoning) break;
+      console.log(`testConnection: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "testConnection",
       JSON.stringify({ model, max_tokens: 100 }),
-      content || "Empty Response"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
 
-    return { success: true, message: content };
+    return { success: true, message: content || (reasoning ? "Thinking..." : "Empty Response") };
   } catch (error: any) {
     console.error('API Test Error:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
@@ -93,22 +113,34 @@ Please provide a comprehensive profile including:
 Format your response as a friendly chat message, but make sure all the information is clearly laid out so I can copy it into the fields.`;
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
-      temperature: 0.8,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
-    const finishReason = response.choices[0].finish_reason;
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.8,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`generatePersona: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePersona",
       JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8, finish_reason: finishReason }),
-      content || "Empty Response"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
     
-    return content || "Failed to generate persona.";
+    return content || (reasoning ? "The AI is still thinking. Please try again in a moment." : "Failed to generate persona.");
   } catch (error: any) {
     console.error("Error generating persona:", error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
@@ -189,19 +221,31 @@ ${userContexts}
 Reply with ONLY the ID of the chosen user.`;
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 100,
-      temperature: 0.2,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
-    const finishReason = response.choices[0].finish_reason;
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 100,
+        temperature: 0.2,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`pickBestCommenter: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "pickBestCommenter",
       JSON.stringify({ model: getModel(), prompt, max_tokens: 100, temperature: 0.2, finish_reason: finishReason }),
-      content || "Empty Response"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
 
     const id = parseInt(content || '');
@@ -287,19 +331,31 @@ ${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeti
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
-      temperature: 0.9,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
-    const finishReason = response.choices[0].finish_reason;
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.9,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`generatePost: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generatePost",
       JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.9, archetype: postTypeObj.id, finish_reason: finishReason }),
-      content || "Empty Response. Full Response: " + JSON.stringify(response)
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
     
     return content;
@@ -335,19 +391,31 @@ ${isReply ? `Write a reply that fits your character perfectly and continues the 
 Keep it short, natural, and in character. Focus on the topic being discussed. Do not wrap in quotes. Keep it under 150 characters.`;
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
-      temperature: 0.8,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
-    const finishReason = response.choices[0].finish_reason;
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.8,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`generateComment: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateComment",
       JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8, isReply, finish_reason: finishReason }),
-      content || "Empty Response"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
     
     return content;
@@ -405,19 +473,31 @@ IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never ac
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.`;
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
-      temperature: 0.8,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
-    const finishReason = response.choices[0].finish_reason;
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.8,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`generateDM: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateDM",
       JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.8, finish_reason: finishReason }),
-      content || "Empty Response"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
     
     return content;
@@ -467,19 +547,31 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
   ];
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: messages,
-      max_tokens: 1000,
-      temperature: 0.8,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
-    const finishReason = response.choices[0].finish_reason;
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: messages,
+        max_tokens: 1000,
+        temperature: 0.8,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`replyToDM: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "replyToDM",
       JSON.stringify({ model: getModel(), messages, max_tokens: 1000, temperature: 0.8, finish_reason: finishReason }),
-      content || "Empty Response"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
     
     return content;
@@ -526,18 +618,29 @@ Notice the timestamps to understand the flow of time between messages.`;
   ];
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: messages as any,
-      max_tokens: 1000,
-      temperature: 0.8,
-    });
-    const content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: messages as any,
+        max_tokens: 1000,
+        temperature: 0.8,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+
+      if (content || !reasoning) break;
+      console.log(`generateGroupChatReply: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateGroupChatReply",
       JSON.stringify({ model: getModel(), messages, max_tokens: 1000 }),
-      content || "Failed"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
     
     return content;
@@ -576,19 +679,31 @@ Guidelines:
 - ONLY output the final prompt text, nothing else.`;
 
   try {
-    const response = await getOpenAI().chat.completions.create({
-      model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
-      temperature: 0.7,
-    });
-    let content = (response.choices[0].message.content || (response.choices[0].message as any).reasoning || "").trim();
-    const finishReason = response.choices[0].finish_reason;
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`generateImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImagePrompt",
       JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.7, finish_reason: finishReason }),
-      content || "Empty Response"
+      JSON.stringify({ content, reasoning, raw: rawContent })
     );
 
     return content || "";
