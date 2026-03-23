@@ -265,8 +265,14 @@ async function startServer() {
 
   // API Routes
   app.get("/api/logs", (req, res) => {
-    const logs = db.prepare("SELECT * FROM api_logs ORDER BY created_at DESC LIMIT 50").all();
-    res.json(logs);
+    const q = req.query.q as string;
+    if (q) {
+      const logs = db.prepare("SELECT * FROM api_logs WHERE response_payload LIKE ? OR request_payload LIKE ? ORDER BY created_at DESC LIMIT 50").all(`%${q}%`, `%${q}%`);
+      res.json(logs);
+    } else {
+      const logs = db.prepare("SELECT * FROM api_logs ORDER BY created_at DESC LIMIT 50").all();
+      res.json(logs);
+    }
   });
 
   app.get("/api/health", (req, res) => {

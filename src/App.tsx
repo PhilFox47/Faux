@@ -69,6 +69,8 @@ export default function App() {
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const skipNextScroll = useRef(false);
+  const prevChatIdRef = useRef<string | null>(null);
+  const prevLastMsgIdRef = useRef<number | string | null>(null);
 
   const scrollToBottom = useCallback(() => {
     if (chatScrollRef.current) {
@@ -78,13 +80,28 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab === 'messages' && activeChat) {
+      const currentChatId = `${isGroupChat ? 'group' : 'dm'}-${activeChat.id}`;
+      const currentLastMsg = chatMessages[chatMessages.length - 1];
+      const currentLastMsgIdentifier = currentLastMsg ? (currentLastMsg.id || currentLastMsg.created_at) : null;
+
       if (skipNextScroll.current) {
         skipNextScroll.current = false;
+        prevChatIdRef.current = currentChatId;
+        prevLastMsgIdRef.current = currentLastMsgIdentifier;
         return;
       }
-      scrollToBottom();
+
+      if (
+        prevChatIdRef.current !== currentChatId ||
+        prevLastMsgIdRef.current !== currentLastMsgIdentifier
+      ) {
+        scrollToBottom();
+      }
+
+      prevChatIdRef.current = currentChatId;
+      prevLastMsgIdRef.current = currentLastMsgIdentifier;
     }
-  }, [chatMessages, activeTab, activeChat, scrollToBottom]);
+  }, [chatMessages, activeTab, activeChat, isGroupChat, scrollToBottom]);
 
   // Add Character Form
   const [charName, setCharName] = useState('');
@@ -213,9 +230,12 @@ export default function App() {
 
   // API Logs
   const [apiLogs, setApiLogs] = useState<any[]>([]);
+  const [apiLogSearch, setApiLogSearch] = useState('');
 
-  const fetchApiLogs = () => {
-    apiFetch('/api/logs')
+  const fetchApiLogs = (query?: string | React.MouseEvent | React.KeyboardEvent) => {
+    const q = typeof query === 'string' ? query : apiLogSearch;
+    const url = q ? `/api/logs?q=${encodeURIComponent(q)}` : '/api/logs';
+    apiFetch(url)
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -228,6 +248,12 @@ export default function App() {
         console.error("Failed to fetch API logs:", err);
         setApiLogs([]);
       });
+  };
+
+  const handleViewApiLogs = (content: string) => {
+    setActiveTab('settings');
+    setApiLogSearch(content);
+    fetchApiLogs(content);
   };
 
   const isUserOnline = (user: any) => {
@@ -568,6 +594,16 @@ export default function App() {
   };
 
   const handleViewUniverse = async (universeId: number) => {
+    if (universeId === -1) {
+      setViewingUniverse({ id: -1, name: 'None', description: 'Characters without an assigned universe.' });
+      setEditUniverseDescription('');
+      setEditUniverseImageUrl('');
+      setIsEditingUniverse(false);
+      const chars = users.filter(u => !u.universe_id);
+      setViewingUniverseCharacters(chars);
+      setActiveTab('universe_details');
+      return;
+    }
     const universe = universes.find(u => u.id === universeId);
     if (!universe) return;
     setViewingUniverse(universe);
@@ -1217,6 +1253,7 @@ export default function App() {
                       setHighlightedCommentId(null);
                     }}
                     users={users}
+                    onViewApiLogs={handleViewApiLogs}
                   />
                 ))}
                 {posts.length > visiblePosts && (
@@ -1580,6 +1617,18 @@ export default function App() {
             <div className="p-6 max-w-4xl mx-auto">
               <h2 className="text-2xl font-bold mb-6">Universes</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div onClick={() => handleViewUniverse(-1)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition">
+                  <div className="flex items-center gap-4 mb-3">
+                    <div className="w-16 h-16 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
+                      <Globe size={32} className="m-auto mt-4 text-gray-500" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-lg">None</h3>
+                      <p className="text-sm text-gray-400">{users.filter(u => !u.universe_id).length} characters</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-300 line-clamp-2">Characters without an assigned universe.</p>
+                </div>
                 {universes.map(u => (
                   <div key={u.id} onClick={() => handleViewUniverse(u.id)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition">
                     <div className="flex items-center gap-4 mb-3">
@@ -1615,7 +1664,7 @@ export default function App() {
                 <button onClick={() => setActiveTab('universes')} className="flex items-center gap-2 text-gray-400 hover:text-white">
                   <ArrowLeft size={20} /> Back to Universes
                 </button>
-                {!isEditingUniverse && (
+                {!isEditingUniverse && viewingUniverse.id !== -1 && (
                   <button 
                     onClick={() => setIsEditingUniverse(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition"
@@ -2112,13 +2161,39 @@ export default function App() {
                         API Logs
                       </h3>
                       <button 
-                        onClick={fetchApiLogs}
+                        onClick={() => fetchApiLogs()}
                         className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1 rounded-lg transition-colors"
                       >
                         Refresh Logs
                       </button>
                     </div>
                     <p className="text-sm text-gray-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
+                    
+                    <div className="mb-4 flex gap-2">
+                      <input 
+                        type="text" 
+                        value={apiLogSearch} 
+                        onChange={(e) => setApiLogSearch(e.target.value)} 
+                        onKeyDown={(e) => e.key === 'Enter' && fetchApiLogs()}
+                        placeholder="Search logs by content..." 
+                        className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                      />
+                      <button 
+                        onClick={() => fetchApiLogs()}
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                      >
+                        Search
+                      </button>
+                      {apiLogSearch && (
+                        <button 
+                          onClick={() => { setApiLogSearch(''); fetchApiLogs(''); }}
+                          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
                     <div className="space-y-4 max-h-[600px] overflow-y-auto">
                       {apiLogs.map((log: any) => {
                         let requestObj = {};
@@ -2486,6 +2561,7 @@ export default function App() {
                   onShowLikers={handleShowLikers}
                   formatTimestamp={formatTimestamp}
                   onRefresh={() => handleViewPost(viewingPostData.id)}
+                  onViewApiLogs={handleViewApiLogs}
                 />
               </div>
             </div>
@@ -2638,6 +2714,7 @@ export default function App() {
                         onShowLikers={handleShowLikers}
                         formatTimestamp={formatTimestamp}
                         onRefresh={() => handleViewProfile(viewingProfile.id)}
+                        onViewApiLogs={handleViewApiLogs}
                       />
                     ))}
                     {viewingProfilePosts.length > visibleProfilePosts && (
@@ -2796,7 +2873,7 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
-function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
+function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -2933,9 +3010,12 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
             </div>
             <button onClick={() => setShowMenu(!showMenu)} className="text-gray-500 hover:text-orange-500"><MoreHorizontal size={18} /></button>
             {showMenu && (
-              <div className="absolute right-0 top-6 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 w-32 overflow-hidden">
+              <div className="absolute right-0 top-6 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 w-36 overflow-hidden">
                 <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 transition">Edit</button>
                 <button onClick={() => { handleDelete(); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-800 transition">Delete</button>
+                {loggedInUser?.role === 'admin' && onViewApiLogs && (
+                  <button onClick={() => { onViewApiLogs(post.content); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-blue-400 hover:bg-gray-800 transition border-t border-gray-800">View API Logs</button>
+                )}
               </div>
             )}
           </div>
@@ -3021,6 +3101,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
               highlightedCommentId={highlightedCommentId}
               commentRef={(id, el) => { commentRefs.current[id] = el; }}
               users={users}
+              onViewApiLogs={onViewApiLogs}
             />
           ))}
           
@@ -3077,7 +3158,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   );
 }
 
-function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users, loggedInUser, apiFetch }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
+function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(comment.content);
@@ -3120,9 +3201,12 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
               </div>
               <button onClick={() => setShowMenu(!showMenu)} className="text-gray-500 hover:text-orange-500"><MoreHorizontal size={14} /></button>
               {showMenu && (
-                <div className="absolute right-0 top-5 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 w-32 overflow-hidden">
+                <div className="absolute right-0 top-5 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 w-36 overflow-hidden">
                   <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 transition">Edit</button>
                   <button onClick={() => { handleDelete(); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-800 transition">Delete</button>
+                  {loggedInUser?.role === 'admin' && onViewApiLogs && (
+                    <button onClick={() => { onViewApiLogs(comment.content); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-blue-400 hover:bg-gray-800 transition border-t border-gray-800">View API Logs</button>
+                  )}
                 </div>
               )}
             </div>
@@ -3179,6 +3263,7 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
               highlightedCommentId={highlightedCommentId}
               commentRef={commentRef}
               users={users}
+              onViewApiLogs={onViewApiLogs}
             />
           ))}
         </div>
