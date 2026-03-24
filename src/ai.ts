@@ -746,23 +746,76 @@ Guidelines:
   }
 }
 
-export async function generateImage(prompt: string) {
+export async function generateNegativeImagePrompt(positivePrompt: string) {
+  const prompt = `Given the following positive image generation prompt, write a comprehensive negative prompt to avoid unwanted elements. 
+The negative prompt should include things like "blurry, deformed, bad anatomy, text, watermark, extra limbs, low quality" plus any specific elements that would ruin the described scene. 
+ONLY output the negative prompt text, nothing else, comma separated.
+
+Positive Prompt:
+${positivePrompt}`;
+
+  try {
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 10000,
+        temperature: 0.7,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`generateNegativeImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generateNegativeImagePrompt",
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason }),
+      JSON.stringify({ content, reasoning, raw: rawContent })
+    );
+
+    return content || "";
+  } catch (error: any) {
+    console.error('Error generating negative image prompt:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generateNegativeImagePrompt",
+      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+    );
+    return "";
+  }
+}
+
+export async function generateImage(prompt: string, negative_prompt?: string) {
   try {
     const model = getImageModel();
     const sizes = ['1024x1024', '1024x1536', '1024x1536'];
     const randomSize = sizes[Math.floor(Math.random() * sizes.length)];
     
-    const response = await getOpenAI().images.generate({
+    const requestBody: any = {
       model: model,
       prompt: prompt,
       n: 1,
-      size: randomSize as any,
+      size: randomSize,
       response_format: 'b64_json',
-      // @ts-ignore - passing extra params for Chroma/Flux
       steps: 28,
       guidance_scale: 3.5,
       guidance: 3.5
-    });
+    };
+
+    if (negative_prompt) {
+      requestBody.negative_prompt = negative_prompt;
+    }
+
+    const response = await getOpenAI().images.generate(requestBody);
     
     const imageData = response.data[0];
     let url = '';
@@ -791,7 +844,7 @@ export async function generateImage(prompt: string) {
     
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImage",
-      JSON.stringify({ model: model, prompt, steps: 28, guidance: 3.5 }),
+      JSON.stringify(requestBody),
       url || "Empty Response (No Image Data)"
     );
     
@@ -800,7 +853,7 @@ export async function generateImage(prompt: string) {
     console.error('Error generating image:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "generateImage",
-      JSON.stringify({ model: getImageModel(), prompt, error: "Catch Block" }),
+      JSON.stringify({ model: getImageModel(), prompt, negative_prompt, error: "Catch Block" }),
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;

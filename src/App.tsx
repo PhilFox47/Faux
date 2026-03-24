@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 
@@ -53,6 +53,7 @@ export default function App() {
   const [users, setUsers] = useState<any[]>([]);
   const [conversations, setConversations] = useState<any[]>([]);
   const [groupChats, setGroupChats] = useState<any[]>([]);
+  const [dmFavorites, setDmFavorites] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [activeChat, setActiveChat] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -132,6 +133,7 @@ export default function App() {
   const [probPost, setProbPost] = useState(100);
   const [probComment, setProbComment] = useState(1000);
   const [probMessage, setProbMessage] = useState(5);
+  const [probFavoriteDm, setProbFavoriteDm] = useState(50);
   const [archetypes, setArchetypes] = useState<any[]>([]);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean, message?: string, error?: string} | null>(null);
@@ -481,6 +483,10 @@ export default function App() {
     apiFetch('/api/group-chats').then(r => r.json()).then(setGroupChats);
   };
 
+  const fetchDmFavorites = () => {
+    apiFetch('/api/favorites').then(r => r.json()).then(setDmFavorites);
+  };
+
   const fetchNotifications = () => {
     apiFetch('/api/notifications').then(r => r.json()).then(setNotifications);
   };
@@ -519,6 +525,7 @@ export default function App() {
         if (data.prob_post !== undefined) setProbPost(data.prob_post);
         if (data.prob_comment !== undefined) setProbComment(data.prob_comment);
         if (data.prob_message !== undefined) setProbMessage(data.prob_message);
+        if (data.prob_favorite_dm !== undefined) setProbFavoriteDm(data.prob_favorite_dm);
       }
     });
   };
@@ -555,6 +562,7 @@ export default function App() {
     if (newSettings.prob_post !== undefined) setProbPost(newSettings.prob_post);
     if (newSettings.prob_comment !== undefined) setProbComment(newSettings.prob_comment);
     if (newSettings.prob_message !== undefined) setProbMessage(newSettings.prob_message);
+    if (newSettings.prob_favorite_dm !== undefined) setProbFavoriteDm(newSettings.prob_favorite_dm);
     await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -670,7 +678,11 @@ export default function App() {
         }
         fetchPosts();
         fetchUsers();
-        showToast("Post forced successfully!");
+        if (type === 'image') {
+          showToast("Image post is generating in the background. It will appear shortly.");
+        } else {
+          showToast("Post forced successfully!");
+        }
       } else {
         const err = await res.json();
         showToast("Failed to force post: " + err.error);
@@ -718,6 +730,7 @@ export default function App() {
     fetchUniverses();
     fetchConversations();
     fetchGroupChats();
+    fetchDmFavorites();
     fetchNotifications();
     fetchSettings();
     fetchArchetypes();
@@ -755,15 +768,37 @@ export default function App() {
     }
   };
 
+  const handleToggleFavorite = async (targetId: number, isGroup: boolean) => {
+    const isFav = dmFavorites.some(f => f.target_id === targetId && f.is_group === (isGroup ? 1 : 0));
+    try {
+      if (isFav) {
+        await apiFetch(`/api/favorites/${targetId}?is_group=${isGroup}`, { method: 'DELETE' });
+      } else {
+        await apiFetch('/api/favorites', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_id: targetId, is_group: isGroup })
+        });
+      }
+      fetchDmFavorites();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleCreatePost = async () => {
     if (!newPostContent.trim()) return;
+    const type = newPostType;
     await apiFetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: newPostContent, post_type: newPostType })
+      body: JSON.stringify({ content: newPostContent, post_type: type })
     });
     setNewPostContent('');
     setNewPostType('life_update');
+    if (type === 'image_post') {
+      showToast("Image is generating in the background. It will appear shortly.");
+    }
     fetchPosts();
   };
 
@@ -1536,15 +1571,24 @@ export default function App() {
                       </div>
                       {activeChat.name}
                     </div>
-                    {!isGroupChat && (
-                      <button 
-                        onClick={handleResetChat}
-                        className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-full transition"
-                        title="Reset Conversation"
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleToggleFavorite(activeChat.id, isGroupChat)}
+                        className={`p-2 rounded-full transition ${dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? 'text-yellow-500 bg-yellow-500/10' : 'text-gray-500 hover:text-yellow-500 hover:bg-yellow-500/10'}`}
+                        title={dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? "Unfavorite" : "Favorite"}
                       >
-                        <Trash2 size={20} />
+                        <Star size={20} fill={dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? "currentColor" : "none"} />
                       </button>
-                    )}
+                      {!isGroupChat && (
+                        <button 
+                          onClick={handleResetChat}
+                          className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-full transition"
+                          title="Reset Conversation"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
                     {hasMoreMessages && (
@@ -1982,6 +2026,15 @@ export default function App() {
                           <input 
                             type="range" min="0" max="50" value={probMessage} 
                             onChange={e => handleUpdateSettings({ prob_message: parseInt(e.target.value) })}
+                            className="w-full accent-orange-500" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Favorite DM Chance ({probFavoriteDm}%)</label>
+                          <p className="text-xs text-gray-500 mb-2">Probability that a DM will be sent to a favorited conversation vs a random character.</p>
+                          <input 
+                            type="range" min="0" max="100" value={probFavoriteDm} 
+                            onChange={e => handleUpdateSettings({ prob_favorite_dm: parseInt(e.target.value) })}
                             className="w-full accent-orange-500" 
                           />
                         </div>

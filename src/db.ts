@@ -28,6 +28,7 @@ export function initDb() {
       image_prompt TEXT,
       post_type TEXT DEFAULT 'life_update',
       event_id INTEGER,
+      is_visible BOOLEAN DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (event_id) REFERENCES events(id)
@@ -177,6 +178,15 @@ export function initDb() {
       description TEXT NOT NULL,
       probability REAL NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS dm_favorites (
+      user_id INTEGER NOT NULL,
+      target_id INTEGER NOT NULL,
+      is_group BOOLEAN NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, target_id, is_group),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   // Initialize default archetypes if table is empty
@@ -285,6 +295,12 @@ export function initDb() {
   }
 
   try {
+    db.prepare('SELECT prob_favorite_dm FROM settings').get();
+  } catch (e) {
+    db.exec("ALTER TABLE settings ADD COLUMN prob_favorite_dm REAL DEFAULT 50.0");
+  }
+
+  try {
     db.prepare('SELECT event_id FROM posts').get();
   } catch (e) {
     db.exec("ALTER TABLE posts ADD COLUMN event_id INTEGER REFERENCES events(id)");
@@ -320,6 +336,12 @@ export function initDb() {
     db.prepare('SELECT post_type FROM posts').get();
   } catch (e) {
     db.exec("ALTER TABLE posts ADD COLUMN post_type TEXT DEFAULT 'life_update'");
+  }
+
+  try {
+    db.prepare('SELECT is_visible FROM posts').get();
+  } catch (e) {
+    db.exec("ALTER TABLE posts ADD COLUMN is_visible BOOLEAN DEFAULT 1");
   }
 
   // Handle schema migrations for settings
