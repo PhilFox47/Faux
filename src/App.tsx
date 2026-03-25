@@ -233,6 +233,24 @@ export default function App() {
   // API Logs
   const [apiLogs, setApiLogs] = useState<any[]>([]);
   const [apiLogSearch, setApiLogSearch] = useState('');
+  
+  const [relationshipChecks, setRelationshipChecks] = useState<any[]>([]);
+
+  const fetchRelationshipChecks = () => {
+    apiFetch('/api/relationship-checks')
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setRelationshipChecks(data);
+        } else {
+          setRelationshipChecks([]);
+        }
+      })
+      .catch(err => {
+        console.error("Failed to fetch relationship checks:", err);
+        setRelationshipChecks([]);
+      });
+  };
 
   const fetchApiLogs = (query?: string | React.MouseEvent | React.KeyboardEvent) => {
     const q = typeof query === 'string' ? query : apiLogSearch;
@@ -252,10 +270,12 @@ export default function App() {
       });
   };
 
+  const [showApiLogsModal, setShowApiLogsModal] = useState(false);
+
   const handleViewApiLogs = (content: string) => {
-    setActiveTab('settings');
     setApiLogSearch(content);
     fetchApiLogs(content);
+    setShowApiLogsModal(true);
   };
 
   const isUserOnline = (user: any) => {
@@ -1174,6 +1194,7 @@ export default function App() {
                 onClick={() => setActiveTab('messages')} 
               />
               <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); }} />
+              <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(); }} />
               <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); }} />
             </nav>
             <button 
@@ -1790,6 +1811,59 @@ export default function App() {
                 ))}
                 {viewingUniverseCharacters.length === 0 && (
                   <p className="text-gray-500 col-span-full">No characters found in this universe.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'relationships' && (
+            <div className="p-6 max-w-4xl mx-auto">
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                <Users className="text-orange-500" />
+                Dynamic Relationships
+              </h2>
+              <p className="text-gray-400 mb-6">
+                This tab shows all the times the AI evaluated whether two characters formed a meaningful relationship based on their interactions.
+              </p>
+              
+              <div className="space-y-4">
+                {relationshipChecks.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <Users size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>No relationship checks have occurred yet.</p>
+                    <p className="text-sm mt-2">Characters need to interact more (comments or DMs) to trigger a check.</p>
+                  </div>
+                ) : (
+                  relationshipChecks.map((check: any) => (
+                    <div key={check.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="flex -space-x-4">
+                            <img src={check.user1_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user1_name}`} alt={check.user1_name} className="w-12 h-12 rounded-full border-2 border-gray-900 object-cover bg-gray-800" referrerPolicy="no-referrer" />
+                            <img src={check.user2_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user2_name}`} alt={check.user2_name} className="w-12 h-12 rounded-full border-2 border-gray-900 object-cover bg-gray-800" referrerPolicy="no-referrer" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-lg">{check.user1_name} & {check.user2_name}</h3>
+                            <p className="text-xs text-gray-500">{new Date(check.created_at).toLocaleString()}</p>
+                          </div>
+                        </div>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${check.result ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {check.result ? 'Relationship Formed' : 'No Relationship'}
+                        </div>
+                      </div>
+                      
+                      <div className="bg-black/30 rounded-xl p-4 text-sm">
+                        <div className="flex items-center gap-2 mb-2 text-gray-400">
+                          <span className="font-mono text-xs bg-gray-800 px-2 py-0.5 rounded">Threshold: {check.interaction_threshold}</span>
+                        </div>
+                        {check.description ? (
+                          <p className="text-gray-300 italic">"{check.description}"</p>
+                        ) : (
+                          <p className="text-gray-500 italic">The AI determined their interactions were not significant enough to form a hard-coded relationship.</p>
+                        )}
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
@@ -2840,7 +2914,115 @@ export default function App() {
           </div>
         )}
 
-        {showCreateGroupModal && (
+        {/* API Logs Modal */}
+      {showApiLogsModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold flex items-center gap-2 text-blue-400">
+                <MessageSquare size={24} />
+                API Logs
+              </h3>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => fetchApiLogs(apiLogSearch)}
+                  className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1 rounded-lg transition-colors"
+                >
+                  Refresh Logs
+                </button>
+                <button onClick={() => setShowApiLogsModal(false)} className="text-gray-400 hover:text-white"><X size={24} /></button>
+              </div>
+            </div>
+            
+            <div className="mb-4 flex gap-2">
+              <input 
+                type="text" 
+                value={apiLogSearch} 
+                onChange={(e) => setApiLogSearch(e.target.value)} 
+                onKeyDown={(e) => e.key === 'Enter' && fetchApiLogs(apiLogSearch)}
+                placeholder="Search logs by content..." 
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+              <button 
+                onClick={() => fetchApiLogs(apiLogSearch)}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+              >
+                Search
+              </button>
+              {apiLogSearch && (
+                <button 
+                  onClick={() => { setApiLogSearch(''); fetchApiLogs(''); }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+              {apiLogs.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">No API logs found.</div>
+              ) : (
+                apiLogs.map((log: any) => {
+                  let requestObj: any = {};
+                  try {
+                    requestObj = JSON.parse(log.request_payload);
+                  } catch (e) {}
+                  
+                  return (
+                    <div key={log.id} className="bg-gray-800 p-4 rounded-xl text-xs font-mono border border-gray-700 hover:border-blue-500 transition-colors">
+                      <div className="flex justify-between text-gray-400 mb-3 items-center">
+                        <span className="font-bold text-blue-400 text-sm">{log.endpoint}</span>
+                        <span className="text-[10px] opacity-60">{formatTimestamp(log.created_at)}</span>
+                      </div>
+                      <div className="mb-3 space-y-1">
+                        <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Request Details</div>
+                        <div className="bg-black/30 p-2 rounded border border-white/5 overflow-x-auto whitespace-pre-wrap">
+                          {Object.entries(requestObj).map(([key, val]) => (
+                            <div key={key} className="mb-1 last:mb-0">
+                              <span className="text-orange-400">{key}:</span> <span className="text-gray-300">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
+                        {(() => {
+                          try {
+                            const resObj = JSON.parse(log.response_payload);
+                            return (
+                              <div className="space-y-2">
+                                {resObj.reasoning && (
+                                  <div className="bg-blue-900/10 border border-blue-500/20 p-2 rounded">
+                                    <div className="text-[10px] text-blue-400 font-bold mb-1 uppercase tracking-tighter">Thinking / Reasoning</div>
+                                    <div className="text-gray-400 italic">{resObj.reasoning}</div>
+                                  </div>
+                                )}
+                                <div className={`p-2 rounded border ${!resObj.content ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
+                                  <div className="text-[10px] opacity-50 font-bold mb-1 uppercase tracking-tighter">Final Output</div>
+                                  {resObj.content || "Empty Response"}
+                                </div>
+                              </div>
+                            );
+                          } catch (e) {
+                            return (
+                              <div className="bg-red-900/20 border border-red-500/30 text-red-200 p-2 rounded whitespace-pre-wrap overflow-x-auto">
+                                {log.response_payload}
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCreateGroupModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
               <div className="flex justify-between items-center mb-6">

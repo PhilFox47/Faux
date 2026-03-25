@@ -332,6 +332,94 @@ function getOtherUserUniverseContext(character: any, otherUser: any): string {
   return '';
 }
 
+export async function generateImagePostData(character: any, context: string = '', relationships: string = '', availableUsernames: string = '') {
+  const helperCallLLM = async (prompt: string, endpointName: string, temp: number = 0.9) => {
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 10000,
+        temperature: temp,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`${endpointName}: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      endpointName,
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: temp, finish_reason: finishReason }),
+      JSON.stringify({ content, reasoning, raw: rawContent })
+    );
+    
+    return content.trim();
+  };
+
+  try {
+    // Step 1: Idea
+    const ideaPrompt = `${buildCharacterPrompt(character)}
+Think about something you would post on social media right now that would justify adding a photo to it.
+Make sure to only create the vision/idea of the post, not the post itself.
+${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
+${context ? `Recent platform activity for inspiration (with timestamps, do not copy, just for vibe and temporal context): ${context}` : ''}
+Respond with ONLY the brief idea.`;
+    const idea = await helperCallLLM(ideaPrompt, "generateImagePostData_idea", 0.9);
+
+    // Step 2: Text Post
+    const textPrompt = `${buildCharacterPrompt(character)}
+Based on this idea for a photo post: "${idea}"
+Generate the Text Part of the post. DO NOT include an image description (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.
+Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
+    const textPost = await helperCallLLM(textPrompt, "generateImagePostData_text", 0.9);
+
+    // Step 3: Positive Prompt
+    const imagePrompt = `You are an expert at writing highly detailed prompts for the Chroma AI image generator.
+You need to write a comprehensive image generation prompt for a social media post by ${character.display_name}.
+The idea for the post is: "${idea}"
+The text of their post is: "${textPost}"
+
+Chroma is sensitive to prompting and understands plain English. A structured, descriptive prompt is essential.
+
+Character details:
+Name: ${character.display_name}
+Appearance: ${character.physical_appearance || character.bio || 'average looking'}
+Clothing style: ${character.clothing_style || 'casual everyday clothes'}
+Artstyle: ${character.artstyle || 'Realistic'}
+
+Guidelines:
+- Think about what actually should be depicted based on the idea and text.
+- If the character is shown, ensure to describe them accurately based on their physical appearance and clothing style.
+- Use a proper perspective that makes sense for a social media post (e.g., characters usually take the image themselves, so selfies or first-person perspectives are common).
+- Keep in mind how Characters access Faux (based on their universe description), as this usually also has influence on how the image looks.
+- If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Instagram photo", "Lighting: Natural morning light", "Style: Candid amateur photograph"). Mention camera type.
+- If the Artstyle is Stylized: Clearly describe the Art Direction.
+- ONLY output the final prompt text, nothing else.`;
+    const positivePrompt = await helperCallLLM(imagePrompt, "generateImagePostData_image", 0.7);
+
+    // Step 4: Negative Prompt
+    const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
+
+    return { idea, textPost, positivePrompt, negativePrompt };
+  } catch (error: any) {
+    console.error('Error generating image post data:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "generateImagePostData",
+      JSON.stringify({ model: getModel(), error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+    );
+    return null;
+  }
+}
+
 export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false) {
   let prompt = `${buildCharacterPrompt(character)}
 ${isIntroduction ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.` : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
@@ -857,5 +945,87 @@ export async function generateImage(prompt: string, negative_prompt?: string) {
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;
+  }
+}
+
+export async function evaluateDynamicRelationship(user1: any, user2: any, recentComments: any[], recentDms: any[], difficulty: string): Promise<{ result: boolean, description?: string }> {
+  let contextStr = "Recent Interactions:\n";
+  if (recentComments.length > 0) {
+    contextStr += "Comments:\n" + recentComments.map(c => `[${c.created_at}] ${c.commenter} replied to ${c.poster}'s post ("${c.post_content}"): "${c.content}"`).join("\n") + "\n";
+  }
+  if (recentDms.length > 0) {
+    contextStr += "Direct Messages:\n" + recentDms.map(m => `[${m.created_at}] ${m.sender}: "${m.content}"`).join("\n") + "\n";
+  }
+
+  const prompt = `You are evaluating if two users, ${user1.display_name} and ${user2.display_name}, have formed a meaningful relationship based on their recent interactions.
+A meaningful relationship is a special connection (positive or negative) that justifies them receiving a hard-coded relationship on their profiles.
+Do NOT have a positivity bias. Only say "Yes" if the dynamic is truly interesting or noteworthy.
+
+Difficulty Modifier: ${difficulty}
+- Easy: They have few relationships, so be more lenient.
+- Medium: They have some relationships, be moderately strict.
+- Hard: They have many relationships, be very strict. Only the most exceptional dynamics should pass.
+
+User 1: ${user1.display_name} (@${user1.username})
+Bio: ${user1.bio || 'N/A'}
+Persona: ${user1.ai_persona || 'N/A'}
+
+User 2: ${user2.display_name} (@${user2.username})
+Bio: ${user2.bio || 'N/A'}
+Persona: ${user2.ai_persona || 'N/A'}
+
+${contextStr}
+
+First, evaluate if they have formed a meaningful relationship (Yes or No).
+If Yes, provide a 1-2 sentence description of their relationship from a neutral third-party perspective.
+
+Respond strictly in JSON format:
+{
+  "result": boolean,
+  "description": "string (only if result is true, otherwise empty string)"
+}`;
+
+  try {
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: "json_object" },
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`evaluateDynamicRelationship: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "evaluateDynamicRelationship",
+      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.7, finish_reason: finishReason }),
+      JSON.stringify({ content, reasoning, raw: rawContent })
+    );
+
+    const parsed = JSON.parse(content);
+    return {
+      result: !!parsed.result,
+      description: parsed.description || undefined
+    };
+  } catch (error: any) {
+    console.error('Error evaluating dynamic relationship:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "evaluateDynamicRelationship",
+      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+    );
+    return { result: false };
   }
 }

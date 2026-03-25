@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship } from "./src/ai";
 
 const pendingComments = new Set<string>();
 
@@ -47,6 +47,84 @@ function pickWeightedRandomUser(users: any[]) {
     if (random <= 0) return user;
   }
   return users[users.length - 1];
+}
+
+async function checkDynamicRelationship(user1Id: number, user2Id: number) {
+  if (user1Id === user2Id) return;
+  
+  // Check if relationship already exists
+  const existingRel = db.prepare("SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id);
+  if (existingRel) return;
+
+  // Get interaction counts
+  const commentsCount = (db.prepare(`
+    SELECT COUNT(*) as count FROM comments 
+    WHERE (user_id = ? AND post_id IN (SELECT id FROM posts WHERE user_id = ?))
+       OR (user_id = ? AND post_id IN (SELECT id FROM posts WHERE user_id = ?))
+       OR (user_id = ? AND parent_id IN (SELECT id FROM comments WHERE user_id = ?))
+       OR (user_id = ? AND parent_id IN (SELECT id FROM comments WHERE user_id = ?))
+  `).get(user1Id, user2Id, user2Id, user1Id, user1Id, user2Id, user2Id, user1Id) as any).count;
+
+  const dmsCount = (db.prepare(`
+    SELECT COUNT(*) as count FROM direct_messages 
+    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+  `).get(user1Id, user2Id, user2Id, user1Id) as any).count;
+
+  const expectedChecks = Math.floor(commentsCount / 5) + Math.floor(dmsCount / 20);
+  if (expectedChecks <= 0) return;
+
+  const actualChecks = (db.prepare("SELECT COUNT(*) as count FROM relationship_checks WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any).count;
+
+  if (expectedChecks > actualChecks) {
+    // Perform check
+    const user1 = db.prepare("SELECT * FROM users WHERE id = ?").get(user1Id) as any;
+    const user2 = db.prepare("SELECT * FROM users WHERE id = ?").get(user2Id) as any;
+    if (!user1 || !user2) return;
+
+    // Get recent interactions
+    const recentComments = db.prepare(`
+      SELECT c.content, c.created_at, u1.display_name as commenter, u2.display_name as poster, p.content as post_content
+      FROM comments c
+      JOIN users u1 ON c.user_id = u1.id
+      JOIN posts p ON c.post_id = p.id
+      JOIN users u2 ON p.user_id = u2.id
+      WHERE (c.user_id = ? AND p.user_id = ?) OR (c.user_id = ? AND p.user_id = ?)
+      ORDER BY c.created_at DESC LIMIT 10
+    `).all(user1Id, user2Id, user2Id, user1Id) as any[];
+
+    const recentDms = db.prepare(`
+      SELECT dm.content, dm.created_at, u.display_name as sender
+      FROM direct_messages dm
+      JOIN users u ON dm.sender_id = u.id
+      WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+      ORDER BY created_at DESC LIMIT 10
+    `).all(user1Id, user2Id, user2Id, user1Id) as any[];
+
+    // Calculate difficulty
+    const u1Rels = (db.prepare("SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").get(user1Id, user1Id) as any).count;
+    const u2Rels = (db.prepare("SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").get(user2Id, user2Id) as any).count;
+    const minRels = Math.min(u1Rels, u2Rels);
+    
+    let difficulty = "Easy";
+    if (minRels >= 10) difficulty = "Hard";
+    else if (minRels >= 5) difficulty = "Medium";
+
+    const { result, description } = await evaluateDynamicRelationship(user1, user2, recentComments, recentDms, difficulty);
+
+    const u1 = Math.min(user1Id, user2Id);
+    const u2 = Math.max(user1Id, user2Id);
+
+    db.prepare("INSERT INTO relationship_checks (user_id_1, user_id_2, interaction_threshold, result, description) VALUES (?, ?, ?, ?, ?)").run(
+      u1, u2, expectedChecks, result ? 1 : 0, description || null
+    );
+
+    if (result && description) {
+      db.prepare("INSERT INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(u1, u2, description);
+      console.log(`Dynamic relationship formed between ${user1.display_name} and ${user2.display_name}: ${description}`);
+    } else {
+      console.log(`Dynamic relationship check failed for ${user1.display_name} and ${user2.display_name}`);
+    }
+  }
 }
 
 function filterAvailableUsersForComment(opId: number, availableAiUsers: any[]) {
@@ -137,6 +215,7 @@ async function triggerPostComments(postId: number, postType: string) {
       if (commentContent) {
         const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
           .run(postId, randomAi.id, commentContent);
+        checkDynamicRelationship(randomAi.id, post.user_id).catch(console.error);
         console.log(`${randomAi.display_name} auto-commented on post ${postId}`);
 
         // Add 1-5 likes to the post
@@ -226,6 +305,7 @@ async function handleOPReplies() {
         if (replyContent) {
           const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
             .run(comment.post_id, opUser.id, replyContent, comment.id);
+          checkDynamicRelationship(opUser.id, comment.user_id).catch(console.error);
           console.log(`OP ${opUser.display_name} replied to comment ${comment.id}`);
 
           // Add 1-5 likes to the comment being replied to
@@ -275,6 +355,18 @@ async function startServer() {
       const logs = db.prepare("SELECT * FROM api_logs ORDER BY created_at DESC LIMIT 50").all();
       res.json(logs);
     }
+  });
+
+  app.get("/api/relationship-checks", (req, res) => {
+    const checks = db.prepare(`
+      SELECT rc.*, u1.display_name as user1_name, u1.avatar_url as user1_avatar, u2.display_name as user2_name, u2.avatar_url as user2_avatar
+      FROM relationship_checks rc
+      JOIN users u1 ON rc.user_id_1 = u1.id
+      JOIN users u2 ON rc.user_id_2 = u2.id
+      ORDER BY rc.created_at DESC
+      LIMIT 100
+    `).all();
+    res.json(checks);
   });
 
   app.get("/api/health", (req, res) => {
@@ -745,7 +837,22 @@ async function startServer() {
       const archetype = pickArchetype(isFirstPost, type === 'image');
       const allUsers = db.prepare("SELECT username FROM users WHERE id != ?").all(aiUser.id) as any[];
       const availableUsernames = allUsers.map(u => u.username).join(', ');
-      const postContent = await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost);
+      
+      let postContent = "";
+      let positivePrompt = "";
+      let negativePrompt = "";
+      
+      if (archetype.id === 'image_post') {
+        const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
+        if (imageData) {
+          postContent = imageData.textPost;
+          positivePrompt = imageData.positivePrompt;
+          negativePrompt = imageData.negativePrompt;
+        }
+      } else {
+        postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost)) || "";
+      }
+
       if (postContent) {
         const isVisible = archetype.id === 'image_post' ? 0 : 1;
         const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible);
@@ -761,8 +868,6 @@ async function startServer() {
         // Generate image in background
         if (archetype.id === 'image_post') {
           try {
-            const positivePrompt = await generateImagePrompt(aiUser, postContent);
-            const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
             const imageUrl = await generateImage(positivePrompt, negativePrompt);
             if (imageUrl) {
               db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
@@ -862,6 +967,18 @@ async function startServer() {
     const stmt = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)");
     const info = stmt.run(req.params.id, user.id, content, parent_id || null);
     res.json({ id: info.lastInsertRowid });
+
+    let targetUserId = null;
+    if (parent_id) {
+      const parentComment = db.prepare("SELECT user_id FROM comments WHERE id = ?").get(parent_id) as any;
+      if (parentComment) targetUserId = parentComment.user_id;
+    } else {
+      const post = db.prepare("SELECT user_id FROM posts WHERE id = ?").get(req.params.id) as any;
+      if (post) targetUserId = post.user_id;
+    }
+    if (targetUserId) {
+      checkDynamicRelationship(user.id, targetUserId).catch(console.error);
+    }
   });
 
   app.get("/api/posts/:id/likers", (req, res) => {
@@ -1255,6 +1372,8 @@ async function startServer() {
       
       res.json({ success: true });
 
+      checkDynamicRelationship(user.id, parseInt(receiverId)).catch(console.error);
+
       // AI Reply logic
       const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
       const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
@@ -1279,6 +1398,7 @@ async function startServer() {
         if (reply) {
           db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
             .run(receiverId, user.id, reply.trim());
+          checkDynamicRelationship(receiver.id, user.id).catch(console.error);
         }
       }
     } catch (e: any) {
@@ -1402,7 +1522,22 @@ async function startServer() {
         const archetype = pickArchetype(isFirstPost, isImage);
         const allUsers = db.prepare("SELECT username FROM users WHERE id != ?").all(aiUser.id) as any[];
         const availableUsernames = allUsers.map(u => u.username).join(', ');
-        const postContent = await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost);
+        
+        let postContent = "";
+        let positivePrompt = "";
+        let negativePrompt = "";
+        
+        if (archetype.id === 'image_post') {
+          const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
+          if (imageData) {
+            postContent = imageData.textPost;
+            positivePrompt = imageData.positivePrompt;
+            negativePrompt = imageData.negativePrompt;
+          }
+        } else {
+          postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost)) || "";
+        }
+
         if (postContent) {
           const isVisible = archetype.id === 'image_post' ? 0 : 1;
           const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible);
@@ -1415,8 +1550,6 @@ async function startServer() {
 
           if (archetype.id === 'image_post') {
             try {
-              const positivePrompt = await generateImagePrompt(aiUser, postContent);
-              const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
               const imageUrl = await generateImage(positivePrompt, negativePrompt);
               if (imageUrl) {
                 db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
@@ -1458,6 +1591,7 @@ async function startServer() {
                     if (commentContent) {
                       db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
                         .run(postId, otherAi.id, commentContent);
+                      checkDynamicRelationship(otherAi.id, aiUser.id).catch(console.error);
                       console.log(`${otherAi.display_name} reacted to ${archetype.id} by ${aiUser.display_name}`);
                     }
                   } finally {
@@ -1541,6 +1675,7 @@ async function startServer() {
                   if (dmContent) {
                     db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
                       .run(randomAi.id, realUser.id, dmContent.trim());
+                    checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
                     console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
                   }
                 }
@@ -1566,6 +1701,7 @@ async function startServer() {
               if (dmContent) {
                 db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
                   .run(randomAi.id, realUser.id, dmContent.trim());
+                checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
                 console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
               }
             }
@@ -1590,6 +1726,7 @@ async function startServer() {
             if (dmContent) {
               db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
                 .run(randomAi.id, realUser.id, dmContent.trim());
+              checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
               console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
             }
           }
@@ -1637,6 +1774,7 @@ async function startServer() {
               if (reply) {
                 db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
                   .run(aiUser.id, realUser.id, reply);
+                checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
                 console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
               }
             }
@@ -1780,6 +1918,7 @@ async function startServer() {
                   const commentContent = await generateComment(randomAi, commentData.content, commentData.author_name, threadContext, true, relStr, commentData.user_id, undefined, commentData.created_at);
                   if (commentContent) {
                     const info = db.prepare("INSERT INTO comments (post_id, user_id, parent_id, content) VALUES (?, ?, ?, ?)").run(commentData.post_id, randomAi.id, commentData.id, commentContent);
+                    checkDynamicRelationship(randomAi.id, commentData.user_id).catch(console.error);
                     console.log(`${randomAi.display_name} replied to mention in comment ${commentData.id}`);
 
                     // Add 1-5 likes to the comment being replied to
@@ -1825,6 +1964,7 @@ async function startServer() {
                   const commentContent = await generateComment(randomAi, postData.content, postData.author_name, commentsStr, false, relStr, postData.user_id, postData.image_prompt, postData.created_at);
                   if (commentContent) {
                     const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)").run(postData.id, randomAi.id, commentContent);
+                    checkDynamicRelationship(randomAi.id, postData.user_id).catch(console.error);
                     console.log(`${randomAi.display_name} replied to mention in post ${postData.id}`);
 
                     // Add 1-5 likes to the post being replied to
@@ -1992,6 +2132,7 @@ async function startServer() {
               if (commentContent) {
                 const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
                   .run(randomPost.id, randomAi.id, commentContent);
+                checkDynamicRelationship(randomAi.id, randomPost.user_id).catch(console.error);
                 console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
 
                 // Add 1-5 likes to the post
@@ -2022,6 +2163,7 @@ async function startServer() {
               if (replyContent) {
                 const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
                   .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
+                checkDynamicRelationship(randomAi.id, randomComment.user_id).catch(console.error);
                 console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
 
                 // Add 1-5 likes to the comment

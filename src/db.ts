@@ -187,6 +187,19 @@ export function initDb() {
       PRIMARY KEY (user_id, target_id, is_group),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS relationship_checks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id_1 INTEGER NOT NULL,
+      user_id_2 INTEGER NOT NULL,
+      interaction_threshold INTEGER NOT NULL,
+      result BOOLEAN NOT NULL,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id_1, user_id_2, interaction_threshold),
+      FOREIGN KEY (user_id_1) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id_2) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   // Initialize default archetypes if table is empty
