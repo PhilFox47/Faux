@@ -134,6 +134,7 @@ export default function App() {
   const [probComment, setProbComment] = useState(1000);
   const [probMessage, setProbMessage] = useState(5);
   const [probFavoriteDm, setProbFavoriteDm] = useState(50);
+  const [crossUniverseProb, setCrossUniverseProb] = useState(50);
   const [archetypes, setArchetypes] = useState<any[]>([]);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean, message?: string, error?: string} | null>(null);
@@ -280,6 +281,16 @@ export default function App() {
 
   const isUserOnline = (user: any) => {
     if (!user || user.is_ai === 0) return true;
+    
+    // Use backend-calculated status if available and not expired
+    if (user.status_expires_at && user.current_online_status !== undefined) {
+      const now = Date.now();
+      if (now < user.status_expires_at) {
+        return user.current_online_status === 1;
+      }
+    }
+
+    // Fallback to basic timeframe check if backend status is missing or expired
     let onlineTimes = [];
     try {
       onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : (user.online_times || []);
@@ -546,6 +557,7 @@ export default function App() {
         if (data.prob_comment !== undefined) setProbComment(data.prob_comment);
         if (data.prob_message !== undefined) setProbMessage(data.prob_message);
         if (data.prob_favorite_dm !== undefined) setProbFavoriteDm(data.prob_favorite_dm);
+        if (data.cross_universe_prob !== undefined) setCrossUniverseProb(data.cross_universe_prob);
       }
     });
   };
@@ -583,6 +595,7 @@ export default function App() {
     if (newSettings.prob_comment !== undefined) setProbComment(newSettings.prob_comment);
     if (newSettings.prob_message !== undefined) setProbMessage(newSettings.prob_message);
     if (newSettings.prob_favorite_dm !== undefined) setProbFavoriteDm(newSettings.prob_favorite_dm);
+    if (newSettings.cross_universe_prob !== undefined) setCrossUniverseProb(newSettings.cross_universe_prob);
     await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2109,6 +2122,15 @@ export default function App() {
                           <input 
                             type="range" min="0" max="100" value={probFavoriteDm} 
                             onChange={e => handleUpdateSettings({ prob_favorite_dm: parseInt(e.target.value) })}
+                            className="w-full accent-orange-500" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Cross-Universe Interaction ({crossUniverseProb}%)</label>
+                          <p className="text-xs text-gray-500 mb-2">Probability that a character will interact with someone from a different universe.</p>
+                          <input 
+                            type="range" min="0" max="100" value={crossUniverseProb} 
+                            onChange={e => handleUpdateSettings({ cross_universe_prob: parseInt(e.target.value) })}
                             className="w-full accent-orange-500" 
                           />
                         </div>

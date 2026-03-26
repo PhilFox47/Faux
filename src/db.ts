@@ -17,6 +17,8 @@ export function initDb() {
       ai_persona TEXT, -- Description of who they are impersonating
       online_times TEXT DEFAULT '[]', -- JSON array of time windows
       activity_level INTEGER DEFAULT 5, -- Scale of 1-10
+      current_online_status INTEGER DEFAULT 0,
+      status_expires_at INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -117,6 +119,8 @@ export function initDb() {
       prob_image_post REAL DEFAULT 30.0,
       prob_comment REAL DEFAULT 1000.0,
       prob_message REAL DEFAULT 5.0,
+      prob_favorite_dm REAL DEFAULT 50.0,
+      cross_universe_prob REAL DEFAULT 50.0,
       allow_nsfw BOOLEAN DEFAULT 0
     );
 
@@ -308,6 +312,18 @@ export function initDb() {
   }
 
   try {
+    db.prepare('SELECT current_online_status FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN current_online_status INTEGER DEFAULT 0");
+  }
+
+  try {
+    db.prepare('SELECT status_expires_at FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN status_expires_at INTEGER DEFAULT 0");
+  }
+
+  try {
     db.prepare('SELECT prob_favorite_dm FROM settings').get();
   } catch (e) {
     db.exec("ALTER TABLE settings ADD COLUMN prob_favorite_dm REAL DEFAULT 50.0");
@@ -332,6 +348,12 @@ export function initDb() {
     db.exec("ALTER TABLE comments ADD COLUMN op_ignored BOOLEAN DEFAULT 0");
   }
 
+  try {
+    db.prepare('SELECT mention_ignored FROM comments').get();
+  } catch (e) {
+    db.exec("ALTER TABLE comments ADD COLUMN mention_ignored BOOLEAN DEFAULT 0");
+  }
+
   // Handle schema migrations for posts
   try {
     db.prepare('SELECT image_url FROM posts').get();
@@ -343,6 +365,12 @@ export function initDb() {
     db.prepare('SELECT image_prompt FROM posts').get();
   } catch (e) {
     db.exec("ALTER TABLE posts ADD COLUMN image_prompt TEXT");
+  }
+
+  try {
+    db.prepare('SELECT mention_ignored FROM posts').get();
+  } catch (e) {
+    db.exec("ALTER TABLE posts ADD COLUMN mention_ignored BOOLEAN DEFAULT 0");
   }
 
   try {
@@ -379,6 +407,10 @@ export function initDb() {
 
   try {
     db.exec("ALTER TABLE settings ADD COLUMN allow_nsfw BOOLEAN DEFAULT 0");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE settings ADD COLUMN cross_universe_prob REAL DEFAULT 50.0");
   } catch (e) {}
 
   // Insert default settings

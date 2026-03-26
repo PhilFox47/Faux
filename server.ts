@@ -7,35 +7,81 @@ import { generatePost, generateImagePostData, generateComment, generateDM, reply
 const pendingComments = new Set<string>();
 
 function isUserOnline(user: any, timezone: string) {
-  if (!user.online_times || user.online_times === '[]') return true;
-  let onlineTimes;
-  try {
-    onlineTimes = JSON.parse(user.online_times);
-  } catch (e) {
-    return true;
+  // Determine the correct user ID based on the object structure
+  let userId = user.id;
+  if (user.ai_user_id) userId = user.ai_user_id; // From unrepliedMentions
+  else if (user.receiver_id && user.sender_id) userId = user.receiver_id; // From unrepliedDms
+
+  if (!userId) return true;
+
+  let dbUser = user;
+  if (user.current_online_status === undefined || user.status_expires_at === undefined || user.activity_level === undefined) {
+    dbUser = db.prepare("SELECT online_times, activity_level, current_online_status, status_expires_at FROM users WHERE id = ?").get(userId) as any;
+    if (!dbUser) return true;
   }
-  if (!onlineTimes || onlineTimes.length === 0) return true;
 
-  const now = new Date();
-  const localTime = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    hour12: false
-  }).format(now);
-  let currentHour = parseInt(localTime);
-  if (currentHour === 24) currentHour = 0;
+  const now = Date.now();
+  if (dbUser.status_expires_at && now < dbUser.status_expires_at) {
+    return dbUser.current_online_status === 1;
+  }
 
-  return onlineTimes.some((window: string) => {
-    const parts = window.split('-').map(t => parseInt(t.trim().split(':')[0]));
-    if (parts.length !== 2) return false;
-    const [start, end] = parts;
-    if (start < end) {
-      return currentHour >= start && currentHour < end;
-    } else {
-      // Overnight window (e.g., 23:00 - 04:00)
-      return currentHour >= start || currentHour < end;
-    }
-  });
+  let inOnlineTimeframe = true;
+  if (dbUser.online_times && dbUser.online_times !== '[]') {
+    try {
+      const onlineTimes = JSON.parse(dbUser.online_times);
+      if (onlineTimes && onlineTimes.length > 0) {
+        const localTime = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          hour: 'numeric',
+          hour12: false
+        }).format(new Date(now));
+        let currentHour = parseInt(localTime);
+        if (currentHour === 24) currentHour = 0;
+
+        inOnlineTimeframe = onlineTimes.some((window: string) => {
+          const parts = window.split('-').map(t => parseInt(t.trim().split(':')[0]));
+          if (parts.length !== 2) return false;
+          const [start, end] = parts;
+          if (start < end) {
+            return currentHour >= start && currentHour < end;
+          } else {
+            return currentHour >= start || currentHour < end;
+          }
+        });
+      }
+    } catch (e) {}
+  }
+
+  const activityLevel = dbUser.activity_level ?? 5;
+  let chance = 0;
+  let minDuration = 5;
+  let maxDuration = 25;
+
+  if (inOnlineTimeframe) {
+    chance = 50 + (5 * activityLevel);
+    minDuration = 5;
+    maxDuration = 25;
+  } else {
+    chance = 0 + (2 * activityLevel);
+    minDuration = 2;
+    maxDuration = 25;
+  }
+
+  const isOnline = (Math.random() * 100) < chance;
+  const durationMinutes = Math.floor(Math.random() * (maxDuration - minDuration + 1)) + minDuration;
+  const expiresAt = now + (durationMinutes * 60 * 1000);
+
+  try {
+    db.prepare("UPDATE users SET current_online_status = ?, status_expires_at = ? WHERE id = ?")
+      .run(isOnline ? 1 : 0, expiresAt, userId);
+  } catch(e) {
+    console.error("Failed to update user online status", e);
+  }
+
+  user.current_online_status = isOnline ? 1 : 0;
+  user.status_expires_at = expiresAt;
+
+  return isOnline;
 }
 
 function pickWeightedRandomUser(users: any[]) {
@@ -130,6 +176,19 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
 function filterAvailableUsersForComment(opId: number, availableAiUsers: any[]) {
   if (!availableAiUsers || availableAiUsers.length === 0) return [];
 
+  const settings = db.prepare("SELECT cross_universe_prob FROM settings WHERE id = 1").get() as any;
+  const crossUniverseProb = (settings?.cross_universe_prob ?? 50.0) / 100;
+
+  const opUser = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(opId) as any;
+  const opUniverseId = opUser?.universe_id;
+
+  const filteredAiUsers = availableAiUsers.filter(u => {
+    if (u.universe_id === opUniverseId) return true;
+    return Math.random() < crossUniverseProb;
+  });
+
+  if (filteredAiUsers.length === 0) return [];
+
   // 1. ALL Users who the OP has a relationship with
   const relationships = db.prepare("SELECT user_id_1, user_id_2 FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").all(opId, opId) as any[];
   const relatedUserIds = new Set(relationships.flatMap(r => [r.user_id_1, r.user_id_2]).filter(id => id !== opId));
@@ -138,15 +197,15 @@ function filterAvailableUsersForComment(opId: number, availableAiUsers: any[]) {
   const followers = db.prepare("SELECT follower_id FROM follows WHERE followed_id = ?").all(opId) as any[];
   const followerIds = new Set(followers.map(f => f.follower_id));
 
-  const relatedUsers = availableAiUsers.filter(u => relatedUserIds.has(u.id));
+  const relatedUsers = filteredAiUsers.filter(u => relatedUserIds.has(u.id));
 
   // Up to 20 Users who are following OP (excluding related users)
-  const followerUsers = availableAiUsers.filter(u => followerIds.has(u.id) && !relatedUserIds.has(u.id));
+  const followerUsers = filteredAiUsers.filter(u => followerIds.has(u.id) && !relatedUserIds.has(u.id));
   const selectedFollowers = followerUsers.sort(() => 0.5 - Math.random()).slice(0, 20);
 
   // 20 Additional, random Users (excluding related users and selected followers)
   const selectedFollowerIds = new Set(selectedFollowers.map(u => u.id));
-  const remainingUsers = availableAiUsers.filter(u => !relatedUserIds.has(u.id) && !selectedFollowerIds.has(u.id));
+  const remainingUsers = filteredAiUsers.filter(u => !relatedUserIds.has(u.id) && !selectedFollowerIds.has(u.id));
   const randomUsers = remainingUsers.sort(() => 0.5 - Math.random()).slice(0, 20);
 
   return [...relatedUsers, ...selectedFollowers, ...randomUsers];
@@ -261,6 +320,18 @@ function buildThreadContext(commentId: number): string {
   return context.join('\n');
 }
 
+function getCommentDepth(commentId: number): number {
+  let depth = 1;
+  let currentCommentId = commentId;
+  while (currentCommentId) {
+    const comment = db.prepare("SELECT parent_id FROM comments WHERE id = ?").get(currentCommentId) as any;
+    if (!comment || !comment.parent_id) break;
+    currentCommentId = comment.parent_id;
+    depth++;
+  }
+  return depth;
+}
+
 async function handleOPReplies() {
   const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
   if (!settings || !settings.ai_enabled) return;
@@ -287,6 +358,11 @@ async function handleOPReplies() {
     const shouldReply = comment.author_is_ai === 0 ? true : Math.random() < 0.65;
     
     if (shouldReply) {
+      if (getCommentDepth(comment.id) >= 5) {
+        db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+        continue;
+      }
+
       const opUser = db.prepare("SELECT * FROM users WHERE id = ?").get(comment.op_id) as any;
       if (!opUser) continue;
 
@@ -438,7 +514,7 @@ async function startServer() {
   });
 
   app.post("/api/settings", (req, res) => {
-    const { ai_enabled, model_name, image_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm } = req.body;
+    const { ai_enabled, model_name, image_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob } = req.body;
     if (ai_enabled !== undefined) {
       db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(ai_enabled ? 1 : 0);
     }
@@ -468,6 +544,9 @@ async function startServer() {
     }
     if (prob_favorite_dm !== undefined) {
       db.prepare("UPDATE settings SET prob_favorite_dm = ? WHERE id = 1").run(prob_favorite_dm);
+    }
+    if (cross_universe_prob !== undefined) {
+      db.prepare("UPDATE settings SET cross_universe_prob = ? WHERE id = 1").run(cross_universe_prob);
     }
     res.json({ success: true });
   });
@@ -1131,7 +1210,7 @@ async function startServer() {
 
     for (const group of groups as any[]) {
       group.members = db.prepare(`
-        SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times
+        SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at
         FROM users u
         JOIN group_chat_members gcm ON u.id = gcm.user_id
         WHERE gcm.group_chat_id = ?
@@ -1303,7 +1382,7 @@ async function startServer() {
     // Get latest message per conversation
     const conversations = db.prepare(`
       SELECT 
-        u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times,
+        u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at,
         dm.content as last_message, dm.created_at, dm.is_read,
         dm.sender_id,
         (SELECT COUNT(*) FROM direct_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread_count
@@ -1479,8 +1558,8 @@ async function startServer() {
               `).all(randomAi.universe_id, randomAi.id) as any[];
               
               if (sameUniverseUsers.length > 0) {
-                // 70% chance to pick from same universe users
-                if (Math.random() < 0.7) {
+                const crossUniverseProb = (settings.cross_universe_prob ?? 50.0) / 100;
+                if (Math.random() > crossUniverseProb) {
                   const pickedSimilar = sameUniverseUsers[Math.floor(Math.random() * sameUniverseUsers.length)];
                   const foundUser = otherAiUsers.find(u => u.id === pickedSimilar.user_id);
                   if (foundUser) userToFollow = foundUser;
@@ -1569,7 +1648,12 @@ async function startServer() {
           if (archetype.id === 'event' || archetype.id === 'meetup') {
             // Trigger other characters to react
             const count = archetype.id === 'event' ? Math.floor(Math.random() * 5) + 1 : Math.floor(Math.random() * 4) + 1;
-            const otherAis = activeAiUsers.filter(u => u.id !== aiUser.id);
+            const crossUniverseProb = (settings.cross_universe_prob ?? 50.0) / 100;
+            const otherAis = activeAiUsers.filter(u => {
+              if (u.id === aiUser.id) return false;
+              if (u.universe_id === aiUser.universe_id) return true;
+              return Math.random() < crossUniverseProb;
+            });
             if (otherAis.length > 0) {
               const selectedAis = [];
               let availableAis = [...otherAis];
@@ -1783,10 +1867,9 @@ async function startServer() {
       }
     }
       
-      if (Math.random() < probPost && allAiUsers.length > 0) {
-        const onlineAiUsers = allAiUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
-        if (onlineAiUsers.length > 0) {
-          const randomAi = pickWeightedRandomUser(onlineAiUsers);
+      if (Math.random() < probPost && activeAiUsers.length > 0) {
+        if (activeAiUsers.length > 0) {
+          const randomAi = pickWeightedRandomUser(activeAiUsers);
           await doAiPost(randomAi, false);
         }
       }
@@ -1866,7 +1949,7 @@ async function startServer() {
         SELECT p.id as post_id, NULL as comment_id, p.content, u.id as ai_user_id, p.user_id as author_id, u.online_times
         FROM posts p
         JOIN users u ON p.content LIKE '%@' || u.username || '%'
-        WHERE u.is_ai = 1 AND u.is_active = 1
+        WHERE u.is_ai = 1 AND u.is_active = 1 AND p.mention_ignored = 0
         AND NOT EXISTS (
           SELECT 1 FROM comments c WHERE c.post_id = p.id AND c.user_id = u.id AND c.parent_id IS NULL
         )
@@ -1874,13 +1957,24 @@ async function startServer() {
         SELECT c.post_id, c.id as comment_id, c.content, u.id as ai_user_id, c.user_id as author_id, u.online_times
         FROM comments c
         JOIN users u ON c.content LIKE '%@' || u.username || '%'
-        WHERE u.is_ai = 1 AND u.is_active = 1
+        WHERE u.is_ai = 1 AND u.is_active = 1 AND c.mention_ignored = 0
         AND NOT EXISTS (
           SELECT 1 FROM comments c2 WHERE c2.parent_id = c.id AND c2.user_id = u.id
         )
       `).all() as any[];
 
-      const onlineMentions = unrepliedMentions.filter(m => isUserOnline(m, settings.timezone || 'UTC'));
+      const onlineMentions = [];
+      for (const m of unrepliedMentions) {
+        if (isUserOnline(m, settings.timezone || 'UTC')) {
+          onlineMentions.push(m);
+        } else {
+          if (m.comment_id) {
+            db.prepare("UPDATE comments SET mention_ignored = 1 WHERE id = ?").run(m.comment_id);
+          } else if (m.post_id) {
+            db.prepare("UPDATE posts SET mention_ignored = 1 WHERE id = ?").run(m.post_id);
+          }
+        }
+      }
 
       let handledMention = false;
       if (onlineMentions.length > 0 && Math.random() < 0.8 && activeAiUsers.length > 0) { // 80% chance to prioritize a mention if one exists
@@ -1900,7 +1994,10 @@ async function startServer() {
             `).get(mention.comment_id) as any;
             
             if (commentData) {
-              if (pendingComments.has(`${randomAi.id}:comment:${commentData.id}`)) {
+              if (getCommentDepth(commentData.id) >= 5) {
+                db.prepare("UPDATE comments SET mention_ignored = 1 WHERE id = ?").run(commentData.id);
+                handledMention = false;
+              } else if (pendingComments.has(`${randomAi.id}:comment:${commentData.id}`)) {
                 handledMention = false;
               } else {
                 pendingComments.add(`${randomAi.id}:comment:${commentData.id}`);
@@ -2150,6 +2247,7 @@ async function startServer() {
             }
           } else {
             const randomComment = choice.data;
+            if (getCommentDepth(randomComment.id) >= 5) return;
             if (pendingComments.has(`${randomAi.id}:comment:${randomComment.id}`)) return;
             pendingComments.add(`${randomAi.id}:comment:${randomComment.id}`);
             try {
