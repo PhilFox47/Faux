@@ -1096,7 +1096,7 @@ export default function App() {
         <div className="mb-12">
           <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-16 object-contain" referrerPolicy="no-referrer" />
         </div>
-        <h1 className="text-4xl font-bold mb-10 text-center">Who's watching?</h1>
+        <h1 className="text-4xl font-bold mb-10 text-center">New Faux. Who dis?</h1>
         <div className="flex flex-wrap justify-center gap-8 max-w-4xl px-4">
           {realUsers.map(user => (
             <div 
