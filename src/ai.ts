@@ -885,7 +885,7 @@ ${positivePrompt}`;
 export async function generateImage(prompt: string, negative_prompt?: string) {
   try {
     const model = getImageModel();
-    const sizes = ['1024x1024', '1024x1536', '1024x1536'];
+    const sizes = ['4096x4096', '2304x4096', '4096x2304'];
     const randomSize = sizes[Math.floor(Math.random() * sizes.length)];
     
     const requestBody: any = {

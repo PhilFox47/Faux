@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2 } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 
@@ -205,11 +205,16 @@ export default function App() {
   const [replyingTo, setReplyingTo] = useState<{postId: number, commentId: number, authorName: string} | null>(null);
   const [replyContent, setReplyContent] = useState('');
 
+  // DM Editing
+  const [editingDmId, setEditingDmId] = useState<number | null>(null);
+  const [editingDmContent, setEditingDmContent] = useState('');
+
   // Profile Editing
   const [editingProfile, setEditingProfile] = useState<any>(null);
   const [profileName, setProfileName] = useState('');
   const [profileUsername, setProfileUsername] = useState('');
   const [profilePin, setProfilePin] = useState('');
+  const [profileDmFrequency, setProfileDmFrequency] = useState('medium');
   const [profileBio, setProfileBio] = useState('');
   const [profileAvatar, setProfileAvatar] = useState('');
   const [profileDescription, setProfileDescription] = useState('');
@@ -347,6 +352,7 @@ export default function App() {
     setProfileName(user.display_name || '');
     setProfileUsername(user.username || '');
     setProfilePin(user.pin || '');
+    setProfileDmFrequency(user.dm_frequency || 'medium');
     setProfileBio(user.bio || '');
     setProfileAvatar(user.avatar_url || '');
     setProfileDescription(user.description || '');
@@ -447,7 +453,8 @@ export default function App() {
         universe_id: finalUniverseId,
         online_times: JSON.stringify(profileOnlineTimes),
         activity_level: profileActivityLevel,
-        pin: profilePin
+        pin: profilePin,
+        dm_frequency: profileDmFrequency
       })
     });
     
@@ -956,6 +963,32 @@ export default function App() {
     fetchChatMessages(activeChat.id, isGroupChat);
     if (isGroupChat) fetchGroupChats();
     else fetchConversations();
+  };
+
+  const handleEditDm = async (msgId: number) => {
+    if (!editingDmContent.trim() || !activeChat) return;
+    
+    const endpoint = isGroupChat ? `/api/group-chats/messages/${msgId}` : `/api/dms/messages/${msgId}`;
+    await apiFetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: editingDmContent.trim() })
+    });
+    
+    setEditingDmId(null);
+    setEditingDmContent('');
+    fetchChatMessages(activeChat.id, isGroupChat);
+  };
+
+  const handleDeleteDm = async (msgId: number) => {
+    if (!activeChat) return;
+    
+    const endpoint = isGroupChat ? `/api/group-chats/messages/${msgId}` : `/api/dms/messages/${msgId}`;
+    await apiFetch(endpoint, {
+      method: 'DELETE'
+    });
+    
+    fetchChatMessages(activeChat.id, isGroupChat);
   };
 
   const toggleAiEnabled = async () => {
@@ -1654,8 +1687,29 @@ export default function App() {
                                 )}
                               </div>
                             )}
-                            <div className={`max-w-[75%] rounded-2xl p-3 whitespace-pre-wrap break-words ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
-                              {(msg.content || '').trim()}
+                            <div className={`group flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                              <div className={`rounded-2xl p-3 whitespace-pre-wrap break-words ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
+                                {editingDmId === msg.id ? (
+                                  <div className="flex flex-col gap-2 min-w-[200px]">
+                                    <textarea 
+                                      value={editingDmContent} 
+                                      onChange={e => setEditingDmContent(e.target.value)}
+                                      className={`w-full border rounded p-2 text-white outline-none resize-none ${isMe ? 'bg-orange-600 border-orange-400 focus:border-white' : 'bg-gray-700 border-gray-600 focus:border-orange-500'}`}
+                                      rows={3}
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                      <button onClick={() => setEditingDmId(null)} className="text-xs text-white/70 hover:text-white">Cancel</button>
+                                      <button onClick={() => handleEditDm(msg.id)} className={`text-xs px-2 py-1 rounded ${isMe ? 'bg-white text-orange-600 hover:bg-gray-100' : 'bg-orange-600 text-white hover:bg-orange-500'}`}>Save</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  (msg.content || '').trim()
+                                )}
+                              </div>
+                              <div className={`flex gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                <button onClick={() => { setEditingDmId(msg.id); setEditingDmContent(msg.content); }} className="text-xs text-gray-500 hover:text-white"><Edit2 size={12} /></button>
+                                <button onClick={() => handleDeleteDm(msg.id)} className="text-xs text-gray-500 hover:text-red-500"><Trash2 size={12} /></button>
+                              </div>
                             </div>
                           </div>
                           <span className="text-[10px] text-gray-500 px-2">
@@ -2421,10 +2475,22 @@ export default function App() {
                   <input required value={profileUsername} onChange={e => setProfileUsername(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
                 </div>
                 {editingProfile.is_ai === 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Login PIN (Optional)</label>
-                    <input value={profilePin} onChange={e => setProfilePin(e.target.value)} type="password" maxLength={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="4-digit PIN" />
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Login PIN (Optional)</label>
+                      <input value={profilePin} onChange={e => setProfilePin(e.target.value)} type="password" maxLength={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="4-digit PIN" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">DM Frequency from AI Characters</label>
+                      <select value={profileDmFrequency} onChange={e => setProfileDmFrequency(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500">
+                        <option value="never">Never (0%)</option>
+                        <option value="low">Low (20%)</option>
+                        <option value="medium">Medium (100%)</option>
+                        <option value="high">High (300%)</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">Controls how often AI characters you follow will initiate DMs with you.</p>
+                    </div>
+                  </>
                 )}
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Profile Picture (URL or Upload)</label>

@@ -19,6 +19,7 @@ export function initDb() {
       activity_level INTEGER DEFAULT 5, -- Scale of 1-10
       current_online_status INTEGER DEFAULT 0,
       status_expires_at INTEGER DEFAULT 0,
+      dm_frequency TEXT DEFAULT 'medium',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -411,6 +412,10 @@ export function initDb() {
 
   try {
     db.exec("ALTER TABLE settings ADD COLUMN cross_universe_prob REAL DEFAULT 50.0");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN dm_frequency TEXT DEFAULT 'medium'");
   } catch (e) {}
 
   // Insert default settings

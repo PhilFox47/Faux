@@ -142,8 +142,8 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
       SELECT dm.content, dm.created_at, u.display_name as sender
       FROM direct_messages dm
       JOIN users u ON dm.sender_id = u.id
-      WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-      ORDER BY created_at DESC LIMIT 10
+      WHERE (dm.sender_id = ? AND dm.receiver_id = ?) OR (dm.sender_id = ? AND dm.receiver_id = ?)
+      ORDER BY dm.created_at DESC LIMIT 10
     `).all(user1Id, user2Id, user2Id, user1Id) as any[];
 
     // Calculate difficulty
@@ -243,13 +243,24 @@ async function triggerPostComments(postId: number, postType: string) {
     await new Promise(resolve => setTimeout(resolve, 5000 + Math.random() * 10000));
     
     const post = db.prepare(`
-      SELECT p.*, u.display_name as author_name, u.bio as author_bio 
+      SELECT p.*, u.display_name as author_name, u.bio as author_bio, u.is_ai 
       FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?
     `).get(postId) as any;
     
     if (!post) break;
 
-    const aiUsers = db.prepare("SELECT * FROM users WHERE is_ai = 1 AND is_active = 1 AND id != ?").all(post.user_id) as any[];
+    let aiUsersQuery = "SELECT * FROM users WHERE is_ai = 1 AND is_active = 1 AND id != ?";
+    let aiUsersParams = [post.user_id];
+    
+    if (post.is_ai === 0) {
+      aiUsersQuery = `
+        SELECT u.* FROM users u 
+        JOIN follows f ON f.followed_id = u.id 
+        WHERE u.is_ai = 1 AND u.is_active = 1 AND u.id != ? AND f.follower_id = ?
+      `;
+      aiUsersParams = [post.user_id, post.user_id];
+    }
+    const aiUsers = db.prepare(aiUsersQuery).all(...aiUsersParams) as any[];
     const existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(postId).map((r: any) => r.user_id);
     const availableAiUsers = aiUsers.filter(u => {
       const isOnline = isUserOnline(u, settings.timezone || 'UTC');
@@ -345,7 +356,7 @@ async function handleOPReplies() {
     WHERE op.is_ai = 1 AND op.is_active = 1
     AND c.user_id != op.id
     AND c.op_ignored = 0
-    AND p.id IN (SELECT id FROM posts WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 10)
+    AND p.id IN (SELECT id FROM posts WHERE is_visible = 1 ORDER BY posts.created_at DESC LIMIT 10)
     AND NOT EXISTS (
       SELECT 1 FROM comments reply 
       WHERE reply.parent_id = c.id AND reply.user_id = op.id
@@ -791,13 +802,13 @@ async function startServer() {
   });
 
   app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin } = req.body;
+    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency } = req.body;
     try {
       db.prepare(`
         UPDATE users 
-        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?
+        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency)
         WHERE id = ?
-      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, req.params.id);
+      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, req.params.id);
 
       res.json({ success: true });
     } catch (e: any) {
@@ -1271,6 +1282,39 @@ async function startServer() {
     res.json(messages);
   });
 
+  app.put("/api/group-chats/messages/:id", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    const { content } = req.body;
+    
+    const msg = db.prepare("SELECT * FROM group_chat_messages WHERE id = ?").get(req.params.id) as any;
+    if (!msg) return res.status(404).json({ error: "Message not found" });
+    
+    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(msg.group_chat_id, user.id);
+    if (!isMember && user.role !== 'admin') {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+    
+    db.prepare("UPDATE group_chat_messages SET content = ? WHERE id = ?").run(content, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/group-chats/messages/:id", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    
+    const msg = db.prepare("SELECT * FROM group_chat_messages WHERE id = ?").get(req.params.id) as any;
+    if (!msg) return res.status(404).json({ error: "Message not found" });
+    
+    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(msg.group_chat_id, user.id);
+    if (!isMember && user.role !== 'admin') {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+    
+    db.prepare("DELETE FROM group_chat_messages WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
   app.post("/api/group-chats/:id/messages", async (req, res) => {
     const { content } = req.body;
     const user = getRealUser(req);
@@ -1439,6 +1483,37 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.put("/api/dms/messages/:id", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    const { content } = req.body;
+    
+    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
+    if (!msg) return res.status(404).json({ error: "Message not found" });
+    
+    if (msg.sender_id !== user.id && msg.receiver_id !== user.id) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+    
+    db.prepare("UPDATE direct_messages SET content = ? WHERE id = ?").run(content, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/dms/messages/:id", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    
+    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
+    if (!msg) return res.status(404).json({ error: "Message not found" });
+    
+    if (msg.sender_id !== user.id && msg.receiver_id !== user.id) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+    
+    db.prepare("DELETE FROM direct_messages WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
   app.post("/api/dms/:userId", async (req, res) => {
     try {
       const { content } = req.body;
@@ -1497,7 +1572,8 @@ async function startServer() {
       if (!settings || !settings.ai_enabled) return;
 
       const allAiUsers = db.prepare("SELECT * FROM users WHERE is_ai = 1").all() as any[];
-      const activeAiUsers = allAiUsers.filter(u => u.is_active === 1 && isUserOnline(u, settings.timezone || 'UTC'));
+      const onlineAiUsers = allAiUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+      const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
       if (allAiUsers.length === 0) return;
 
       const probPost = (settings.prob_post ?? 100) / 1440;
@@ -1688,85 +1764,129 @@ async function startServer() {
         }
       };
 
-      if (Math.random() < probMessage && activeAiUsers.length > 0) {
-        const realUsers = db.prepare("SELECT * FROM users WHERE is_ai = 0").all() as any[];
-        if (realUsers.length > 0) {
-          const realUser = realUsers[Math.floor(Math.random() * realUsers.length)];
+      const realUsers = db.prepare("SELECT * FROM users WHERE is_ai = 0").all() as any[];
+      if (realUsers.length > 0 && activeAiUsers.length > 0) {
+        const realUser = realUsers[Math.floor(Math.random() * realUsers.length)];
+        
+        let userProbMessage = probMessage;
+        if (realUser.dm_frequency === 'never') userProbMessage = 0;
+        else if (realUser.dm_frequency === 'low') userProbMessage *= 0.2;
+        else if (realUser.dm_frequency === 'high') userProbMessage *= 3.0;
+
+        if (Math.random() < userProbMessage) {
+          const followedAis = db.prepare(`
+            SELECT u.* FROM users u
+            JOIN follows f ON f.followed_id = u.id
+            WHERE f.follower_id = ? AND u.is_ai = 1 AND u.is_active = 1
+          `).all(realUser.id) as any[];
           
-          const probFavoriteDm = (settings.prob_favorite_dm ?? 50.0) / 100;
-          
-          if (Math.random() < probFavoriteDm) {
-            const favorites = db.prepare("SELECT target_id, is_group FROM dm_favorites WHERE user_id = ?").all(realUser.id) as any[];
-            if (favorites.length > 0) {
-              const randomFav = favorites[Math.floor(Math.random() * favorites.length)];
-              if (randomFav.is_group) {
-                const aiMembers = db.prepare(`
-                  SELECT u.* FROM users u
-                  JOIN group_chat_members gcm ON gcm.user_id = u.id
-                  WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1
-                `).all(randomFav.target_id) as any[];
-                
-                if (aiMembers.length > 0) {
-                  const randomAi = pickWeightedRandomUser(aiMembers);
-                  const groupChat = db.prepare("SELECT name FROM group_chats WHERE id = ?").get(randomFav.target_id) as any;
-                  const recentMessages = db.prepare(`
-                    SELECT sender_id, content, created_at FROM group_chat_messages
-                    WHERE group_chat_id = ?
-                    ORDER BY created_at DESC LIMIT 15
-                  `).all(randomFav.target_id).reverse();
-                  
-                  const formattedHistory = recentMessages.map((msg: any) => {
-                    const sender = db.prepare("SELECT display_name FROM users WHERE id = ?").get(msg.sender_id) as any;
-                    return {
-                      role: msg.sender_id === randomAi.id ? 'assistant' : 'user',
-                      name: sender ? sender.display_name : 'Unknown',
-                      content: msg.content,
-                      created_at: msg.created_at
-                    };
-                  });
-                  
-                  const otherMembers = db.prepare(`
-                    SELECT u.display_name, u.description FROM users u
+          const onlineFollowedAis = followedAis.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+
+          if (onlineFollowedAis.length > 0) {
+            const probFavoriteDm = (settings.prob_favorite_dm ?? 50.0) / 100;
+            
+            if (Math.random() < probFavoriteDm) {
+              const favorites = db.prepare("SELECT target_id, is_group FROM dm_favorites WHERE user_id = ?").all(realUser.id) as any[];
+              if (favorites.length > 0) {
+                const randomFav = favorites[Math.floor(Math.random() * favorites.length)];
+                if (randomFav.is_group) {
+                  const aiMembers = db.prepare(`
+                    SELECT u.* FROM users u
                     JOIN group_chat_members gcm ON gcm.user_id = u.id
-                    WHERE gcm.group_chat_id = ? AND u.id != ?
-                  `).all(randomFav.target_id, randomAi.id) as any[];
+                    JOIN follows f ON f.followed_id = u.id
+                    WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
+                  `).all(randomFav.target_id, realUser.id) as any[];
                   
-                  const replyContent = await generateGroupChatReply(randomAi, groupChat.name, formattedHistory, otherMembers);
-                  if (replyContent) {
-                    db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-                      .run(randomFav.target_id, randomAi.id, replyContent.trim());
-                    console.log(`${randomAi.display_name} sent a message to group chat ${groupChat.name}`);
+                  if (aiMembers.length > 0) {
+                    const randomAi = pickWeightedRandomUser(aiMembers);
+                    const groupChat = db.prepare("SELECT name FROM group_chats WHERE id = ?").get(randomFav.target_id) as any;
+                    const recentMessages = db.prepare(`
+                      SELECT sender_id, content, created_at FROM group_chat_messages
+                      WHERE group_chat_id = ?
+                      ORDER BY created_at DESC LIMIT 15
+                    `).all(randomFav.target_id).reverse();
+                    
+                    const formattedHistory = recentMessages.map((msg: any) => {
+                      const sender = db.prepare("SELECT display_name FROM users WHERE id = ?").get(msg.sender_id) as any;
+                      return {
+                        role: msg.sender_id === randomAi.id ? 'assistant' : 'user',
+                        name: sender ? sender.display_name : 'Unknown',
+                        content: msg.content,
+                        created_at: msg.created_at
+                      };
+                    });
+                    
+                    const otherMembers = db.prepare(`
+                      SELECT u.display_name, u.description FROM users u
+                      JOIN group_chat_members gcm ON gcm.user_id = u.id
+                      WHERE gcm.group_chat_id = ? AND u.id != ?
+                    `).all(randomFav.target_id, randomAi.id) as any[];
+                    
+                    const replyContent = await generateGroupChatReply(randomAi, groupChat.name, formattedHistory, otherMembers);
+                    if (replyContent) {
+                      db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
+                        .run(randomFav.target_id, randomAi.id, replyContent.trim());
+                      console.log(`${randomAi.display_name} sent a message to group chat ${groupChat.name}`);
+                    }
+                  }
+                } else {
+                  const randomAi = db.prepare(`
+                    SELECT u.* FROM users u 
+                    JOIN follows f ON f.followed_id = u.id
+                    WHERE u.id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
+                  `).get(randomFav.target_id, realUser.id) as any;
+                  if (randomAi) {
+                    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+                    const relContext = rel ? rel.description : '';
+                    
+                    const messageHistory = db.prepare(`
+                      SELECT sender_id, content, created_at 
+                      FROM direct_messages 
+                      WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                      ORDER BY created_at ASC
+                    `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
+                      role: m.sender_id === randomAi.id ? 'assistant' : 'user',
+                      content: m.content,
+                      created_at: m.created_at
+                    }));
+
+                    const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                    if (dmContent) {
+                      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+                        .run(randomAi.id, realUser.id, dmContent.trim());
+                      checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
+                      console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
+                    }
                   }
                 }
               } else {
-                const randomAi = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(randomFav.target_id) as any;
-                if (randomAi) {
-                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
-                  const relContext = rel ? rel.description : '';
-                  
-                  const messageHistory = db.prepare(`
-                    SELECT sender_id, content, created_at 
-                    FROM direct_messages 
-                    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                    ORDER BY created_at ASC
-                  `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
-                    role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                    content: m.content,
-                    created_at: m.created_at
-                  }));
+                // Fallback if no favorites
+                const randomAi = pickWeightedRandomUser(onlineFollowedAis);
+                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+                const relContext = rel ? rel.description : '';
+                
+                const messageHistory = db.prepare(`
+                  SELECT sender_id, content, created_at 
+                  FROM direct_messages 
+                  WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                  ORDER BY created_at ASC
+                `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
+                  role: m.sender_id === randomAi.id ? 'assistant' : 'user',
+                  content: m.content,
+                  created_at: m.created_at
+                }));
 
-                  const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-                  if (dmContent) {
-                    db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                      .run(randomAi.id, realUser.id, dmContent.trim());
-                    checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
-                    console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
-                  }
+                const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                if (dmContent) {
+                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+                    .run(randomAi.id, realUser.id, dmContent.trim());
+                  checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
+                  console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
                 }
               }
             } else {
-              // Fallback if no favorites
-              const randomAi = pickWeightedRandomUser(activeAiUsers);
+              // Random AI
+              const randomAi = pickWeightedRandomUser(onlineFollowedAis);
               const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
               const relContext = rel ? rel.description : '';
               
@@ -1789,37 +1909,13 @@ async function startServer() {
                 console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
               }
             }
-          } else {
-            // Random AI
-            const randomAi = pickWeightedRandomUser(activeAiUsers);
-            const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
-            const relContext = rel ? rel.description : '';
-            
-            const messageHistory = db.prepare(`
-              SELECT sender_id, content, created_at 
-              FROM direct_messages 
-              WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-              ORDER BY created_at ASC
-            `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
-              role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-              content: m.content,
-              created_at: m.created_at
-            }));
-
-            const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-            if (dmContent) {
-              db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                .run(randomAi.id, realUser.id, dmContent.trim());
-              checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
-              console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
-            }
           }
         }
       } 
 
       // Handle unreplied DMs from real user
-      const realUsers = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").all() as any[];
-      for (const realUser of realUsers) {
+      const allRealUsers = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").all() as any[];
+      for (const realUser of allRealUsers) {
         if (activeAiUsers.length > 0) {
           const unrepliedDms = db.prepare(`
           SELECT dm.*, u.online_times
@@ -1867,10 +1963,32 @@ async function startServer() {
       }
     }
       
-      if (Math.random() < probPost && activeAiUsers.length > 0) {
-        if (activeAiUsers.length > 0) {
-          const randomAi = pickWeightedRandomUser(activeAiUsers);
+      if (Math.random() < probPost && onlineAiUsers.length > 0) {
+        if (onlineAiUsers.length > 0) {
+          const randomAi = pickWeightedRandomUser(onlineAiUsers);
           await doAiPost(randomAi, false);
+        }
+      }
+
+      // Independent chance for inactive users to post their intro to ensure scalability
+      let introPostsThisMinute = 0;
+      const inactiveAiUsers = onlineAiUsers.filter(u => u.is_active === 0);
+      for (const inactiveUser of inactiveAiUsers) {
+        if (introPostsThisMinute >= 3) break; // Limit to 3 intro posts per minute to avoid rate limits
+        
+        const createdAt = new Date(inactiveUser.created_at + 'Z').getTime();
+        const daysSinceCreation = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
+        
+        let introProb = 0;
+        if (daysSinceCreation > 7) {
+          introProb = 0.05; // 5% chance per minute while online
+        } else if (daysSinceCreation > 3) {
+          introProb = ((daysSinceCreation - 3) / 4) * 0.02; // Scales 0 to 2% chance per minute
+        }
+        
+        if (introProb > 0 && Math.random() < introProb) {
+          await doAiPost(inactiveUser, false);
+          introPostsThisMinute++;
         }
       }
 
@@ -2156,7 +2274,9 @@ async function startServer() {
               continue;
             }
 
-            const otherAiUsers = activeAiUsers.filter(u => u.id !== choice.data.user_id);
+            const followedAis = db.prepare("SELECT followed_id FROM follows WHERE follower_id = ?").all(author.id).map((f: any) => f.followed_id);
+            const otherAiUsers = activeAiUsers.filter(u => u.id !== choice.data.user_id && followedAis.includes(u.id));
+            
             if (otherAiUsers.length > 0) {
               const randomAi = pickWeightedRandomUser(otherAiUsers);
               const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, author.id) as any;
@@ -2186,6 +2306,7 @@ async function startServer() {
           }
 
           const targetUserId = choice.data.user_id;
+          const targetUser = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(targetUserId) as any;
           
           let existingRepliers: number[] = [];
           if (choice.type === 'post') {
@@ -2194,7 +2315,13 @@ async function startServer() {
             existingRepliers = db.prepare("SELECT user_id FROM comments WHERE parent_id = ?").all(choice.data.id).map((r: any) => r.user_id);
           }
 
-          availableAis = activeAiUsers.filter(u => u.id !== targetUserId && !existingRepliers.includes(u.id));
+          if (targetUser && targetUser.is_ai === 0) {
+            // Target is a real user, only followed AIs can comment
+            const followedAis = db.prepare("SELECT followed_id FROM follows WHERE follower_id = ?").all(targetUserId).map((f: any) => f.followed_id);
+            availableAis = activeAiUsers.filter(u => u.id !== targetUserId && !existingRepliers.includes(u.id) && followedAis.includes(u.id));
+          } else {
+            availableAis = activeAiUsers.filter(u => u.id !== targetUserId && !existingRepliers.includes(u.id));
+          }
 
           if (availableAis.length > 0) {
             break; // Found a valid choice with available AIs
