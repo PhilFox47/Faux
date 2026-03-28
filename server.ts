@@ -693,13 +693,23 @@ async function startServer() {
   });
 
   app.get("/api/users/:id/relationships", (req, res) => {
+    const loggedInUser = getRealUser(req);
+    
     const relationships = db.prepare(`
-      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar
+      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar, u.role as other_role, u1.role as user1_role
       FROM relationships r
       JOIN users u ON r.user_id_2 = u.id
+      JOIN users u1 ON r.user_id_1 = u1.id
       WHERE r.user_id_1 = ?
     `).all(req.params.id);
-    res.json(relationships);
+    
+    const filteredRelationships = relationships.filter((rel: any) => {
+      if (loggedInUser && loggedInUser.role === 'admin') return true;
+      if (rel.other_role === 'admin' || rel.user1_role === 'admin') return false;
+      return true;
+    });
+    
+    res.json(filteredRelationships);
   });
 
   app.post("/api/users/:id/relationships", (req, res) => {
