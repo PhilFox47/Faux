@@ -99,8 +99,7 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
   if (user1Id === user2Id) return;
   
   // Check if relationship already exists
-  const existingRel = db.prepare("SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id);
-  if (existingRel) return;
+  const existingRel = db.prepare("SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any;
 
   // Get interaction counts
   const commentsCount = (db.prepare(`
@@ -116,7 +115,15 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
     WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
   `).get(user1Id, user2Id, user2Id, user1Id) as any).count;
 
-  const expectedChecks = Math.floor(commentsCount / 5) + Math.floor(dmsCount / 20);
+  let expectedChecks = 0;
+  if (existingRel) {
+    // If relationship exists, check every 20 comments or 100 DMs
+    expectedChecks = Math.floor(commentsCount / 20) + Math.floor(dmsCount / 100);
+  } else {
+    // If no relationship, check every 5 comments or 20 DMs
+    expectedChecks = Math.floor(commentsCount / 5) + Math.floor(dmsCount / 20);
+  }
+
   if (expectedChecks <= 0) return;
 
   const actualChecks = (db.prepare("SELECT COUNT(*) as count FROM relationship_checks WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any).count;
@@ -155,7 +162,7 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
     if (minRels >= 10) difficulty = "Hard";
     else if (minRels >= 5) difficulty = "Medium";
 
-    const { result, description } = await evaluateDynamicRelationship(user1, user2, recentComments, recentDms, difficulty);
+    const { result, description } = await evaluateDynamicRelationship(user1, user2, recentComments, recentDms, difficulty, existingRel?.description);
 
     const u1 = Math.min(user1Id, user2Id);
     const u2 = Math.max(user1Id, user2Id);
@@ -165,8 +172,13 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
     );
 
     if (result && description) {
-      db.prepare("INSERT INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(u1, u2, description);
-      console.log(`Dynamic relationship formed between ${user1.display_name} and ${user2.display_name}: ${description}`);
+      if (existingRel) {
+        db.prepare("UPDATE relationships SET description = ? WHERE id = ?").run(description, existingRel.id);
+        console.log(`Dynamic relationship updated between ${user1.display_name} and ${user2.display_name}: ${description}`);
+      } else {
+        db.prepare("INSERT INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(u1, u2, description);
+        console.log(`Dynamic relationship formed between ${user1.display_name} and ${user2.display_name}: ${description}`);
+      }
     } else {
       console.log(`Dynamic relationship check failed for ${user1.display_name} and ${user2.display_name}`);
     }
@@ -348,11 +360,13 @@ async function handleOPReplies() {
   if (!settings || !settings.ai_enabled) return;
 
   const unansweredComments = db.prepare(`
-    SELECT c.*, p.user_id as op_id, p.content as post_content, u.display_name as author_name, u.is_ai as author_is_ai
+    SELECT c.*, p.user_id as op_id, p.content as post_content, u.display_name as author_name, u.is_ai as author_is_ai,
+           COALESCE(parent_c.user_id, p.user_id) as target_op_id
     FROM comments c
     JOIN posts p ON c.post_id = p.id
     JOIN users u ON c.user_id = u.id
-    JOIN users op ON p.user_id = op.id
+    LEFT JOIN comments parent_c ON c.parent_id = parent_c.id
+    JOIN users op ON COALESCE(parent_c.user_id, p.user_id) = op.id
     WHERE op.is_ai = 1 AND op.is_active = 1
     AND c.user_id != op.id
     AND c.op_ignored = 0
@@ -374,7 +388,7 @@ async function handleOPReplies() {
         continue;
       }
 
-      const opUser = db.prepare("SELECT * FROM users WHERE id = ?").get(comment.op_id) as any;
+      const opUser = db.prepare("SELECT * FROM users WHERE id = ?").get(comment.target_op_id) as any;
       if (!opUser) continue;
 
       if (!isUserOnline(opUser, settings.timezone || 'UTC')) continue;
@@ -1662,7 +1676,7 @@ async function startServer() {
       }
 
       const doAiPost = async (aiUser: any, isImage: boolean) => {
-        const recentContext = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? AND is_visible = 1 ORDER BY created_at DESC LIMIT 3").all(aiUser.id) as any[];
+        const recentContext = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? AND is_visible = 1 ORDER BY created_at DESC LIMIT 10").all(aiUser.id) as any[];
         const contextStr = recentContext.map(p => `[${p.created_at}] ${p.content}`).join(" | ");
         
         const rels = db.prepare(`
@@ -1963,9 +1977,17 @@ async function startServer() {
       }
     }
       
-      if (Math.random() < probPost && onlineAiUsers.length > 0) {
-        if (onlineAiUsers.length > 0) {
-          const randomAi = pickWeightedRandomUser(onlineAiUsers);
+      if (onlineAiUsers.length > 0) {
+        const randomAi = pickWeightedRandomUser(onlineAiUsers);
+        const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(randomAi.id) as any).count;
+        
+        let multiplier = 0.5;
+        if (followersCount === 1) multiplier = 1.0;
+        else if (followersCount === 2) multiplier = 1.5;
+        else if (followersCount === 3) multiplier = 1.7;
+        else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
+
+        if (Math.random() < probPost * multiplier) {
           await doAiPost(randomAi, false);
         }
       }
@@ -1986,7 +2008,14 @@ async function startServer() {
           introProb = ((daysSinceCreation - 3) / 4) * 0.02; // Scales 0 to 2% chance per minute
         }
         
-        if (introProb > 0 && Math.random() < introProb) {
+        const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(inactiveUser.id) as any).count;
+        let multiplier = 0.5;
+        if (followersCount === 1) multiplier = 1.0;
+        else if (followersCount === 2) multiplier = 1.5;
+        else if (followersCount === 3) multiplier = 1.7;
+        else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
+
+        if (introProb > 0 && Math.random() < introProb * multiplier) {
           await doAiPost(inactiveUser, false);
           introPostsThisMinute++;
         }
@@ -2235,6 +2264,13 @@ async function startServer() {
           if (post.post_type === 'shitpost') weight *= 2;
           if (post.post_type === 'mention') weight *= 2;
           if (post.post_type === 'dm_invitation') weight *= 2;
+          
+          // Boost posts from real users by 3-4x
+          const isRealUser = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(post.user_id) as any;
+          if (isRealUser && isRealUser.is_ai === 0) {
+            weight *= (Math.random() < 0.5 ? 3 : 4);
+          }
+
           for (let i = 0; i < weight; i++) {
             weightedItems.push({ type: 'post', data: post });
           }

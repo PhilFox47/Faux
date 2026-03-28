@@ -943,6 +943,20 @@ export default function App() {
     fetchUsers();
   };
 
+  const handleFollowAllInUniverse = async (chars: any[]) => {
+    const charsToFollow = chars.filter(c => !c.is_followed);
+    if (charsToFollow.length === 0) return;
+    await Promise.all(charsToFollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
+    fetchUsers();
+  };
+
+  const handleUnfollowAllInUniverse = async (chars: any[]) => {
+    const charsToUnfollow = chars.filter(c => c.is_followed);
+    if (charsToUnfollow.length === 0) return;
+    await Promise.all(charsToUnfollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
+    fetchUsers();
+  };
+
   const handleSendMsg = async (e: React.FormEvent | React.KeyboardEvent | any) => {
     e.preventDefault();
     if (!newChatMsg.trim() || !activeChat) return;
@@ -1240,6 +1254,7 @@ export default function App() {
                 onClick={() => setActiveTab('messages')} 
               />
               <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); }} />
+              <NavItem icon={<UserCheck />} label="Following" active={activeTab === 'following'} onClick={() => setActiveTab('following')} />
               <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(); }} />
               <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); }} />
             </nav>
@@ -1749,7 +1764,7 @@ export default function App() {
             <div className="p-6 max-w-4xl mx-auto">
               <h2 className="text-2xl font-bold mb-6">Universes</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div onClick={() => handleViewUniverse(-1)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition">
+                <div onClick={() => handleViewUniverse(-1)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition flex flex-col h-full">
                   <div className="flex items-center gap-4 mb-3">
                     <div className="w-16 h-16 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
                       <Globe size={32} className="m-auto mt-4 text-gray-500" />
@@ -1759,10 +1774,30 @@ export default function App() {
                       <p className="text-sm text-gray-400">{users.filter(u => !u.universe_id).length} characters</p>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-300 line-clamp-2">Characters without an assigned universe.</p>
+                  <p className="text-sm text-gray-300 line-clamp-2 mb-4 flex-1">Characters without an assigned universe.</p>
+                  <div className="flex -space-x-2 overflow-hidden mt-auto pt-2">
+                    {users.filter(char => !char.universe_id).slice(0, 7).map(char => (
+                      <div key={char.id} className={`relative inline-block ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
+                        <img 
+                          src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
+                          alt={char.display_name} 
+                          className="w-8 h-8 rounded-full border-2 border-gray-900 object-cover bg-gray-800" 
+                          referrerPolicy="no-referrer" 
+                        />
+                        {char.is_active && isUserOnline(char) && (
+                          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-gray-900 rounded-full"></div>
+                        )}
+                      </div>
+                    ))}
+                    {users.filter(char => !char.universe_id).length > 7 && (
+                      <div className="w-8 h-8 rounded-full border-2 border-gray-900 bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-400 z-10 relative">
+                        +{users.filter(char => !char.universe_id).length - 7}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {universes.map(u => (
-                  <div key={u.id} onClick={() => handleViewUniverse(u.id)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition">
+                  <div key={u.id} onClick={() => handleViewUniverse(u.id)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition flex flex-col h-full">
                     <div className="flex items-center gap-4 mb-3">
                       <div className="w-16 h-16 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
                         {u.image_url ? (
@@ -1777,8 +1812,29 @@ export default function App() {
                       </div>
                     </div>
                     {u.description && (
-                      <p className="text-sm text-gray-300 line-clamp-2">{u.description}</p>
+                      <p className="text-sm text-gray-300 line-clamp-2 mb-4 flex-1">{u.description}</p>
                     )}
+                    {!u.description && <div className="flex-1"></div>}
+                    <div className="flex -space-x-2 overflow-hidden mt-auto pt-2">
+                      {users.filter(char => char.universe_id === u.id).slice(0, 7).map(char => (
+                        <div key={char.id} className={`relative inline-block ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
+                          <img 
+                            src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
+                            alt={char.display_name} 
+                            className="w-8 h-8 rounded-full border-2 border-gray-900 object-cover bg-gray-800" 
+                            referrerPolicy="no-referrer" 
+                          />
+                          {char.is_active && isUserOnline(char) && (
+                            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-gray-900 rounded-full"></div>
+                          )}
+                        </div>
+                      ))}
+                      {users.filter(char => char.universe_id === u.id).length > 7 && (
+                        <div className="w-8 h-8 rounded-full border-2 border-gray-900 bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-400 z-10 relative">
+                          +{users.filter(char => char.universe_id === u.id).length - 7}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {universes.length === 0 && (
@@ -1865,19 +1921,91 @@ export default function App() {
                 )}
               </div>
 
-              <h3 className="text-xl font-bold mb-4">Characters in this Universe</h3>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold">Characters in this Universe</h3>
+                {viewingUniverseCharacters.length > 0 && (
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => handleFollowAllInUniverse(viewingUniverseCharacters)}
+                      className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold transition"
+                    >
+                      Follow All
+                    </button>
+                    <button 
+                      onClick={() => handleUnfollowAllInUniverse(viewingUniverseCharacters)}
+                      className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg font-bold transition"
+                    >
+                      Unfollow All
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {viewingUniverseCharacters.map(char => (
-                  <div key={char.id} onClick={() => handleViewProfile(char.id)} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition">
-                    <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
-                    <div className="overflow-hidden">
-                      <p className="font-bold truncate">{char.display_name}</p>
+                  <div key={char.id} onClick={() => handleViewProfile(char.id)} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
+                    <div className="relative">
+                      <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
+                      {char.is_active && isUserOnline(char) && (
+                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
+                      )}
+                    </div>
+                    <div className="overflow-hidden flex-1">
+                      <p className="font-bold truncate flex items-center gap-2">
+                        {char.display_name}
+                        {!char.is_active && <span className="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-400">Inactive</span>}
+                      </p>
                       <p className="text-xs text-gray-500 truncate">@{char.username}</p>
                     </div>
                   </div>
                 ))}
                 {viewingUniverseCharacters.length === 0 && (
                   <p className="text-gray-500 col-span-full">No characters found in this universe.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'following' && (
+            <div className="p-6 max-w-4xl mx-auto">
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                <UserCheck className="text-orange-500" />
+                Following
+              </h2>
+              <p className="text-gray-400 mb-6">
+                Manage the characters you are currently following.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {users.filter(u => u.is_followed).map(char => (
+                  <div key={char.id} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-3 hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
+                    <div className="flex items-center gap-3 cursor-pointer overflow-hidden flex-1" onClick={() => handleViewProfile(char.id)}>
+                      <div className="relative flex-shrink-0">
+                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
+                        {char.is_active && isUserOnline(char) && (
+                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
+                        )}
+                      </div>
+                      <div className="overflow-hidden">
+                        <p className="font-bold truncate flex items-center gap-2">
+                          {char.display_name}
+                          {!char.is_active && <span className="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-400">Inactive</span>}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">@{char.username}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleFollow(char.id); }}
+                      className="p-2 bg-gray-800 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-full transition flex-shrink-0"
+                      title="Unfollow"
+                    >
+                      <UserCheck size={18} />
+                    </button>
+                  </div>
+                ))}
+                {users.filter(u => u.is_followed).length === 0 && (
+                  <div className="col-span-full text-center py-12 text-gray-500">
+                    <UserCheck size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>You are not following any characters yet.</p>
+                  </div>
                 )}
               </div>
             </div>

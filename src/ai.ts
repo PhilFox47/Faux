@@ -370,7 +370,8 @@ export async function generateImagePostData(character: any, context: string = ''
 Think about something you would post on social media right now that would justify adding a photo to it.
 Make sure to only create the vision/idea of the post, not the post itself.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
-${context ? `Recent platform activity for inspiration (with timestamps, do not copy, just for vibe and temporal context): ${context}` : ''}
+${context ? `Your recent posts (with timestamps): ${context}
+CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
 Respond with ONLY the brief idea.`;
     const idea = await helperCallLLM(ideaPrompt, "generateImagePostData_idea", 0.9);
 
@@ -399,6 +400,7 @@ Guidelines:
 - Think about what actually should be depicted based on the idea and text.
 - If the character is shown, ensure to describe them accurately based on their physical appearance and clothing style.
 - Use a proper perspective that makes sense for a social media post (e.g., characters usually take the image themselves, so selfies or first-person perspectives are common).
+- If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
 - Keep in mind how Characters access Faux (based on their universe description), as this usually also has influence on how the image looks.
 - If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Instagram photo", "Lighting: Natural morning light", "Style: Candid amateur photograph"). Mention camera type.
 - If the Artstyle is Stylized: Clearly describe the Art Direction.
@@ -429,7 +431,8 @@ Instructions for this archetype: ${postTypeObj.description}
 Avoid referencing other people's posts directly unless it's a very general observation or the archetype requires it.
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
-${context ? `Recent platform activity for inspiration (with timestamps, do not copy, just for vibe and temporal context): ${context}` : ''}
+${context ? `Your recent posts (with timestamps): ${context}
+CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
 ${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : ''}
 ${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
 ${postTypeObj.id === 'event' ? `IMPORTANT: This is an EVENT post. An event has happened that affects you and some other characters. Describe the event and your reaction to it. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
@@ -789,6 +792,7 @@ Guidelines:
 - If the Artstyle is Stylized (Anime, Pixel Art, Oil Painting, etc.): Clearly describe the Art Direction (Genre, Medium, Texture, specific artist influences if applicable).
 - The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
 - Images don't always need to show the character who posted it. You can show a relevant object, scenery, situation, etc. Add variance.
+- If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
 - Accurately describe the physical features and clothing of the character ONLY if the character is visible in the shot.
 - Be very descriptive about the environment, lighting, mood, and composition.
 - Use descriptive adjectives and specific details to ensure a high-quality, accurate depiction.
@@ -837,6 +841,7 @@ Guidelines:
 export async function generateNegativeImagePrompt(positivePrompt: string) {
   const prompt = `Given the following positive image generation prompt, write a comprehensive negative prompt to avoid unwanted elements. 
 The negative prompt should include things like "blurry, deformed, bad anatomy, text, watermark, extra limbs, low quality" plus any specific elements that would ruin the described scene. 
+If the positive prompt describes a selfie (but not a mirror selfie), explicitly include "holding phone, phone in hand, visible phone" in the negative prompt.
 ONLY output the negative prompt text, nothing else, comma separated.
 
 Positive Prompt:
@@ -948,7 +953,7 @@ export async function generateImage(prompt: string, negative_prompt?: string) {
   }
 }
 
-export async function evaluateDynamicRelationship(user1: any, user2: any, recentComments: any[], recentDms: any[], difficulty: string): Promise<{ result: boolean, description?: string }> {
+export async function evaluateDynamicRelationship(user1: any, user2: any, recentComments: any[], recentDms: any[], difficulty: string, existingRelationship?: string): Promise<{ result: boolean, description?: string }> {
   let contextStr = "Recent Interactions:\n";
   if (recentComments.length > 0) {
     contextStr += "Comments:\n" + recentComments.map(c => `[${c.created_at}] ${c.commenter} replied to ${c.poster}'s post ("${c.post_content}"): "${c.content}"`).join("\n") + "\n";
@@ -958,8 +963,8 @@ export async function evaluateDynamicRelationship(user1: any, user2: any, recent
   }
 
   const prompt = `You are evaluating if two users, ${user1.display_name} and ${user2.display_name}, have formed a meaningful relationship based on their recent interactions.
-A meaningful relationship is a special connection (positive or negative) that justifies them receiving a hard-coded relationship on their profiles.
-Do NOT have a positivity bias. Only say "Yes" if the dynamic is truly interesting or noteworthy.
+${existingRelationship ? `They ALREADY have an existing relationship described as: "${existingRelationship}". You are evaluating if this relationship has PROGRESSED or CHANGED significantly based on their recent interactions. If it's mostly the same, say No.` : `A meaningful relationship is a special connection (positive or negative) that justifies them receiving a hard-coded relationship on their profiles.`}
+Do NOT have a positivity bias. Only say "Yes" if the dynamic is truly interesting, noteworthy, or has significantly changed.
 
 Difficulty Modifier: ${difficulty}
 - Easy: They have few relationships, so be more lenient.
@@ -976,7 +981,7 @@ Persona: ${user2.ai_persona || 'N/A'}
 
 ${contextStr}
 
-First, evaluate if they have formed a meaningful relationship (Yes or No).
+First, evaluate if they have formed a meaningful relationship (or if their existing relationship has changed significantly) (Yes or No).
 If Yes, provide a 1-2 sentence description of their relationship from a neutral third-party perspective.
 
 Respond strictly in JSON format:
