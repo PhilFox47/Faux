@@ -5,6 +5,8 @@ import db, { initDb } from "./src/db";
 import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship } from "./src/ai";
 
 const pendingComments = new Set<string>();
+const pendingDMs = new Set<string>();
+const pendingGroupChats = new Set<string>();
 
 function isUserOnline(user: any, timezone: string) {
   // Determine the correct user ID based on the object structure
@@ -167,8 +169,8 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
     const u1 = Math.min(user1Id, user2Id);
     const u2 = Math.max(user1Id, user2Id);
 
-    db.prepare("INSERT INTO relationship_checks (user_id_1, user_id_2, interaction_threshold, result, description) VALUES (?, ?, ?, ?, ?)").run(
-      u1, u2, expectedChecks, result ? 1 : 0, description || null
+    db.prepare("INSERT INTO relationship_checks (user_id_1, user_id_2, interaction_threshold, result, description, is_update) VALUES (?, ?, ?, ?, ?, ?)").run(
+      u1, u2, expectedChecks, result ? 1 : 0, description || null, existingRel ? 1 : 0
     );
 
     if (result && description) {
@@ -1388,22 +1390,30 @@ async function startServer() {
         const shouldReply = isMentioned || Math.random() < baseProb;
         
         if (shouldReply) {
-          const otherMembers = db.prepare(`
-            SELECT u.* FROM users u
-            JOIN group_chat_members gcm ON u.id = gcm.user_id
-            WHERE gcm.group_chat_id = ? AND u.id != ?
-          `).all(groupId, aiUser.id) as any[];
+          const gcKey = `${groupId}:${aiUser.id}`;
+          if (pendingGroupChats.has(gcKey)) continue;
+          pendingGroupChats.add(gcKey);
 
-          const reply = await generateGroupChatReply(aiUser, group.name, formattedHistory, otherMembers);
-          if (reply) {
-            db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-              .run(groupId, aiUser.id, reply);
-            
-            // Add this reply to history for the next AI
-            formattedHistory.push({
-              role: 'assistant',
-              content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${reply}`
-            });
+          try {
+            const otherMembers = db.prepare(`
+              SELECT u.* FROM users u
+              JOIN group_chat_members gcm ON u.id = gcm.user_id
+              WHERE gcm.group_chat_id = ? AND u.id != ?
+            `).all(groupId, aiUser.id) as any[];
+
+            const reply = await generateGroupChatReply(aiUser, group.name, formattedHistory, otherMembers);
+            if (reply) {
+              db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
+                .run(groupId, aiUser.id, reply);
+              
+              // Add this reply to history for the next AI
+              formattedHistory.push({
+                role: 'assistant',
+                content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${reply}`
+              });
+            }
+          } finally {
+            pendingGroupChats.delete(gcKey);
           }
         }
       }
@@ -1556,27 +1566,35 @@ async function startServer() {
       const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
       const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
       if (receiver && isUserOnline(receiver, settings?.timezone || 'UTC')) {
-        // Get recent history
-        const history = db.prepare(`
-          SELECT sender_id, content, created_at FROM direct_messages
-          WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-          ORDER BY created_at DESC LIMIT 10
-        `).all(user.id, receiverId, receiverId, user.id).reverse();
+        const dmKey = `${receiverId}:${user.id}`;
+        if (pendingDMs.has(dmKey)) return;
+        pendingDMs.add(dmKey);
+        
+        try {
+          // Get recent history
+          const history = db.prepare(`
+            SELECT sender_id, content, created_at FROM direct_messages
+            WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+            ORDER BY created_at DESC LIMIT 10
+          `).all(user.id, receiverId, receiverId, user.id).reverse();
 
-        const formattedHistory = history.map((msg: any) => ({
-          role: msg.sender_id === receiverId ? 'assistant' : 'user',
-          content: msg.content,
-          created_at: msg.created_at
-        }));
+          const formattedHistory = history.map((msg: any) => ({
+            role: msg.sender_id === receiverId ? 'assistant' : 'user',
+            content: msg.content,
+            created_at: msg.created_at
+          }));
 
-        const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
-        const relContext = rel ? rel.description : '';
+          const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
+          const relContext = rel ? rel.description : '';
 
-        const reply = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id);
-        if (reply) {
-          db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-            .run(receiverId, user.id, reply.trim());
-          checkDynamicRelationship(receiver.id, user.id).catch(console.error);
+          const reply = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id);
+          if (reply) {
+            db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+              .run(receiverId, user.id, reply.trim());
+            checkDynamicRelationship(receiver.id, user.id).catch(console.error);
+          }
+        } finally {
+          pendingDMs.delete(dmKey);
         }
       }
     } catch (e: any) {
@@ -1840,17 +1858,26 @@ async function startServer() {
                       };
                     });
                     
-                    const otherMembers = db.prepare(`
-                      SELECT u.display_name, u.description FROM users u
-                      JOIN group_chat_members gcm ON gcm.user_id = u.id
-                      WHERE gcm.group_chat_id = ? AND u.id != ?
-                    `).all(randomFav.target_id, randomAi.id) as any[];
-                    
-                    const replyContent = await generateGroupChatReply(randomAi, groupChat.name, formattedHistory, otherMembers);
-                    if (replyContent) {
-                      db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-                        .run(randomFav.target_id, randomAi.id, replyContent.trim());
-                      console.log(`${randomAi.display_name} sent a message to group chat ${groupChat.name}`);
+                    const gcKey = `${randomFav.target_id}:${randomAi.id}`;
+                    if (!pendingGroupChats.has(gcKey)) {
+                      pendingGroupChats.add(gcKey);
+
+                      try {
+                        const otherMembers = db.prepare(`
+                          SELECT u.display_name, u.description FROM users u
+                          JOIN group_chat_members gcm ON gcm.user_id = u.id
+                          WHERE gcm.group_chat_id = ? AND u.id != ?
+                        `).all(randomFav.target_id, randomAi.id) as any[];
+                        
+                        const replyContent = await generateGroupChatReply(randomAi, groupChat.name, formattedHistory, otherMembers);
+                        if (replyContent) {
+                          db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
+                            .run(randomFav.target_id, randomAi.id, replyContent.trim());
+                          console.log(`${randomAi.display_name} sent a message to group chat ${groupChat.name}`);
+                        }
+                      } finally {
+                        pendingGroupChats.delete(gcKey);
+                      }
                     }
                   }
                 } else {
@@ -1860,6 +1887,46 @@ async function startServer() {
                     WHERE u.id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
                   `).get(randomFav.target_id, realUser.id) as any;
                   if (randomAi) {
+                    const dmKey = `${randomAi.id}:${realUser.id}`;
+                    if (!pendingDMs.has(dmKey)) {
+                      pendingDMs.add(dmKey);
+
+                      try {
+                        const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+                        const relContext = rel ? rel.description : '';
+                        
+                        const messageHistory = db.prepare(`
+                          SELECT sender_id, content, created_at 
+                          FROM direct_messages 
+                          WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                          ORDER BY created_at ASC
+                        `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
+                          role: m.sender_id === randomAi.id ? 'assistant' : 'user',
+                          content: m.content,
+                          created_at: m.created_at
+                        }));
+
+                        const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                        if (dmContent) {
+                          db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+                            .run(randomAi.id, realUser.id, dmContent.trim());
+                          checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
+                          console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
+                        }
+                      } finally {
+                        pendingDMs.delete(dmKey);
+                      }
+                    }
+                  }
+                }
+              } else {
+                // Fallback if no favorites
+                const randomAi = pickWeightedRandomUser(onlineFollowedAis);
+                const dmKey = `${randomAi.id}:${realUser.id}`;
+                if (!pendingDMs.has(dmKey)) {
+                  pendingDMs.add(dmKey);
+
+                  try {
                     const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
                     const relContext = rel ? rel.description : '';
                     
@@ -1881,56 +1948,43 @@ async function startServer() {
                       checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
                       console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
                     }
+                  } finally {
+                    pendingDMs.delete(dmKey);
                   }
-                }
-              } else {
-                // Fallback if no favorites
-                const randomAi = pickWeightedRandomUser(onlineFollowedAis);
-                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
-                const relContext = rel ? rel.description : '';
-                
-                const messageHistory = db.prepare(`
-                  SELECT sender_id, content, created_at 
-                  FROM direct_messages 
-                  WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                  ORDER BY created_at ASC
-                `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
-                  role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                  content: m.content,
-                  created_at: m.created_at
-                }));
-
-                const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-                if (dmContent) {
-                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                    .run(randomAi.id, realUser.id, dmContent.trim());
-                  checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
-                  console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
                 }
               }
             } else {
               // Random AI
               const randomAi = pickWeightedRandomUser(onlineFollowedAis);
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
-              const relContext = rel ? rel.description : '';
-              
-              const messageHistory = db.prepare(`
-                SELECT sender_id, content, created_at 
-                FROM direct_messages 
-                WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                ORDER BY created_at ASC
-              `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
-                role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                content: m.content,
-                created_at: m.created_at
-              }));
+              const dmKey = `${randomAi.id}:${realUser.id}`;
+              if (!pendingDMs.has(dmKey)) {
+                pendingDMs.add(dmKey);
 
-              const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-              if (dmContent) {
-                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                  .run(randomAi.id, realUser.id, dmContent.trim());
-                checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
-                console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
+                try {
+                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+                  const relContext = rel ? rel.description : '';
+                  
+                  const messageHistory = db.prepare(`
+                    SELECT sender_id, content, created_at 
+                    FROM direct_messages 
+                    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                    ORDER BY created_at ASC
+                  `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
+                    role: m.sender_id === randomAi.id ? 'assistant' : 'user',
+                    content: m.content,
+                    created_at: m.created_at
+                  }));
+
+                  const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                  if (dmContent) {
+                    db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+                      .run(randomAi.id, realUser.id, dmContent.trim());
+                    checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
+                    console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
+                  }
+                } finally {
+                  pendingDMs.delete(dmKey);
+                }
               }
             }
           }
@@ -1959,27 +2013,35 @@ async function startServer() {
           if (Math.random() < 0.5) { // 50% chance to reply per worker tick to not spam
             const aiUser = activeAiUsers.find(u => u.id === dm.receiver_id);
             if (aiUser) {
-              const history = db.prepare(`
-                SELECT sender_id, content, created_at FROM direct_messages
-                WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                ORDER BY created_at DESC LIMIT 10
-              `).all(realUser.id, aiUser.id, aiUser.id, realUser.id).reverse();
+              const dmKey = `${aiUser.id}:${realUser.id}`;
+              if (pendingDMs.has(dmKey)) continue;
+              pendingDMs.add(dmKey);
 
-              const formattedHistory = history.map((msg: any) => ({
-                role: msg.sender_id === aiUser.id ? 'assistant' : 'user',
-                content: msg.content,
-                created_at: msg.created_at
-              }));
+              try {
+                const history = db.prepare(`
+                  SELECT sender_id, content, created_at FROM direct_messages
+                  WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                  ORDER BY created_at DESC LIMIT 10
+                `).all(realUser.id, aiUser.id, aiUser.id, realUser.id).reverse();
 
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(aiUser.id, realUser.id) as any;
-              const relContext = rel ? rel.description : '';
+                const formattedHistory = history.map((msg: any) => ({
+                  role: msg.sender_id === aiUser.id ? 'assistant' : 'user',
+                  content: msg.content,
+                  created_at: msg.created_at
+                }));
 
-              const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true);
-              if (reply) {
-                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                  .run(aiUser.id, realUser.id, reply);
-                checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
-                console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
+                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(aiUser.id, realUser.id) as any;
+                const relContext = rel ? rel.description : '';
+
+                const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true);
+                if (reply) {
+                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+                    .run(aiUser.id, realUser.id, reply);
+                  checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
+                  console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
+                }
+              } finally {
+                pendingDMs.delete(dmKey);
               }
             }
           }
@@ -2071,35 +2133,44 @@ async function startServer() {
             const lastMsg = db.prepare("SELECT sender_id FROM group_chat_messages WHERE group_chat_id = ? ORDER BY created_at DESC LIMIT 1").get(group.id) as any;
             
             if (lastMsg && lastMsg.sender_id !== selectedAi.id) {
-              const history = db.prepare(`
-                SELECT m.sender_id, m.content, u.display_name, m.created_at, u.is_ai
-                FROM group_chat_messages m
-                JOIN users u ON m.sender_id = u.id
-                WHERE m.group_chat_id = ?
-                ORDER BY m.created_at DESC LIMIT 15
-              `).all(group.id).reverse();
+              const gcKey = `${group.id}:${selectedAi.id}`;
+              if (!pendingGroupChats.has(gcKey)) {
+                pendingGroupChats.add(gcKey);
 
-              const formattedHistory = history.map((msg: any) => ({
-                role: msg.is_ai === 0 ? 'user' : 'assistant',
-                content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`
-              }));
+                try {
+                const history = db.prepare(`
+                  SELECT m.sender_id, m.content, u.display_name, m.created_at, u.is_ai
+                  FROM group_chat_messages m
+                  JOIN users u ON m.sender_id = u.id
+                  WHERE m.group_chat_id = ?
+                  ORDER BY m.created_at DESC LIMIT 15
+                `).all(group.id).reverse();
 
-              const otherMembers = db.prepare(`
-                SELECT u.* FROM users u
-                JOIN group_chat_members gcm ON u.id = gcm.user_id
-                WHERE gcm.group_chat_id = ? AND u.id != ?
-              `).all(group.id, selectedAi.id) as any[];
+                const formattedHistory = history.map((msg: any) => ({
+                  role: msg.is_ai === 0 ? 'user' : 'assistant',
+                  content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`
+                }));
 
-              const reply = await generateGroupChatReply(selectedAi, group.name, formattedHistory, otherMembers);
-              if (reply) {
-                db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-                  .run(group.id, selectedAi.id, reply);
-                console.log(`${selectedAi.display_name} replied in group chat ${group.name}`);
+                const otherMembers = db.prepare(`
+                  SELECT u.* FROM users u
+                  JOIN group_chat_members gcm ON u.id = gcm.user_id
+                  WHERE gcm.group_chat_id = ? AND u.id != ?
+                `).all(group.id, selectedAi.id) as any[];
+
+                const reply = await generateGroupChatReply(selectedAi, group.name, formattedHistory, otherMembers);
+                if (reply) {
+                  db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
+                    .run(group.id, selectedAi.id, reply);
+                  console.log(`${selectedAi.display_name} replied in group chat ${group.name}`);
+                }
+              } finally {
+                pendingGroupChats.delete(gcKey);
               }
             }
           }
         }
       }
+    }
       
       // Handle mentions
       const unrepliedMentions = db.prepare(`
@@ -2325,30 +2396,36 @@ async function startServer() {
             
             if (otherAiUsers.length > 0) {
               const randomAi = pickWeightedRandomUser(otherAiUsers);
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, author.id) as any;
-              const relContext = rel ? rel.description : '';
-              const dmContext = `You saw their post: "${choice.data.content}" and decided to DM them about it.`;
-              
-              // Fetch message history
-              const messageHistory = db.prepare(`
-                SELECT sender_id, content, created_at 
-                FROM direct_messages 
-                WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                ORDER BY created_at ASC
-              `).all(randomAi.id, author.id, author.id, randomAi.id).map((m: any) => ({
-                role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                content: m.content,
-                created_at: m.created_at
-              }));
+              if (pendingDMs.has(`${randomAi.id}:${author.id}`)) continue;
+              pendingDMs.add(`${randomAi.id}:${author.id}`);
+              try {
+                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, author.id) as any;
+                const relContext = rel ? rel.description : '';
+                const dmContext = `You saw their post: "${choice.data.content}" and decided to DM them about it.`;
+                
+                // Fetch message history
+                const messageHistory = db.prepare(`
+                  SELECT sender_id, content, created_at 
+                  FROM direct_messages 
+                  WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                  ORDER BY created_at ASC
+                `).all(randomAi.id, author.id, author.id, randomAi.id).map((m: any) => ({
+                  role: m.sender_id === randomAi.id ? 'assistant' : 'user',
+                  content: m.content,
+                  created_at: m.created_at
+                }));
 
-              const dmContent = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext, messageHistory);
-              if (dmContent) {
-                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                  .run(randomAi.id, author.id, dmContent);
-                console.log(`${randomAi.display_name} sent a DM to ${author.display_name} in response to a dm_invitation post`);
+                const dmContent = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext, messageHistory);
+                if (dmContent) {
+                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+                    .run(randomAi.id, author.id, dmContent);
+                  console.log(`${randomAi.display_name} sent a DM to ${author.display_name} in response to a dm_invitation post`);
+                }
+              } finally {
+                pendingDMs.delete(`${randomAi.id}:${author.id}`);
               }
             }
-            return;
+            break;
           }
 
           const targetUserId = choice.data.user_id;
@@ -2381,74 +2458,79 @@ async function startServer() {
         if (choice && availableAis.length > 0) {
           // Now pick the best commenter
           const candidateUsers = filterAvailableUsersForComment(choice.data.user_id, availableAis);
-          if (candidateUsers.length === 0) return;
+          if (candidateUsers.length > 0) {
+            const chosenAiId = await pickBestCommenter(choice.data, candidateUsers);
+            const randomAi = availableAis.find(u => u.id === chosenAiId) || availableAis[0];
 
-          const chosenAiId = await pickBestCommenter(choice.data, candidateUsers);
-          const randomAi = availableAis.find(u => u.id === chosenAiId) || availableAis[0];
+            if (choice.type === 'post') {
+              const randomPost = choice.data;
+              if (!pendingComments.has(`${randomAi.id}:post:${randomPost.id}`)) {
+                pendingComments.add(`${randomAi.id}:post:${randomPost.id}`);
+                try {
+                  // Get other comments for context
+                  const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
+                  
+                  // Get relationship context
+                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
+                  const relContext = rel ? rel.description : '';
 
-          if (choice.type === 'post') {
-            const randomPost = choice.data;
-            if (pendingComments.has(`${randomAi.id}:post:${randomPost.id}`)) return;
-            pendingComments.add(`${randomAi.id}:post:${randomPost.id}`);
-            try {
-              // Get other comments for context
-              const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
-              
-              // Get relationship context
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
-              const relContext = rel ? rel.description : '';
+                  const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id, randomPost.image_prompt, randomPost.created_at);
+                  if (commentContent) {
+                    const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
+                      .run(randomPost.id, randomAi.id, commentContent);
+                    checkDynamicRelationship(randomAi.id, randomPost.user_id).catch(console.error);
+                    console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
 
-              const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id, randomPost.image_prompt, randomPost.created_at);
-              if (commentContent) {
-                const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
-                  .run(randomPost.id, randomAi.id, commentContent);
-                checkDynamicRelationship(randomAi.id, randomPost.user_id).catch(console.error);
-                console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
+                    // Add 1-5 likes to the post
+                    addLikesToPostOrComment(randomPost.id, null, Math.floor(Math.random() * 5) + 1);
 
-                // Add 1-5 likes to the post
-                addLikesToPostOrComment(randomPost.id, null, Math.floor(Math.random() * 5) + 1);
-
-                // Notify real user if they own the post
-                const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomPost.user_id) as any;
-                if (postAuthor && postAuthor.is_ai === 0) {
-                  db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-                    .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
+                    // Notify real user if they own the post
+                    const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomPost.user_id) as any;
+                    if (postAuthor && postAuthor.is_ai === 0) {
+                      db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
+                        .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
+                    }
+                  }
+                } finally {
+                  pendingComments.delete(`${randomAi.id}:post:${randomPost.id}`);
                 }
               }
-            } finally {
-              pendingComments.delete(`${randomAi.id}:post:${randomPost.id}`);
-            }
-          } else {
-            const randomComment = choice.data;
-            if (getCommentDepth(randomComment.id) >= 5) return;
-            if (pendingComments.has(`${randomAi.id}:comment:${randomComment.id}`)) return;
-            pendingComments.add(`${randomAi.id}:comment:${randomComment.id}`);
-            try {
-              // Get relationship context
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
-              const relContext = rel ? rel.description : '';
+            } else {
+              const randomComment = choice.data;
+              if (getCommentDepth(randomComment.id) < 5) {
+                // Check if this AI has already replied to this comment
+                const existingReply = db.prepare("SELECT 1 FROM comments WHERE parent_id = ? AND user_id = ?").get(randomComment.id, randomAi.id);
+                if (!existingReply && !pendingComments.has(`${randomAi.id}:comment:${randomComment.id}`)) {
+                  pendingComments.add(`${randomAi.id}:comment:${randomComment.id}`);
+                  try {
+                    // Get relationship context
+                    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
+                    const relContext = rel ? rel.description : '';
 
-              const threadContext = buildThreadContext(randomComment.id);
+                    const threadContext = buildThreadContext(randomComment.id);
 
-              const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id, undefined, randomComment.created_at);
-              if (replyContent) {
-                const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
-                  .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
-                checkDynamicRelationship(randomAi.id, randomComment.user_id).catch(console.error);
-                console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
+                    const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id, undefined, randomComment.created_at);
+                    if (replyContent) {
+                      const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
+                        .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
+                      checkDynamicRelationship(randomAi.id, randomComment.user_id).catch(console.error);
+                      console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
 
-                // Add 1-5 likes to the comment
-                addLikesToPostOrComment(randomComment.post_id, randomComment.id, Math.floor(Math.random() * 5) + 1);
+                      // Add 1-5 likes to the comment
+                      addLikesToPostOrComment(randomComment.post_id, randomComment.id, Math.floor(Math.random() * 5) + 1);
 
-                // Notify real user if they own the comment
-                const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomComment.user_id) as any;
-                if (commentAuthor && commentAuthor.is_ai === 0) {
-                  db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-                    .run(commentAuthor.id, randomAi.id, info.lastInsertRowid);
+                      // Notify real user if they own the comment
+                      const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomComment.user_id) as any;
+                      if (commentAuthor && commentAuthor.is_ai === 0) {
+                        db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
+                          .run(commentAuthor.id, randomAi.id, info.lastInsertRowid);
+                      }
+                    }
+                  } finally {
+                    pendingComments.delete(`${randomAi.id}:comment:${randomComment.id}`);
+                  }
                 }
               }
-            } finally {
-              pendingComments.delete(`${randomAi.id}:comment:${randomComment.id}`);
             }
           }
         }

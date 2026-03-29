@@ -8,6 +8,7 @@ export default function App() {
   const [realUsers, setRealUsers] = useState<any[]>([]);
   const [loginPin, setLoginPin] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<any>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const apiFetch = useCallback(async (resource: RequestInfo | URL, config?: RequestInit) => {
     const headers = new Headers(config?.headers);
@@ -28,7 +29,8 @@ export default function App() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedLoginUser) return;
+    if (!selectedLoginUser || isLoggingIn) return;
+    setIsLoggingIn(true);
     try {
       const res = await apiFetch('/api/login', {
         method: 'POST',
@@ -45,6 +47,8 @@ export default function App() {
       }
     } catch (e) {
       showToast("Error logging in");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -59,11 +63,14 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostType, setNewPostType] = useState('life_update');
+  const [isCreatingPost, setIsCreatingPost] = useState(false);
   const [newChatMsg, setNewChatMsg] = useState('');
+  const [isSendingMsg, setIsSendingMsg] = useState(false);
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<number[]>([]);
+  const [isCreatingGroupChat, setIsCreatingGroupChat] = useState(false);
   const [groupSearchQuery, setGroupSearchQuery] = useState('');
 
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -119,6 +126,7 @@ export default function App() {
   const [charOnlineTimes, setCharOnlineTimes] = useState<string[]>([]);
   const [charActivityLevel, setCharActivityLevel] = useState<number>(5);
   const [charNewUniverseName, setCharNewUniverseName] = useState('');
+  const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [universes, setUniverses] = useState<any[]>([]);
   const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
   const [personaChatResponse, setPersonaChatResponse] = useState('');
@@ -204,6 +212,7 @@ export default function App() {
   // Threaded Comments
   const [replyingTo, setReplyingTo] = useState<{postId: number, commentId: number, authorName: string} | null>(null);
   const [replyContent, setReplyContent] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
 
   // DM Editing
   const [editingDmId, setEditingDmId] = useState<number | null>(null);
@@ -229,12 +238,15 @@ export default function App() {
   const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
   const [newRelUserId, setNewRelUserId] = useState('');
   const [newRelDesc, setNewRelDesc] = useState('');
+  const [isAddingRelationship, setIsAddingRelationship] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [relSearch, setRelSearch] = useState('');
 
   // Universe Editing
   const [isEditingUniverse, setIsEditingUniverse] = useState(false);
   const [editUniverseDescription, setEditUniverseDescription] = useState('');
   const [editUniverseImageUrl, setEditUniverseImageUrl] = useState('');
+  const [isUpdatingUniverse, setIsUpdatingUniverse] = useState(false);
 
   // API Logs
   const [apiLogs, setApiLogs] = useState<any[]>([]);
@@ -385,7 +397,8 @@ export default function App() {
 
   const handleAddRelationship = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRelUserId || !newRelDesc) return;
+    if (!newRelUserId || !newRelDesc || isAddingRelationship) return;
+    setIsAddingRelationship(true);
     try {
       await apiFetch(`/api/users/${editingProfile.id}/relationships`, {
         method: 'POST',
@@ -399,6 +412,8 @@ export default function App() {
       showToast('Relationship added!');
     } catch (e) {
       console.error(e);
+    } finally {
+      setIsAddingRelationship(false);
     }
   };
 
@@ -417,67 +432,72 @@ export default function App() {
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingProfile) return;
+    if (!editingProfile || isSavingProfile) return;
+    setIsSavingProfile(true);
     
-    let finalUniverseId = profileUniverseId;
-    if (profileUniverseId === -1 && profileNewUniverseName.trim()) {
-      const res = await apiFetch('/api/universes', {
-        method: 'POST',
+    try {
+      let finalUniverseId = profileUniverseId;
+      if (profileUniverseId === -1 && profileNewUniverseName.trim()) {
+        const res = await apiFetch('/api/universes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: profileNewUniverseName.trim() })
+        });
+        if (res.ok) {
+          const newUniverse = await res.json();
+          finalUniverseId = newUniverse.id;
+          fetchUniverses();
+        } else {
+          const err = await res.json();
+          showToast(err.error || "Failed to create universe");
+          return;
+        }
+      }
+
+      const res = await apiFetch(`/api/users/${editingProfile.id}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: profileNewUniverseName.trim() })
+        body: JSON.stringify({
+          display_name: profileName,
+          username: profileUsername,
+          bio: profileBio,
+          avatar_url: profileAvatar,
+          description: profileDescription,
+          writing_style: profileWritingStyle,
+          physical_appearance: profilePhysicalAppearance,
+          clothing_style: profileClothingStyle,
+          artstyle: profileArtstyle,
+          universe_id: finalUniverseId,
+          online_times: JSON.stringify(profileOnlineTimes),
+          activity_level: profileActivityLevel,
+          pin: profilePin,
+          dm_frequency: profileDmFrequency
+        })
       });
-      if (res.ok) {
-        const newUniverse = await res.json();
-        finalUniverseId = newUniverse.id;
-        fetchUniverses();
-      } else {
+      
+      if (!res.ok) {
         const err = await res.json();
-        showToast(err.error || "Failed to create universe");
+        showToast(err.error || "Failed to save profile");
         return;
       }
-    }
+      
+      if (loggedInUser && loggedInUser.id === editingProfile.id) {
+        setLoggedInUser({
+          ...loggedInUser,
+          display_name: profileName,
+          username: profileUsername,
+          avatar_url: profileAvatar
+        });
+      }
 
-    const res = await apiFetch(`/api/users/${editingProfile.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        display_name: profileName,
-        username: profileUsername,
-        bio: profileBio,
-        avatar_url: profileAvatar,
-        description: profileDescription,
-        writing_style: profileWritingStyle,
-        physical_appearance: profilePhysicalAppearance,
-        clothing_style: profileClothingStyle,
-        artstyle: profileArtstyle,
-        universe_id: finalUniverseId,
-        online_times: JSON.stringify(profileOnlineTimes),
-        activity_level: profileActivityLevel,
-        pin: profilePin,
-        dm_frequency: profileDmFrequency
-      })
-    });
-    
-    if (!res.ok) {
-      const err = await res.json();
-      showToast(err.error || "Failed to save profile");
-      return;
+      setEditingProfile(null);
+      setProfileNewUniverseName('');
+      fetchUsers();
+      setActiveTab('home');
+      showToast('Profile updated!');
+    } finally {
+      setIsSavingProfile(false);
     }
-    
-    if (loggedInUser && loggedInUser.id === editingProfile.id) {
-      setLoggedInUser({
-        ...loggedInUser,
-        display_name: profileName,
-        username: profileUsername,
-        avatar_url: profileAvatar
-      });
-    }
-
-    setEditingProfile(null);
-    setProfileNewUniverseName('');
-    fetchUsers();
-    setActiveTab('home');
-    showToast('Profile updated!');
   };
 
   const handleDeleteCharacter = () => {
@@ -665,7 +685,8 @@ export default function App() {
   };
 
   const handleUpdateUniverse = async () => {
-    if (!viewingUniverse) return;
+    if (!viewingUniverse || isUpdatingUniverse) return;
+    setIsUpdatingUniverse(true);
     try {
       const res = await apiFetch(`/api/universes/${viewingUniverse.id}`, {
         method: 'PUT',
@@ -690,6 +711,8 @@ export default function App() {
       }
     } catch (e) {
       showToast("Error updating universe");
+    } finally {
+      setIsUpdatingUniverse(false);
     }
   };
 
@@ -704,7 +727,7 @@ export default function App() {
 
   const handleForcePost = async (type: 'text' | 'image', userId?: number) => {
     const targetId = userId || viewingProfile?.id;
-    if (!targetId) return;
+    if (!targetId || isForcingPost) return;
     setIsForcingPost(true);
     try {
       const res = await apiFetch(`/api/users/${targetId}/force-post`, {
@@ -751,16 +774,21 @@ export default function App() {
   };
 
   const handleReply = async (postId: number, parentId: number) => {
-    if (!replyContent.trim()) return;
-    await apiFetch(`/api/posts/${postId}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: replyContent, parent_id: parentId })
-    });
-    setReplyContent('');
-    setReplyingTo(null);
-    fetchPosts();
-    fetchNotifications();
+    if (!replyContent.trim() || isSendingReply) return;
+    setIsSendingReply(true);
+    try {
+      await apiFetch(`/api/posts/${postId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: replyContent, parent_id: parentId })
+      });
+      setReplyContent('');
+      setReplyingTo(null);
+      fetchPosts();
+      fetchNotifications();
+    } finally {
+      setIsSendingReply(false);
+    }
   };
 
   useEffect(() => {
@@ -786,7 +814,8 @@ export default function App() {
   }, [activeChat, isGroupChat, loggedInUser]);
 
   const handleCreateGroupChat = async () => {
-    if (!newGroupName.trim() || selectedGroupMembers.length === 0) return;
+    if (!newGroupName.trim() || selectedGroupMembers.length === 0 || isCreatingGroupChat) return;
+    setIsCreatingGroupChat(true);
     try {
       const res = await apiFetch('/api/group-chats', {
         method: 'POST',
@@ -805,6 +834,8 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setIsCreatingGroupChat(false);
     }
   };
 
@@ -827,85 +858,96 @@ export default function App() {
   };
 
   const handleCreatePost = async () => {
-    if (!newPostContent.trim()) return;
+    if (!newPostContent.trim() || isCreatingPost) return;
+    setIsCreatingPost(true);
     const type = newPostType;
-    await apiFetch('/api/posts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: newPostContent, post_type: type })
-    });
-    setNewPostContent('');
-    setNewPostType('life_update');
-    if (type === 'image_post') {
-      showToast("Image is generating in the background. It will appear shortly.");
+    try {
+      await apiFetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newPostContent, post_type: type })
+      });
+      setNewPostContent('');
+      setNewPostType('life_update');
+      if (type === 'image_post') {
+        showToast("Image is generating in the background. It will appear shortly.");
+      }
+      fetchPosts();
+    } finally {
+      setIsCreatingPost(false);
     }
-    fetchPosts();
   };
 
   const handleAddCharacter = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAddingCharacter) return;
+    setIsAddingCharacter(true);
     
-    let finalUniverseId = charUniverseId;
-    if (charUniverseId === -1 && charNewUniverseName.trim()) {
-      const res = await apiFetch('/api/universes', {
+    try {
+      let finalUniverseId = charUniverseId;
+      if (charUniverseId === -1 && charNewUniverseName.trim()) {
+        const res = await apiFetch('/api/universes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: charNewUniverseName.trim() })
+        });
+        if (res.ok) {
+          const newUniverse = await res.json();
+          finalUniverseId = newUniverse.id;
+          fetchUniverses();
+        } else {
+          const err = await res.json();
+          showToast(err.error || "Failed to create universe");
+          return;
+        }
+      }
+
+      const res = await apiFetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: charNewUniverseName.trim() })
+        body: JSON.stringify({
+          username: charUsername,
+          display_name: charName,
+          bio: charBio,
+          avatar_url: charAvatar,
+          ai_persona: charPersona,
+          description: charDescription,
+          writing_style: charWritingStyle,
+          physical_appearance: charPhysicalAppearance,
+          clothing_style: charClothingStyle,
+          artstyle: charArtstyle,
+          universe_id: finalUniverseId,
+          online_times: JSON.stringify(charOnlineTimes),
+          activity_level: charActivityLevel
+        })
       });
-      if (res.ok) {
-        const newUniverse = await res.json();
-        finalUniverseId = newUniverse.id;
-        fetchUniverses();
-      } else {
+
+      if (!res.ok) {
         const err = await res.json();
-        showToast(err.error || "Failed to create universe");
+        showToast(err.error || "Failed to add character");
         return;
       }
+
+      setCharName('');
+      setCharUsername('');
+      setCharBio('');
+      setCharAvatar('');
+      setCharPersona('');
+      setCharDescription('');
+      setCharWritingStyle('');
+      setCharPhysicalAppearance('');
+      setCharClothingStyle('');
+      setCharArtstyle('');
+      setCharUniverseId(null);
+      setCharOnlineTimes([]);
+      setCharActivityLevel(5);
+      setCharNewUniverseName('');
+      setPersonaChatResponse('');
+      fetchUsers();
+      showToast('Character added!');
+    } finally {
+      setIsAddingCharacter(false);
     }
-
-    const res = await apiFetch('/api/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: charUsername,
-        display_name: charName,
-        bio: charBio,
-        avatar_url: charAvatar,
-        ai_persona: charPersona,
-        description: charDescription,
-        writing_style: charWritingStyle,
-        physical_appearance: charPhysicalAppearance,
-        clothing_style: charClothingStyle,
-        artstyle: charArtstyle,
-        universe_id: finalUniverseId,
-        online_times: JSON.stringify(charOnlineTimes),
-        activity_level: charActivityLevel
-      })
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      showToast(err.error || "Failed to add character");
-      return;
-    }
-
-    setCharName('');
-    setCharUsername('');
-    setCharBio('');
-    setCharAvatar('');
-    setCharPersona('');
-    setCharDescription('');
-    setCharWritingStyle('');
-    setCharPhysicalAppearance('');
-    setCharClothingStyle('');
-    setCharArtstyle('');
-    setCharUniverseId(null);
-    setCharOnlineTimes([]);
-    setCharActivityLevel(5);
-    setCharNewUniverseName('');
-    setPersonaChatResponse('');
-    fetchUsers();
-    showToast('Character added!');
   };
 
   const handleGeneratePersona = async () => {
@@ -959,8 +1001,9 @@ export default function App() {
 
   const handleSendMsg = async (e: React.FormEvent | React.KeyboardEvent | any) => {
     e.preventDefault();
-    if (!newChatMsg.trim() || !activeChat) return;
+    if (!newChatMsg.trim() || !activeChat || isSendingMsg) return;
     
+    setIsSendingMsg(true);
     // Optimistic update
     const msg = newChatMsg.trim();
     setNewChatMsg('');
@@ -969,14 +1012,18 @@ export default function App() {
 
     const endpoint = isGroupChat ? `/api/group-chats/${activeChat.id}/messages` : `/api/dms/${activeChat.id}`;
     
-    await apiFetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: msg })
-    });
-    fetchChatMessages(activeChat.id, isGroupChat);
-    if (isGroupChat) fetchGroupChats();
-    else fetchConversations();
+    try {
+      await apiFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: msg })
+      });
+      fetchChatMessages(activeChat.id, isGroupChat);
+      if (isGroupChat) fetchGroupChats();
+      else fetchConversations();
+    } finally {
+      setIsSendingMsg(false);
+    }
   };
 
   const handleEditDm = async (msgId: number) => {
@@ -2043,18 +2090,19 @@ export default function App() {
                           </div>
                         </div>
                         <div className={`px-3 py-1 rounded-full text-xs font-bold ${check.result ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                          {check.result ? 'Relationship Formed' : 'No Relationship'}
+                          {check.result ? (check.is_update ? 'Relationship Updated' : 'Relationship Formed') : (check.is_update ? 'No Update Needed' : 'No Relationship')}
                         </div>
                       </div>
                       
                       <div className="bg-black/30 rounded-xl p-4 text-sm">
                         <div className="flex items-center gap-2 mb-2 text-gray-400">
                           <span className="font-mono text-xs bg-gray-800 px-2 py-0.5 rounded">Threshold: {check.interaction_threshold}</span>
+                          {check.is_update ? <span className="font-mono text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">Update Check</span> : <span className="font-mono text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">New Check</span>}
                         </div>
                         {check.description ? (
                           <p className="text-gray-300 italic">"{check.description}"</p>
                         ) : (
-                          <p className="text-gray-500 italic">The AI determined their interactions were not significant enough to form a hard-coded relationship.</p>
+                          <p className="text-gray-500 italic">The AI determined their interactions were not significant enough to {check.is_update ? 'update their existing relationship' : 'form a hard-coded relationship'}.</p>
                         )}
                       </div>
                     </div>
@@ -2905,6 +2953,7 @@ export default function App() {
                   formatTimestamp={formatTimestamp}
                   onRefresh={() => handleViewPost(viewingPostData.id)}
                   onViewApiLogs={handleViewApiLogs}
+                  users={users}
                 />
               </div>
             </div>
@@ -3053,11 +3102,12 @@ export default function App() {
                         key={post.id} 
                         post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
                         onLike={() => handleLike(post.id)} 
-                        onViewProfile={() => {}}
+                        onViewProfile={handleViewProfile}
                         onShowLikers={handleShowLikers}
                         formatTimestamp={formatTimestamp}
                         onRefresh={() => handleViewProfile(viewingProfile.id)}
                         onViewApiLogs={handleViewApiLogs}
+                        users={users}
                       />
                     ))}
                     {viewingProfilePosts.length > visibleProfilePosts && (
@@ -3324,10 +3374,38 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   );
 }
 
+function renderContentWithTags(content: string, users: any[] | undefined, onViewProfile: (id: number) => void) {
+  if (!content) return null;
+  
+  // Split by @username pattern (including word characters)
+  const parts = content.split(/(@\w+)/g);
+  
+  return parts.map((part, i) => {
+    if (part.startsWith('@')) {
+      const username = part.substring(1);
+      const user = users?.find(u => u.username.toLowerCase() === username.toLowerCase());
+      
+      if (user) {
+        return (
+          <span 
+            key={i} 
+            onClick={(e) => { e.stopPropagation(); onViewProfile(user.id); }} 
+            className="text-orange-500 hover:underline cursor-pointer font-bold"
+          >
+            {part}
+          </span>
+        );
+      }
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
 function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [isSendingComment, setIsSendingComment] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -3407,20 +3485,25 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   const handleAddComment = async (e: React.FormEvent, parentId: number | null = null) => {
     e.preventDefault();
     const content = parentId ? replyingTo.content : newComment;
-    if (!content.trim()) return;
+    if (!content.trim() || isSendingComment) return;
     
-    await apiFetch(`/api/posts/${post.id}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, parent_id: parentId })
-    });
-    
-    if (parentId) {
-      setReplyingTo(null);
-    } else {
-      setNewComment('');
+    setIsSendingComment(true);
+    try {
+      await apiFetch(`/api/posts/${post.id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, parent_id: parentId })
+      });
+      
+      if (parentId) {
+        setReplyingTo(null);
+      } else {
+        setNewComment('');
+      }
+      fetchComments();
+    } finally {
+      setIsSendingComment(false);
     }
-    fetchComments();
   };
 
   const handleCommentLike = async (commentId: number) => {
@@ -3485,7 +3568,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
               </div>
             </div>
           ) : (
-            <p className="mt-1 whitespace-pre-wrap">{post.content}</p>
+            <p className="mt-1 whitespace-pre-wrap">{renderContentWithTags(post.content, users, onViewProfile)}</p>
           )}
           {post.image_url && (
             <>
@@ -3676,7 +3759,7 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
                 </div>
               </div>
             ) : (
-              <p className="text-sm">{comment.content}</p>
+              <p className="text-sm whitespace-pre-wrap">{renderContentWithTags(comment.content, users, onViewProfile)}</p>
             )}
           </div>
           <div className="flex gap-6 mt-1 ml-2 text-gray-500">

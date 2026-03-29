@@ -241,6 +241,13 @@ export function initDb() {
     // Column might already exist
   }
 
+  // Add is_update column to relationship_checks if it doesn't exist
+  try {
+    db.exec("ALTER TABLE relationship_checks ADD COLUMN is_update BOOLEAN DEFAULT 0");
+  } catch (e) {
+    // Column might already exist
+  }
+
   // Handle schema migrations for settings if model_name doesn't exist
   try {
     db.prepare('SELECT model_name FROM settings').get();

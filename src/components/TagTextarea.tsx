@@ -84,7 +84,7 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
     }, 0);
   };
 
-  const filteredUsers = users
+  const filteredUsers = (users || [])
     .filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()) || u.display_name.toLowerCase().includes(searchQuery.toLowerCase()))
     .slice(0, 5);
 
@@ -105,8 +105,12 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
               className="p-2 hover:bg-gray-700 cursor-pointer flex items-center gap-2"
               onClick={() => insertTag(user.username)}
             >
-              <div className="w-8 h-8 rounded-full bg-orange-900 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                {user.display_name.charAt(0).toUpperCase()}
+              <div className="w-8 h-8 rounded-full bg-orange-900 flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.display_name}`} alt="" className="w-full h-full object-cover bg-gray-800" referrerPolicy="no-referrer" />
+                )}
               </div>
               <div className="overflow-hidden">
                 <div className="font-bold text-sm text-white truncate">{user.display_name}</div>
