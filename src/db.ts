@@ -425,6 +425,10 @@ export function initDb() {
     db.exec("ALTER TABLE users ADD COLUMN dm_frequency TEXT DEFAULT 'medium'");
   } catch (e) {}
 
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN reference_images TEXT DEFAULT '[]'");
+  } catch (e) {}
+
   // Insert default settings
   db.prepare("INSERT OR IGNORE INTO settings (id, ai_enabled, model_name, image_model_name, timezone, api_key, allow_nsfw) VALUES (1, 1, 'zai-org/glm-5', 'z-image-turbo', 'UTC', '', 0)").run();
 

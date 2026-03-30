@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2 } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 
@@ -115,6 +115,7 @@ export default function App() {
   const [charName, setCharName] = useState('');
   const [charUsername, setCharUsername] = useState('');
   const [charAvatar, setCharAvatar] = useState('');
+  const [charReferenceImages, setCharReferenceImages] = useState<string[]>([]);
   const [charPersona, setCharPersona] = useState('');
   const [charBio, setCharBio] = useState('');
   const [charDescription, setCharDescription] = useState('');
@@ -226,6 +227,7 @@ export default function App() {
   const [profileDmFrequency, setProfileDmFrequency] = useState('medium');
   const [profileBio, setProfileBio] = useState('');
   const [profileAvatar, setProfileAvatar] = useState('');
+  const [profileReferenceImages, setProfileReferenceImages] = useState<string[]>([]);
   const [profileDescription, setProfileDescription] = useState('');
   const [profileWritingStyle, setProfileWritingStyle] = useState('');
   const [profilePhysicalAppearance, setProfilePhysicalAppearance] = useState('');
@@ -367,6 +369,11 @@ export default function App() {
     setProfileDmFrequency(user.dm_frequency || 'medium');
     setProfileBio(user.bio || '');
     setProfileAvatar(user.avatar_url || '');
+    try {
+      setProfileReferenceImages(user.reference_images ? JSON.parse(user.reference_images) : []);
+    } catch (e) {
+      setProfileReferenceImages([]);
+    }
     setProfileDescription(user.description || '');
     setProfileWritingStyle(user.writing_style || '');
     setProfilePhysicalAppearance(user.physical_appearance || '');
@@ -471,7 +478,8 @@ export default function App() {
           online_times: JSON.stringify(profileOnlineTimes),
           activity_level: profileActivityLevel,
           pin: profilePin,
-          dm_frequency: profileDmFrequency
+          dm_frequency: profileDmFrequency,
+          reference_images: profileReferenceImages
         })
       });
       
@@ -918,7 +926,8 @@ export default function App() {
           artstyle: charArtstyle,
           universe_id: finalUniverseId,
           online_times: JSON.stringify(charOnlineTimes),
-          activity_level: charActivityLevel
+          activity_level: charActivityLevel,
+          reference_images: charReferenceImages
         })
       });
 
@@ -932,6 +941,7 @@ export default function App() {
       setCharUsername('');
       setCharBio('');
       setCharAvatar('');
+      setCharReferenceImages([]);
       setCharPersona('');
       setCharDescription('');
       setCharWritingStyle('');
@@ -1313,6 +1323,10 @@ export default function App() {
             </button>
           </div>
           <div className="flex flex-col gap-2">
+            <div className="hidden xl:flex items-center gap-2 p-3 text-sm text-gray-400">
+              <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+              <span>{users.filter(u => u.is_ai === 1 && isUserOnline(u)).length} AI Online</span>
+            </div>
             <div 
               onClick={() => handleEditProfile(loggedInUser)}
               className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
@@ -1488,6 +1502,31 @@ export default function App() {
                         Upload
                         <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, setCharAvatar)} />
                       </label>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-1">Reference Images (Overrides Profile Pic for Image Gen)</label>
+                    <div className="flex flex-col gap-2">
+                      {charReferenceImages.map((img, idx) => (
+                        <div key={idx} className="flex gap-2 items-center">
+                          {img && <img src={img} alt="Ref" className="w-10 h-10 object-cover rounded" />}
+                          <input value={img} onChange={e => {
+                            const newImgs = [...charReferenceImages];
+                            newImgs[idx] = e.target.value;
+                            setCharReferenceImages(newImgs);
+                          }} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" placeholder="Image URL..." />
+                          <button onClick={() => setCharReferenceImages(charReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <button onClick={() => setCharReferenceImages([...charReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                          <Plus size={16} /> Add URL
+                        </button>
+                        <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer flex items-center gap-2 text-sm">
+                          <Upload size={16} /> Upload Image
+                          <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, (base64) => setCharReferenceImages([...charReferenceImages, base64]))} />
+                        </label>
+                      </div>
                     </div>
                   </div>
                   <div>
@@ -2677,6 +2716,31 @@ export default function App() {
                       Upload
                       <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, setProfileAvatar)} />
                     </label>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Reference Images (Overrides Profile Pic for Image Gen)</label>
+                  <div className="flex flex-col gap-2">
+                    {profileReferenceImages.map((img, idx) => (
+                      <div key={idx} className="flex gap-2 items-center">
+                        {img && <img src={img} alt="Ref" className="w-10 h-10 object-cover rounded" />}
+                        <input value={img} onChange={e => {
+                          const newImgs = [...profileReferenceImages];
+                          newImgs[idx] = e.target.value;
+                          setProfileReferenceImages(newImgs);
+                        }} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" placeholder="Image URL..." />
+                        <button onClick={() => setProfileReferenceImages(profileReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
+                      </div>
+                    ))}
+                    <div className="flex gap-2">
+                      <button onClick={() => setProfileReferenceImages([...profileReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                        <Plus size={16} /> Add URL
+                      </button>
+                      <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer flex items-center gap-2 text-sm">
+                        <Upload size={16} /> Upload Image
+                        <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, (base64) => setProfileReferenceImages([...profileReferenceImages, base64]))} />
+                      </label>
+                    </div>
                   </div>
                 </div>
                 <div>

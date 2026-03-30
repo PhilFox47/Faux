@@ -954,7 +954,7 @@ export async function getBase64Image(url: string): Promise<string | null> {
   return null;
 }
 
-export async function generateImage(prompt: string, negative_prompt?: string, avatarUrl?: string) {
+export async function generateImage(prompt: string, negative_prompt?: string, referenceImageUrls?: string[]) {
   try {
     const model = getImageModel();
     const sizes = ['4096x4096', '2304x4096', '4096x2304'];
@@ -975,12 +975,16 @@ export async function generateImage(prompt: string, negative_prompt?: string, av
       requestBody.negative_prompt = negative_prompt;
     }
 
-    if (avatarUrl) {
-      const base64Image = await getBase64Image(avatarUrl);
-      if (base64Image) {
-        requestBody.image = base64Image;
-        // Adjust Image-to-Image controls for Seedream 4.0
-        requestBody.strength = 0.65; 
+    if (referenceImageUrls && referenceImageUrls.length > 0) {
+      const base64Images = await Promise.all(referenceImageUrls.map(url => getBase64Image(url)));
+      const validImages = base64Images.filter(img => img !== null);
+      
+      if (validImages.length === 1) {
+        requestBody.image = validImages[0];
+        requestBody.strength = 0.65;
+      } else if (validImages.length > 1) {
+        requestBody.image = validImages; // Pass array of images
+        requestBody.strength = 0.65;
       }
     }
 

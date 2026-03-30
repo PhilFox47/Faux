@@ -828,13 +828,13 @@ async function startServer() {
   });
 
   app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency } = req.body;
+    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images } = req.body;
     try {
       db.prepare(`
         UPDATE users 
-        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency)
+        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency), reference_images = ?
         WHERE id = ?
-      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, req.params.id);
+      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, reference_images ? JSON.stringify(reference_images) : '[]', req.params.id);
 
       res.json({ success: true });
     } catch (e: any) {
@@ -860,7 +860,7 @@ async function startServer() {
   });
 
   app.post("/api/users", (req, res) => {
-    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level } = req.body;
+    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images } = req.body;
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "ROUTE_ADD_USER",
       JSON.stringify({ username, display_name, universe_id }),
@@ -873,10 +873,10 @@ async function startServer() {
       }
 
       const stmt = db.prepare(`
-        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5);
+      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, reference_images ? JSON.stringify(reference_images) : '[]');
       const userId = info.lastInsertRowid;
       
       // AI character follows real user by default, but real user does NOT follow AI character by default
@@ -986,8 +986,16 @@ async function startServer() {
         // Generate image in background
         if (archetype.id === 'image_post') {
           try {
-            const avatarUrl = characterVisible ? aiUser.avatar_url : undefined;
-            const imageUrl = await generateImage(positivePrompt, negativePrompt, avatarUrl);
+            let referenceImageUrls: string[] | undefined = undefined;
+            if (characterVisible) {
+              const refImages = JSON.parse(aiUser.reference_images || '[]');
+              if (refImages.length > 0) {
+                referenceImageUrls = refImages;
+              } else if (aiUser.avatar_url) {
+                referenceImageUrls = [aiUser.avatar_url];
+              }
+            }
+            const imageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
             if (imageUrl) {
               db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
               triggerPostComments(postId, archetype.id);
@@ -1045,8 +1053,18 @@ async function startServer() {
       try {
         const { prompt: positivePrompt, characterVisible } = await generateImagePrompt(user, content);
         const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
-        const avatarUrl = characterVisible ? user.avatar_url : undefined;
-        const imageUrl = await generateImage(positivePrompt, negativePrompt, avatarUrl);
+        
+        let referenceImageUrls: string[] | undefined = undefined;
+        if (characterVisible) {
+          const refImages = JSON.parse(user.reference_images || '[]');
+          if (refImages.length > 0) {
+            referenceImageUrls = refImages;
+          } else if (user.avatar_url) {
+            referenceImageUrls = [user.avatar_url];
+          }
+        }
+        
+        const imageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
         if (imageUrl) {
           db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
           triggerPostComments(postId, post_type || 'life_update');
@@ -1753,8 +1771,16 @@ async function startServer() {
 
           if (archetype.id === 'image_post') {
             try {
-              const avatarUrl = characterVisible ? aiUser.avatar_url : undefined;
-              const imageUrl = await generateImage(positivePrompt, negativePrompt, avatarUrl);
+              let referenceImageUrls: string[] | undefined = undefined;
+              if (characterVisible) {
+                const refImages = JSON.parse(aiUser.reference_images || '[]');
+                if (refImages.length > 0) {
+                  referenceImageUrls = refImages;
+                } else if (aiUser.avatar_url) {
+                  referenceImageUrls = [aiUser.avatar_url];
+                }
+              }
+              const imageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
               if (imageUrl) {
                 db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
                 console.log(`Image attached to post ${postId} by ${aiUser.display_name}`);
