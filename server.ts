@@ -957,6 +957,7 @@ async function startServer() {
       let postContent = "";
       let positivePrompt = "";
       let negativePrompt = "";
+      let characterVisible = false;
       
       if (archetype.id === 'image_post') {
         const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
@@ -964,6 +965,7 @@ async function startServer() {
           postContent = imageData.textPost;
           positivePrompt = imageData.positivePrompt;
           negativePrompt = imageData.negativePrompt;
+          characterVisible = imageData.characterVisible;
         }
       } else {
         postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost)) || "";
@@ -984,7 +986,8 @@ async function startServer() {
         // Generate image in background
         if (archetype.id === 'image_post') {
           try {
-            const imageUrl = await generateImage(positivePrompt, negativePrompt);
+            const avatarUrl = characterVisible ? aiUser.avatar_url : undefined;
+            const imageUrl = await generateImage(positivePrompt, negativePrompt, avatarUrl);
             if (imageUrl) {
               db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
               triggerPostComments(postId, archetype.id);
@@ -1040,9 +1043,10 @@ async function startServer() {
 
     if (post_type === 'image_post') {
       try {
-        const positivePrompt = await generateImagePrompt(user, content);
+        const { prompt: positivePrompt, characterVisible } = await generateImagePrompt(user, content);
         const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
-        const imageUrl = await generateImage(positivePrompt, negativePrompt);
+        const avatarUrl = characterVisible ? user.avatar_url : undefined;
+        const imageUrl = await generateImage(positivePrompt, negativePrompt, avatarUrl);
         if (imageUrl) {
           db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
           triggerPostComments(postId, post_type || 'life_update');
@@ -1723,6 +1727,7 @@ async function startServer() {
         let postContent = "";
         let positivePrompt = "";
         let negativePrompt = "";
+        let characterVisible = false;
         
         if (archetype.id === 'image_post') {
           const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
@@ -1730,6 +1735,7 @@ async function startServer() {
             postContent = imageData.textPost;
             positivePrompt = imageData.positivePrompt;
             negativePrompt = imageData.negativePrompt;
+            characterVisible = imageData.characterVisible;
           }
         } else {
           postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost)) || "";
@@ -1747,7 +1753,8 @@ async function startServer() {
 
           if (archetype.id === 'image_post') {
             try {
-              const imageUrl = await generateImage(positivePrompt, negativePrompt);
+              const avatarUrl = characterVisible ? aiUser.avatar_url : undefined;
+              const imageUrl = await generateImage(positivePrompt, negativePrompt, avatarUrl);
               if (imageUrl) {
                 db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
                 console.log(`Image attached to post ${postId} by ${aiUser.display_name}`);

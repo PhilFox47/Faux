@@ -396,21 +396,44 @@ Appearance: ${character.physical_appearance || character.bio || 'average looking
 Clothing style: ${character.clothing_style || 'casual everyday clothes'}
 Artstyle: ${character.artstyle || 'Realistic'}
 
-Guidelines:
+Guidelines for Seedream 4.0:
 - Think about what actually should be depicted based on the idea and text.
-- If the character is shown, ensure to describe them accurately based on their physical appearance and clothing style.
-- Use a proper perspective that makes sense for a social media post (e.g., characters usually take the image themselves, so selfies or first-person perspectives are common).
+- The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
+- Images don't always need to show the character who posted it. You can show a relevant object, scenery, situation, etc. Add variance.
 - If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
 - Keep in mind how Characters access Faux (based on their universe description), as this usually also has influence on how the image looks.
 - If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Instagram photo", "Lighting: Natural morning light", "Style: Candid amateur photograph"). Mention camera type.
 - If the Artstyle is Stylized: Clearly describe the Art Direction.
-- ONLY output the final prompt text, nothing else.`;
-    const positivePrompt = await helperCallLLM(imagePrompt, "generateImagePostData_image", 0.7);
+- Be very descriptive about the environment, lighting, mood, and composition.
+
+IMPORTANT: You must output a JSON object with exactly two fields:
+1. "character_visible": boolean (true if the character is visible in the shot, false otherwise)
+2. "prompt": string (the highly detailed image generation prompt)
+
+If the character IS visible:
+- Describe the character's appearance and clothing in detail in the prompt.
+- An image of the character will be provided as an Image Input to the model, so the prompt should reference their appearance accurately.
+
+If the character is NOT visible:
+- DO NOT describe the character's physical appearance in the prompt.
+
+Output ONLY the JSON object, nothing else.`;
+    const positivePromptRaw = await helperCallLLM(imagePrompt, "generateImagePostData_image", 0.7);
+    
+    let positivePrompt = "";
+    let characterVisible = false;
+    try {
+      const parsed = JSON.parse(positivePromptRaw.replace(/```json|```/g, '').trim());
+      positivePrompt = parsed.prompt;
+      characterVisible = parsed.character_visible;
+    } catch (e) {
+      positivePrompt = positivePromptRaw;
+    }
 
     // Step 4: Negative Prompt
     const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
 
-    return { idea, textPost, positivePrompt, negativePrompt };
+    return { idea, textPost, positivePrompt, negativePrompt, characterVisible };
   } catch (error: any) {
     console.error('Error generating image post data:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
@@ -787,16 +810,27 @@ Appearance: ${character.physical_appearance || character.bio || 'average looking
 Clothing style: ${character.clothing_style || 'casual everyday clothes'}
 Artstyle: ${character.artstyle || 'Realistic'}
 
-Guidelines:
+Guidelines for Seedream 4.0:
 - If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Instagram photo", "Lighting: Natural morning light", "Style: Candid amateur photograph"). Mention camera type (e.g., "Shot on 35mm lens", "iPhone 15 Pro photo").
 - If the Artstyle is Stylized (Anime, Pixel Art, Oil Painting, etc.): Clearly describe the Art Direction (Genre, Medium, Texture, specific artist influences if applicable).
 - The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
 - Images don't always need to show the character who posted it. You can show a relevant object, scenery, situation, etc. Add variance.
 - If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
-- Accurately describe the physical features and clothing of the character ONLY if the character is visible in the shot.
 - Be very descriptive about the environment, lighting, mood, and composition.
 - Use descriptive adjectives and specific details to ensure a high-quality, accurate depiction.
-- ONLY output the final prompt text, nothing else.`;
+
+IMPORTANT: You must output a JSON object with exactly two fields:
+1. "character_visible": boolean (true if the character is visible in the shot, false otherwise)
+2. "prompt": string (the highly detailed image generation prompt)
+
+If the character IS visible:
+- Describe the character's appearance and clothing in detail in the prompt.
+- An image of the character will be provided as an Image Input to the model, so the prompt should reference their appearance accurately.
+
+If the character is NOT visible:
+- DO NOT describe the character's physical appearance in the prompt.
+
+Output ONLY the JSON object, nothing else.`;
 
   try {
     let content = "";
@@ -826,7 +860,17 @@ Guidelines:
       JSON.stringify({ content, reasoning, raw: rawContent })
     );
 
-    return content || "";
+    let finalPrompt = content || "";
+    let characterVisible = false;
+    try {
+      const parsed = JSON.parse(finalPrompt.replace(/```json|```/g, '').trim());
+      finalPrompt = parsed.prompt;
+      characterVisible = parsed.character_visible;
+    } catch (e) {
+      // fallback
+    }
+
+    return { prompt: finalPrompt, characterVisible };
   } catch (error: any) {
     console.error('Error generating image prompt:', error);
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
@@ -834,7 +878,7 @@ Guidelines:
       JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
-    return "";
+    return { prompt: "", characterVisible: false };
   }
 }
 
@@ -887,7 +931,30 @@ ${positivePrompt}`;
   }
 }
 
-export async function generateImage(prompt: string, negative_prompt?: string) {
+export async function getBase64Image(url: string): Promise<string | null> {
+  if (!url) return null;
+  try {
+    if (url.startsWith('/uploads/')) {
+      const filePath = path.join(process.cwd(), url);
+      if (fs.existsSync(filePath)) {
+        const buffer = fs.readFileSync(filePath);
+        const ext = path.extname(filePath).substring(1) || 'png';
+        return `data:image/${ext};base64,${buffer.toString('base64')}`;
+      }
+    } else if (url.startsWith('http')) {
+      const res = await fetch(url);
+      const arrayBuffer = await res.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const contentType = res.headers.get('content-type') || 'image/png';
+      return `data:${contentType};base64,${buffer.toString('base64')}`;
+    }
+  } catch (e) {
+    console.error("Error fetching base64 image:", e);
+  }
+  return null;
+}
+
+export async function generateImage(prompt: string, negative_prompt?: string, avatarUrl?: string) {
   try {
     const model = getImageModel();
     const sizes = ['4096x4096', '2304x4096', '4096x2304'];
@@ -906,6 +973,15 @@ export async function generateImage(prompt: string, negative_prompt?: string) {
 
     if (negative_prompt) {
       requestBody.negative_prompt = negative_prompt;
+    }
+
+    if (avatarUrl) {
+      const base64Image = await getBase64Image(avatarUrl);
+      if (base64Image) {
+        requestBody.image = base64Image;
+        // Adjust Image-to-Image controls for Seedream 4.0
+        requestBody.strength = 0.65; 
+      }
     }
 
     const response = await getOpenAI().images.generate(requestBody);
