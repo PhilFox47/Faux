@@ -225,13 +225,16 @@ export function initDb() {
       { id: 'venting', name: 'Venting', description: 'A character venting about something that made them angry.', probability: 5 },
       { id: 'dm_invitation', name: 'DM Invitation', description: 'A Character mentions something and invites other users to contact them via DM.', probability: 2 },
       { id: 'event', name: 'Event', description: 'Something that affects multiple characters has happened and they are now reacting to it.', probability: 2 },
-      { id: 'meetup', name: 'Meetup', description: 'A meetup between 2-5 characters.', probability: 2 }
+      { id: 'meetup', name: 'Meetup', description: 'A meetup between 2-5 characters. If they are from different universes, this MUST be a digital meetup (gaming, video call, etc). If they are from the same universe, it can be a real-world meetup.', probability: 2 }
     ];
     
     const insertArchetype = db.prepare("INSERT INTO post_archetypes (id, name, description, probability) VALUES (?, ?, ?, ?)");
     for (const arch of defaultArchetypes) {
       insertArchetype.run(arch.id, arch.name, arch.description, arch.probability);
     }
+  } else {
+    // Update meetup description for existing databases
+    db.prepare("UPDATE post_archetypes SET description = ? WHERE id = 'meetup' AND description = 'A meetup between 2-5 characters.'").run('A meetup between 2-5 characters. If they are from different universes, this MUST be a digital meetup (gaming, video call, etc). If they are from the same universe, it can be a real-world meetup.');
   }
 
   // Add last_read_at column if it doesn't exist

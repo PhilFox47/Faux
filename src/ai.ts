@@ -321,9 +321,9 @@ function getOtherUserUniverseContext(character: any, otherUser: any): string {
     const otherUniverse = db.prepare("SELECT name FROM universes WHERE id = ?").get(otherUser.universe_id) as any;
     if (otherUniverse) {
       if (character.universe_id === otherUser.universe_id) {
-        return `You and ${otherUser.display_name} are from the same universe/franchise ("${otherUniverse.name}"). You likely know each other to some extent or share common knowledge of your world.\n`;
+        return `You and ${otherUser.display_name} are from the same universe/franchise ("${otherUniverse.name}"). You likely know each other to some extent or share common knowledge of your world. You CAN interact with them in the "real world" (meet up, hang out, etc).\n`;
       } else {
-        return `${otherUser.display_name} is from a different universe/franchise ("${otherUniverse.name}"). You do not know them from your own world, and their background might seem strange or novel to you.\n`;
+        return `${otherUser.display_name} is from a different universe/franchise ("${otherUniverse.name}"). You do not know them from your own world, and their background might seem strange or novel to you. CRITICAL RULE: You can ONLY interact with them digitally on this platform (e.g., chatting, video calls, online gaming). You CANNOT meet up with them in the "real world".\n`;
       }
     }
   } catch (e) {
@@ -370,6 +370,8 @@ export async function generateImagePostData(character: any, context: string = ''
 Think about something you would post on social media right now that would justify adding a photo to it.
 Make sure to only create the vision/idea of the post, not the post itself.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
+${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ''}
+CRITICAL UNIVERSE RULE: Characters from different universes can ONLY interact digitally (e.g., playing a game online, video call, podcast, chatting). They CANNOT meet up in the "real world". Characters from the SAME universe CAN meet up in the real world. Keep this in mind when mentioning other characters.
 ${context ? `Your recent posts (with timestamps): ${context}
 CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
 Respond with ONLY the brief idea.`;
@@ -379,6 +381,8 @@ Respond with ONLY the brief idea.`;
     const textPrompt = `${buildCharacterPrompt(character)}
 Based on this idea for a photo post: "${idea}"
 Generate the Text Part of the post. DO NOT include an image description (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.
+${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ''}
+CRITICAL UNIVERSE RULE: Characters from different universes can ONLY interact digitally (e.g., playing a game online, video call, podcast, chatting). They CANNOT meet up in the "real world". Characters from the SAME universe CAN meet up in the real world. Keep this in mind when mentioning other characters.
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
     const textPost = await helperCallLLM(textPrompt, "generateImagePostData_text", 0.9);
 
@@ -459,7 +463,8 @@ CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same top
 ${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : ''}
 ${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
 ${postTypeObj.id === 'event' ? `IMPORTANT: This is an EVENT post. An event has happened that affects you and some other characters. Describe the event and your reaction to it. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
-${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}`}
+${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
+CRITICAL UNIVERSE RULE: Characters from different universes can ONLY interact digitally (e.g., playing a game online, video call, podcast, chatting). They CANNOT meet up in the "real world". Characters from the SAME universe CAN meet up in the real world. Keep this in mind when mentioning other characters.`}
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
 
   try {

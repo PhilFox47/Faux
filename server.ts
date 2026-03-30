@@ -951,8 +951,13 @@ async function startServer() {
 
       const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
       const archetype = pickArchetype(isFirstPost, type === 'image');
-      const allUsers = db.prepare("SELECT username FROM users WHERE id != ?").all(aiUser.id) as any[];
-      const availableUsernames = allUsers.map(u => u.username).join(', ');
+      const allUsers = db.prepare(`
+        SELECT u.username, u.universe_id, un.name as universe_name
+        FROM users u
+        LEFT JOIN universes un ON u.universe_id = un.id
+        WHERE u.id != ?
+      `).all(aiUser.id) as any[];
+      const availableUsernames = allUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
       
       let postContent = "";
       let positivePrompt = "";
@@ -1739,8 +1744,13 @@ async function startServer() {
 
         const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
         const archetype = pickArchetype(isFirstPost, isImage);
-        const allUsers = db.prepare("SELECT username FROM users WHERE id != ?").all(aiUser.id) as any[];
-        const availableUsernames = allUsers.map(u => u.username).join(', ');
+        const allUsers = db.prepare(`
+          SELECT u.username, u.universe_id, un.name as universe_name
+          FROM users u
+          LEFT JOIN universes un ON u.universe_id = un.id
+          WHERE u.id != ?
+        `).all(aiUser.id) as any[];
+        const availableUsernames = allUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
         
         let postContent = "";
         let positivePrompt = "";

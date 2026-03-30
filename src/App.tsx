@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
+import { WELCOME_TEXTS } from './welcomeTexts';
 
 export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<any>(null);
+  const [welcomeText] = useState(() => WELCOME_TEXTS[Math.floor(Math.random() * WELCOME_TEXTS.length)]);
   const [realUsers, setRealUsers] = useState<any[]>([]);
   const [loginPin, setLoginPin] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<any>(null);
@@ -1167,7 +1169,7 @@ export default function App() {
         <div className="mb-12">
           <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-16 object-contain" referrerPolicy="no-referrer" />
         </div>
-        <h1 className="text-4xl font-bold mb-10 text-center">New Faux. Who dis?</h1>
+        <h1 className="text-4xl font-bold mb-10 text-center">{welcomeText}</h1>
         <div className="flex flex-wrap justify-center gap-8 max-w-4xl px-4">
           {realUsers.map(user => (
             <div 
@@ -1261,7 +1263,7 @@ export default function App() {
       <div className="w-full max-w-7xl flex min-h-screen">
         
         {/* Left Sidebar */}
-        <div className="w-20 xl:w-64 border-r border-gray-800 p-4 flex flex-col justify-between h-full sticky top-0">
+        <div className="w-20 xl:w-64 border-r border-gray-800 p-4 flex flex-col h-full sticky top-0">
           <div>
             <div className="flex items-center justify-center xl:justify-start mb-8 p-2">
               <img 
@@ -1321,34 +1323,35 @@ export default function App() {
             >
               Post
             </button>
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="hidden xl:flex items-center gap-2 p-3 text-sm text-gray-400">
-              <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
-              <span>{users.filter(u => u.is_ai === 1 && isUserOnline(u)).length} AI Online</span>
-            </div>
-            <div 
-              onClick={() => handleEditProfile(loggedInUser)}
-              className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
-            >
-              <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
-                {loggedInUser?.avatar_url ? (
-                  <img src={loggedInUser.avatar_url} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  loggedInUser?.display_name?.[0] || 'Y'
-                )}
+
+            <div className="flex flex-col gap-2 mt-8">
+              <div className="hidden xl:flex items-center gap-2 p-3 text-sm text-gray-400">
+                <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                <span>{users.filter(u => u.is_ai === 1 && isUserOnline(u)).length} AI Online</span>
               </div>
-              <div className="hidden xl:block">
-                <p className="font-bold text-sm">{loggedInUser?.display_name || 'You'}</p>
-                <p className="text-gray-500 text-sm">@{loggedInUser?.username || 'real_user'}</p>
+              <div 
+                onClick={() => handleEditProfile(loggedInUser)}
+                className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
+              >
+                <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
+                  {loggedInUser?.avatar_url ? (
+                    <img src={loggedInUser.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    loggedInUser?.display_name?.[0] || 'Y'
+                  )}
+                </div>
+                <div className="hidden xl:block">
+                  <p className="font-bold text-sm">{loggedInUser?.display_name || 'You'}</p>
+                  <p className="text-gray-500 text-sm">@{loggedInUser?.username || 'real_user'}</p>
+                </div>
               </div>
+              <button 
+                onClick={() => setLoggedInUser(null)}
+                className="text-xs text-gray-500 hover:text-white transition text-center py-2"
+              >
+                Log out
+              </button>
             </div>
-            <button 
-              onClick={() => setLoggedInUser(null)}
-              className="text-xs text-gray-500 hover:text-white transition text-center py-2"
-            >
-              Log out
-            </button>
           </div>
         </div>
 
@@ -1515,11 +1518,11 @@ export default function App() {
                             newImgs[idx] = e.target.value;
                             setCharReferenceImages(newImgs);
                           }} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" placeholder="Image URL..." />
-                          <button onClick={() => setCharReferenceImages(charReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
+                          <button type="button" onClick={() => setCharReferenceImages(charReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
                         </div>
                       ))}
                       <div className="flex gap-2">
-                        <button onClick={() => setCharReferenceImages([...charReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                        <button type="button" onClick={() => setCharReferenceImages([...charReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
                           <Plus size={16} /> Add URL
                         </button>
                         <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer flex items-center gap-2 text-sm">
@@ -2729,11 +2732,11 @@ export default function App() {
                           newImgs[idx] = e.target.value;
                           setProfileReferenceImages(newImgs);
                         }} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" placeholder="Image URL..." />
-                        <button onClick={() => setProfileReferenceImages(profileReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
+                        <button type="button" onClick={() => setProfileReferenceImages(profileReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
                       </div>
                     ))}
                     <div className="flex gap-2">
-                      <button onClick={() => setProfileReferenceImages([...profileReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                      <button type="button" onClick={() => setProfileReferenceImages([...profileReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
                         <Plus size={16} /> Add URL
                       </button>
                       <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer flex items-center gap-2 text-sm">
