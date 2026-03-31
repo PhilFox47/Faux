@@ -47,6 +47,15 @@ function getModel() {
   }
 }
 
+function getVisionModel() {
+  try {
+    const settings = db.prepare("SELECT vision_model_name FROM settings WHERE id = 1").get() as any;
+    return settings?.vision_model_name || 'zai-org/glm-5-vision';
+  } catch (e) {
+    return 'zai-org/glm-5-vision';
+  }
+}
+
 function getImageModel() {
   try {
     const settings = db.prepare("SELECT image_model_name FROM settings WHERE id = 1").get() as any;
@@ -585,11 +594,21 @@ export async function generateDM(character: any, userDisplayName: string, relati
       const hasPosts = recentPosts.length > 0;
       const hasComments = recentComments.length > 0;
 
-      let options = [3]; // Option 3: No recent activity
-      if (hasPosts) options.push(1); // Option 1: Recent post
-      if (hasComments) options.push(2); // Option 2: Recent comment
+      let chosenOption = 3; // Default to Option 3: No recent activity
 
-      const chosenOption = options[Math.floor(Math.random() * options.length)];
+      // If context is provided (e.g., reacting to a specific dm_invitation post), don't randomly pick another post to react to
+      if (!context) {
+        // 20% chance to react to a post or comment, if they exist
+        if (Math.random() < 0.20 && (hasPosts || hasComments)) {
+          if (hasPosts && hasComments) {
+            chosenOption = Math.random() < 0.5 ? 1 : 2;
+          } else if (hasPosts) {
+            chosenOption = 1;
+          } else {
+            chosenOption = 2;
+          }
+        }
+      }
 
       if (chosenOption === 1) {
         const randomPost = recentPosts[Math.floor(Math.random() * recentPosts.length)];
@@ -615,8 +634,8 @@ ${historyStr}
 Write a short, in-character message. 
 If there is previous history, you can pick up where you left off or start a new topic. 
 Notice the timestamps in the history to understand how much time has passed since the last message.
-Give a good reason for reaching out (e.g., asking a question about a recent post or comment, sharing a secret, reacting to something, or just checking in). 
-IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never actually posted. Only reference the recent posts/comments provided above, or find another reason to reach out.
+${context ? 'Use the provided context as the reason for reaching out.' : (recentActivity ? 'Give a good reason for reaching out (e.g., asking a question about their recent post or comment, sharing a secret, or checking in).' : 'Give a good reason for reaching out (e.g., sharing a secret, asking a random question, talking about your own life, or just checking in).')} 
+IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never actually posted. ${context ? 'Focus on the provided context.' : (recentActivity ? 'Only reference the recent posts/comments provided above, or find another reason to reach out.' : 'Since no recent posts/comments are provided, you MUST find another reason to reach out.')}
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.`;
 
   try {
@@ -957,6 +976,44 @@ export async function getBase64Image(url: string): Promise<string | null> {
     console.error("Error fetching base64 image:", e);
   }
   return null;
+}
+
+export async function analyzeImage(imageUrl: string): Promise<string> {
+  const prompt = "Describe this image in detail. Focus on the subjects, setting, actions, and any text visible. This description will be used by an AI character to understand what was posted.";
+  
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getVisionModel(),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: imageUrl } }
+          ] as any
+        }
+      ],
+      max_tokens: 1000,
+    });
+    
+    const content = response.choices[0].message.content || "";
+    
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "analyzeImage",
+      JSON.stringify({ model: getVisionModel(), prompt, imageUrl }),
+      JSON.stringify({ content })
+    );
+    
+    return content;
+  } catch (error: any) {
+    console.error('Error analyzing image:', error);
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      "analyzeImage",
+      JSON.stringify({ model: getVisionModel(), prompt, imageUrl, error: "Catch Block" }),
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+    );
+    return "An image was posted, but it could not be analyzed.";
+  }
 }
 
 export async function generateImage(prompt: string, negative_prompt?: string, referenceImageUrls?: string[]) {

@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/x-icon" href="https://i.imgur.com/TO3Y4TF.png" />
     <title>Faux</title>
+    <script>
+      window.addEventListener('error', function(e) {
+        const div = document.createElement('div');
+        div.style.position = 'fixed';
+        div.style.top = '0';
+        div.style.left = '0';
+        div.style.zIndex = '9999';
+        div.style.backgroundColor = 'red';
+        div.style.color = 'white';
+        div.style.padding = '20px';
+        div.innerText = e.message + '\n' + e.filename + ':' + e.lineno;
+        document.body.appendChild(div);
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

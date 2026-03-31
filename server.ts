@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage } from "./src/ai";
 
 const pendingComments = new Set<string>();
 const pendingDMs = new Set<string>();
@@ -541,7 +541,7 @@ async function startServer() {
   });
 
   app.post("/api/settings", (req, res) => {
-    const { ai_enabled, model_name, image_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob } = req.body;
+    const { ai_enabled, model_name, image_model_name, vision_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob } = req.body;
     if (ai_enabled !== undefined) {
       db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(ai_enabled ? 1 : 0);
     }
@@ -550,6 +550,9 @@ async function startServer() {
     }
     if (image_model_name !== undefined) {
       db.prepare("UPDATE settings SET image_model_name = ? WHERE id = 1").run(image_model_name);
+    }
+    if (vision_model_name !== undefined) {
+      db.prepare("UPDATE settings SET vision_model_name = ? WHERE id = 1").run(vision_model_name);
     }
     if (timezone !== undefined) {
       db.prepare("UPDATE settings SET timezone = ? WHERE id = 1").run(timezone);
@@ -823,7 +826,7 @@ async function startServer() {
   });
 
   app.get("/api/universes/:id/characters", (req, res) => {
-    const characters = db.prepare("SELECT id, username, display_name, avatar_url, bio FROM users WHERE universe_id = ?").all(req.params.id);
+    const characters = db.prepare("SELECT id, username, display_name, avatar_url, bio, is_ai, is_active, online_times, current_online_status, status_expires_at FROM users WHERE universe_id = ?").all(req.params.id);
     res.json(characters);
   });
 
@@ -951,13 +954,14 @@ async function startServer() {
 
       const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
       const archetype = pickArchetype(isFirstPost, type === 'image');
-      const allUsers = db.prepare(`
+      const relatedUsers = db.prepare(`
         SELECT u.username, u.universe_id, un.name as universe_name
         FROM users u
         LEFT JOIN universes un ON u.universe_id = un.id
+        JOIN relationships r ON (r.user_id_1 = u.id AND r.user_id_2 = ?) OR (r.user_id_2 = u.id AND r.user_id_1 = ?)
         WHERE u.id != ?
-      `).all(aiUser.id) as any[];
-      const availableUsernames = allUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
+      `).all(aiUser.id, aiUser.id, aiUser.id) as any[];
+      const availableUsernames = relatedUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
       
       let postContent = "";
       let positivePrompt = "";
@@ -1043,18 +1047,27 @@ async function startServer() {
   });
 
   app.post("/api/posts", async (req, res) => {
-    const { content, post_type } = req.body;
+    const { content, post_type, image_url } = req.body;
     const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
-    const isVisible = post_type === 'image_post' ? 0 : 1;
-    const stmt = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)");
-    const info = stmt.run(user.id, content, post_type || 'life_update', isVisible);
+    const isVisible = (post_type === 'image_post' && !image_url) ? 0 : 1;
+    const stmt = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, image_url) VALUES (?, ?, ?, ?, ?)");
+    const info = stmt.run(user.id, content, post_type || 'life_update', isVisible, image_url || null);
     const postId = info.lastInsertRowid;
     
     res.json({ id: postId });
 
-    if (post_type === 'image_post') {
+    if (image_url) {
+      try {
+        const description = await analyzeImage(image_url);
+        db.prepare("UPDATE posts SET image_prompt = ? WHERE id = ?").run(description, postId);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    if (post_type === 'image_post' && !image_url) {
       try {
         const { prompt: positivePrompt, characterVisible } = await generateImagePrompt(user, content);
         const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
@@ -1069,9 +1082,9 @@ async function startServer() {
           }
         }
         
-        const imageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
-        if (imageUrl) {
-          db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
+        const generatedImageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
+        if (generatedImageUrl) {
+          db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(generatedImageUrl, positivePrompt, postId);
           triggerPostComments(postId, post_type || 'life_update');
         } else {
           db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
@@ -1080,7 +1093,7 @@ async function startServer() {
         console.error("Failed to generate image for user post:", e);
         db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
       }
-    } else {
+    } else if (isVisible) {
       triggerPostComments(postId, post_type || 'life_update');
     }
   });
@@ -1744,13 +1757,14 @@ async function startServer() {
 
         const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
         const archetype = pickArchetype(isFirstPost, isImage);
-        const allUsers = db.prepare(`
+        const relatedUsers = db.prepare(`
           SELECT u.username, u.universe_id, un.name as universe_name
           FROM users u
           LEFT JOIN universes un ON u.universe_id = un.id
+          JOIN relationships r ON (r.user_id_1 = u.id AND r.user_id_2 = ?) OR (r.user_id_2 = u.id AND r.user_id_1 = ?)
           WHERE u.id != ?
-        `).all(aiUser.id) as any[];
-        const availableUsernames = allUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
+        `).all(aiUser.id, aiUser.id, aiUser.id) as any[];
+        const availableUsernames = relatedUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
         
         let postContent = "";
         let positivePrompt = "";
@@ -2133,6 +2147,37 @@ async function startServer() {
         if (introProb > 0 && Math.random() < introProb * multiplier) {
           await doAiPost(inactiveUser, false);
           introPostsThisMinute++;
+        }
+      }
+
+      // Independent chance for active users who haven't posted in a while to ensure they don't go inactive
+      let catchupPostsThisMinute = 0;
+      for (const activeUser of activeAiUsers) {
+        if (catchupPostsThisMinute >= 3) break; // Limit to avoid rate limits
+        
+        const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(activeUser.id) as any;
+        const referenceTime = lastPost ? new Date(lastPost.created_at + 'Z').getTime() : new Date(activeUser.created_at + 'Z').getTime();
+        const daysSinceLastPost = (Date.now() - referenceTime) / (1000 * 60 * 60 * 24);
+        
+        if (daysSinceLastPost > 7) {
+          let catchupProb = 0;
+          if (daysSinceLastPost > 14) {
+            catchupProb = 0.05; // 5% chance per minute while online
+          } else {
+            catchupProb = ((daysSinceLastPost - 7) / 7) * 0.02; // Scales 0 to 2% chance per minute
+          }
+          
+          const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(activeUser.id) as any).count;
+          let multiplier = 0.5;
+          if (followersCount === 1) multiplier = 1.0;
+          else if (followersCount === 2) multiplier = 1.5;
+          else if (followersCount === 3) multiplier = 1.7;
+          else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
+
+          if (catchupProb > 0 && Math.random() < catchupProb * multiplier) {
+            await doAiPost(activeUser, false);
+            catchupPostsThisMinute++;
+          }
         }
       }
 

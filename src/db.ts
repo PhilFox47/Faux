@@ -114,6 +114,7 @@ export function initDb() {
       ai_enabled BOOLEAN DEFAULT 1,
       model_name TEXT DEFAULT 'zai-org/glm-5',
       image_model_name TEXT DEFAULT 'z-image-turbo',
+      vision_model_name TEXT DEFAULT 'zai-org/glm-5-vision',
       timezone TEXT DEFAULT 'UTC',
       api_key TEXT DEFAULT '',
       prob_post REAL DEFAULT 100.0,
@@ -414,6 +415,10 @@ export function initDb() {
 
   try {
     db.exec("ALTER TABLE settings ADD COLUMN image_model_name TEXT DEFAULT 'z-image-turbo'");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE settings ADD COLUMN vision_model_name TEXT DEFAULT 'zai-org/glm-5-vision'");
   } catch (e) {}
 
   try {

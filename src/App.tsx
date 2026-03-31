@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -64,6 +64,7 @@ export default function App() {
   const [activeChat, setActiveChat] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newPostContent, setNewPostContent] = useState('');
+  const [newPostImage, setNewPostImage] = useState('');
   const [newPostType, setNewPostType] = useState('life_update');
   const [isCreatingPost, setIsCreatingPost] = useState(false);
   const [newChatMsg, setNewChatMsg] = useState('');
@@ -138,6 +139,7 @@ export default function App() {
   const [aiEnabled, setAiEnabled] = useState(true);
   const [modelName, setModelName] = useState('zai-org/glm-5');
   const [imageModelName, setImageModelName] = useState('z-image-turbo');
+  const [visionModelName, setVisionModelName] = useState('zai-org/glm-5-vision');
   const [apiKey, setApiKey] = useState('');
   const [timezone, setTimezone] = useState('UTC');
   const [allowNsfw, setAllowNsfw] = useState(false);
@@ -587,6 +589,7 @@ export default function App() {
         setAiEnabled(data.ai_enabled === 1);
         if (data.model_name) setModelName(data.model_name);
         if (data.image_model_name) setImageModelName(data.image_model_name);
+        if (data.vision_model_name) setVisionModelName(data.vision_model_name);
         if (data.timezone) setTimezone(data.timezone);
         if (data.api_key !== undefined) setApiKey(data.api_key);
         if (data.allow_nsfw !== undefined) setAllowNsfw(data.allow_nsfw === 1);
@@ -868,19 +871,22 @@ export default function App() {
   };
 
   const handleCreatePost = async () => {
-    if (!newPostContent.trim() || isCreatingPost) return;
+    if ((!newPostContent.trim() && !newPostImage) || isCreatingPost) return;
     setIsCreatingPost(true);
     const type = newPostType;
     try {
       await apiFetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: newPostContent, post_type: type })
+        body: JSON.stringify({ content: newPostContent, post_type: type, image_url: newPostImage })
       });
       setNewPostContent('');
+      setNewPostImage('');
       setNewPostType('life_update');
-      if (type === 'image_post') {
+      if (type === 'image_post' && !newPostImage) {
         showToast("Image is generating in the background. It will appear shortly.");
+      } else if (newPostImage) {
+        showToast("Post with image created.");
       }
       fetchPosts();
     } finally {
@@ -1090,6 +1096,15 @@ export default function App() {
       body: JSON.stringify({ image_model_name: imageModelName })
     });
     showToast("Image Model saved!");
+  };
+
+  const saveVisionModelName = async () => {
+    await apiFetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vision_model_name: visionModelName })
+    });
+    showToast("Vision Model saved!");
   };
 
   const saveApiKey = async () => {
@@ -1381,8 +1396,23 @@ export default function App() {
                     placeholder="What's happening?"
                     rows={3}
                   />
+                  {newPostImage && (
+                    <div className="relative mt-2 inline-block">
+                      <img src={newPostImage} alt="Post preview" className="max-h-48 rounded-xl object-cover" />
+                      <button 
+                        onClick={() => setNewPostImage('')}
+                        className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white rounded-full p-1"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center mt-2 border-t border-gray-800 pt-3">
-                    <div className="text-orange-500 flex gap-4">
+                    <div className="text-orange-500 flex gap-4 items-center">
+                      <label className="cursor-pointer hover:bg-gray-800 p-2 rounded-full transition">
+                        <Image size={20} />
+                        <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, setNewPostImage)} />
+                      </label>
                       <select 
                         value={newPostType} 
                         onChange={(e) => setNewPostType(e.target.value)}
@@ -1405,7 +1435,7 @@ export default function App() {
                     </div>
                     <button 
                       onClick={handleCreatePost}
-                      disabled={!newPostContent.trim()}
+                      disabled={!newPostContent.trim() && !newPostImage}
                       className="bg-gradient-to-r from-orange-500 to-yellow-500 hover:from-orange-600 hover:to-yellow-600 disabled:opacity-50 text-white rounded-full px-6 py-2 font-bold transition duration-200 shadow-lg"
                     >
                       Post
@@ -2456,6 +2486,21 @@ export default function App() {
                           className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
                         />
                         <button onClick={saveImageModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                          Save
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Vision Model (for user image uploads)</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={visionModelName}
+                          onChange={e => setVisionModelName(e.target.value)}
+                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                        />
+                        <button onClick={saveVisionModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
                           Save
                         </button>
                       </div>
