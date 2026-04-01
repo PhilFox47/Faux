@@ -206,6 +206,42 @@ export function initDb() {
       FOREIGN KEY (user_id_1) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id_2) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_posts_is_visible ON posts(is_visible);
+    CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+    CREATE INDEX IF NOT EXISTS idx_comments_post_id_created_at ON comments(post_id, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_comments_user_id ON comments(user_id);
+    CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_likes_post_id ON likes(post_id);
+    CREATE INDEX IF NOT EXISTS idx_likes_user_id ON likes(user_id);
+    CREATE INDEX IF NOT EXISTS idx_likes_post_user ON likes(post_id, user_id);
+    CREATE INDEX IF NOT EXISTS idx_comment_likes_comment_id ON comment_likes(comment_id);
+    CREATE INDEX IF NOT EXISTS idx_comment_likes_user_id ON comment_likes(user_id);
+    CREATE INDEX IF NOT EXISTS idx_comment_likes_comment_user ON comment_likes(comment_id, user_id);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_id ON direct_messages(sender_id);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_id ON direct_messages(receiver_id);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_created_at ON direct_messages(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_follows_followed_id ON follows(followed_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user_id_created_at ON notifications(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_relationships_user_1 ON relationships(user_id_1);
+    CREATE INDEX IF NOT EXISTS idx_relationships_user_2 ON relationships(user_id_2);
+    CREATE INDEX IF NOT EXISTS idx_group_chat_messages_group_chat_id ON group_chat_messages(group_chat_id);
+    CREATE INDEX IF NOT EXISTS idx_group_chat_messages_group_chat_id_created_at ON group_chat_messages(group_chat_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_group_chat_messages_created_at ON group_chat_messages(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_group_chat_members_user_id ON group_chat_members(user_id);
+    CREATE INDEX IF NOT EXISTS idx_users_is_ai_is_active ON users(is_ai, is_active);
+    CREATE INDEX IF NOT EXISTS idx_users_is_ai ON users(is_ai);
+    CREATE INDEX IF NOT EXISTS idx_users_universe_id ON users(universe_id);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver ON direct_messages(sender_id, receiver_id);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender ON direct_messages(receiver_id, sender_id);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver_id ON direct_messages(sender_id, receiver_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender_id ON direct_messages(receiver_id, sender_id, id DESC);
   `);
 
   // Initialize default archetypes if table is empty

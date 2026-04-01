@@ -8,6 +8,20 @@ const pendingComments = new Set<string>();
 const pendingDMs = new Set<string>();
 const pendingGroupChats = new Set<string>();
 
+const timeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function getFormatter(timezone: string) {
+  if (!timeFormatters.has(timezone)) {
+    timeFormatters.set(timezone, new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false
+    }));
+  }
+  return timeFormatters.get(timezone)!;
+}
+
 function isUserOnline(user: any, timezone: string) {
   // Determine the correct user ID based on the object structure
   let userId = user.id;
@@ -30,24 +44,32 @@ function isUserOnline(user: any, timezone: string) {
   let inOnlineTimeframe = true;
   if (dbUser.online_times && dbUser.online_times !== '[]') {
     try {
-      const onlineTimes = JSON.parse(dbUser.online_times);
+      let onlineTimes = dbUser._parsed_online_times;
+      if (!onlineTimes) {
+        onlineTimes = typeof dbUser.online_times === 'string' ? JSON.parse(dbUser.online_times) : dbUser.online_times;
+        dbUser._parsed_online_times = onlineTimes;
+      }
+      
       if (onlineTimes && onlineTimes.length > 0) {
-        const localTime = new Intl.DateTimeFormat('en-US', {
-          timeZone: timezone,
-          hour: 'numeric',
-          hour12: false
-        }).format(new Date(now));
-        let currentHour = parseInt(localTime);
+        const localTime = getFormatter(timezone).format(new Date(now));
+        let [currentHour, currentMinute] = localTime.split(':').map(Number);
         if (currentHour === 24) currentHour = 0;
+        const currentTimeInMinutes = currentHour * 60 + currentMinute;
 
         inOnlineTimeframe = onlineTimes.some((window: string) => {
-          const parts = window.split('-').map(t => parseInt(t.trim().split(':')[0]));
+          const parts = window.split('-');
           if (parts.length !== 2) return false;
           const [start, end] = parts;
-          if (start < end) {
-            return currentHour >= start && currentHour < end;
+          const [startH, startM] = start.trim().split(':').map(Number);
+          const [endH, endM] = end.trim().split(':').map(Number);
+          
+          const startTotal = startH * 60 + startM;
+          const endTotal = endH * 60 + endM;
+          
+          if (startTotal < endTotal) {
+            return currentTimeInMinutes >= startTotal && currentTimeInMinutes < endTotal;
           } else {
-            return currentHour >= start || currentHour < end;
+            return currentTimeInMinutes >= startTotal || currentTimeInMinutes < endTotal;
           }
         });
       }
@@ -249,7 +271,14 @@ async function triggerPostComments(postId: number, postType: string) {
   const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
   if (!settings || !settings.ai_enabled) return;
 
-  const count = (postType === 'question' || postType === 'discussion') ? 5 : 3;
+  const allUsers = db.prepare("SELECT * FROM users").all() as any[];
+  const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+  const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
+
+  const baseCount = (postType === 'question' || postType === 'discussion') ? 5 : 3;
+  const count = Math.max(0, Math.round(baseCount * onlineRatio));
+  if (count === 0) return;
+
   const commentedUserIds = new Set<number>();
   
   for (let i = 0; i < count; i++) {
@@ -689,10 +718,14 @@ async function startServer() {
     const users = db.prepare(`
       SELECT u.*, 
       (u.pin IS NOT NULL AND u.pin != '') as has_pin,
-      (SELECT COUNT(*) FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
-      (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
-      (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
-      FROM users u ORDER BY u.created_at DESC
+      (f1.follower_id IS NOT NULL) as is_followed,
+      COALESCE(f2.following_count, 0) as following_count,
+      COALESCE(f3.follower_count, 0) as follower_count
+      FROM users u 
+      LEFT JOIN follows f1 ON f1.follower_id = ? AND f1.followed_id = u.id
+      LEFT JOIN (SELECT follower_id, COUNT(*) as following_count FROM follows GROUP BY follower_id) f2 ON f2.follower_id = u.id
+      LEFT JOIN (SELECT followed_id, COUNT(*) as follower_count FROM follows GROUP BY followed_id) f3 ON f3.followed_id = u.id
+      ORDER BY u.created_at DESC
     `).all(user?.id || 0);
     
     res.json(users);
@@ -1500,19 +1533,22 @@ async function startServer() {
 
     // Get latest message per conversation
     const conversations = db.prepare(`
+      WITH LatestMessages AS (
+        SELECT 
+          CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END as other_user_id,
+          MAX(id) as max_id
+        FROM direct_messages
+        WHERE sender_id = ? OR receiver_id = ?
+        GROUP BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
+      )
       SELECT 
         u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at,
         dm.content as last_message, dm.created_at, dm.is_read,
         dm.sender_id,
         (SELECT COUNT(*) FROM direct_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread_count
-      FROM users u
-      JOIN direct_messages dm ON (dm.sender_id = u.id AND dm.receiver_id = ?) OR (dm.sender_id = ? AND dm.receiver_id = u.id)
-      WHERE dm.id IN (
-        SELECT MAX(id) FROM direct_messages 
-        WHERE sender_id = u.id OR receiver_id = u.id
-        GROUP BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
-      )
-      AND u.id != ?
+      FROM LatestMessages lm
+      JOIN direct_messages dm ON dm.id = lm.max_id
+      JOIN users u ON u.id = lm.other_user_id
       ORDER BY dm.created_at DESC
     `).all(user.id, user.id, user.id, user.id, user.id);
     res.json(conversations);
@@ -1654,14 +1690,18 @@ async function startServer() {
       const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
       if (!settings || !settings.ai_enabled) return;
 
-      const allAiUsers = db.prepare("SELECT * FROM users WHERE is_ai = 1").all() as any[];
-      const onlineAiUsers = allAiUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+      const allUsers = db.prepare("SELECT * FROM users").all() as any[];
+      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+      const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
+
+      const allAiUsers = allUsers.filter(u => u.is_ai === 1);
+      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1);
       const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
       if (allAiUsers.length === 0) return;
 
-      const probPost = (settings.prob_post ?? 100) / 1440;
-      const probComment = (settings.prob_comment ?? 1000) / 1440;
-      const probMessage = (settings.prob_message ?? 5) / 1440;
+      const probPost = ((settings.prob_post ?? 100) / 1440) * onlineRatio;
+      const probComment = ((settings.prob_comment ?? 1000) / 1440) * onlineRatio;
+      const probMessage = ((settings.prob_message ?? 5) / 1440) * onlineRatio;
 
       // Local actions (Likes & Follows) - Doesn't use API tokens
       if (Math.random() < 0.3 && activeAiUsers.length > 0) {
@@ -1823,7 +1863,8 @@ async function startServer() {
 
           if (archetype.id === 'event' || archetype.id === 'meetup') {
             // Trigger other characters to react
-            const count = archetype.id === 'event' ? Math.floor(Math.random() * 5) + 1 : Math.floor(Math.random() * 4) + 1;
+            const baseCount = archetype.id === 'event' ? Math.floor(Math.random() * 5) + 1 : Math.floor(Math.random() * 4) + 1;
+            const count = Math.max(0, Math.round(baseCount * onlineRatio));
             const crossUniverseProb = (settings.cross_universe_prob ?? 50.0) / 100;
             const otherAis = activeAiUsers.filter(u => {
               if (u.id === aiUser.id) return false;
@@ -2284,12 +2325,6 @@ async function startServer() {
       for (const m of unrepliedMentions) {
         if (isUserOnline(m, settings.timezone || 'UTC')) {
           onlineMentions.push(m);
-        } else {
-          if (m.comment_id) {
-            db.prepare("UPDATE comments SET mention_ignored = 1 WHERE id = ?").run(m.comment_id);
-          } else if (m.post_id) {
-            db.prepare("UPDATE posts SET mention_ignored = 1 WHERE id = ?").run(m.post_id);
-          }
         }
       }
 

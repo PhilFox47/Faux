@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
@@ -302,7 +302,14 @@ export default function App() {
     setShowApiLogsModal(true);
   };
 
-  const isUserOnline = (user: any) => {
+  const timeFormatter = useMemo(() => new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false
+  }), [timezone]);
+
+  const isUserOnline = useCallback((user: any) => {
     if (!user || user.is_ai === 0) return true;
     
     // Use backend-calculated status if available and not expired
@@ -314,22 +321,20 @@ export default function App() {
     }
 
     // Fallback to basic timeframe check if backend status is missing or expired
-    let onlineTimes = [];
-    try {
-      onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : (user.online_times || []);
-    } catch (e) {
-      onlineTimes = [];
+    let onlineTimes = user._parsed_online_times;
+    if (!onlineTimes) {
+      try {
+        onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : (user.online_times || []);
+      } catch (e) {
+        onlineTimes = [];
+      }
+      user._parsed_online_times = onlineTimes;
     }
     
     if (onlineTimes.length === 0) return true;
     
     const now = new Date();
-    const userTime = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: false
-    }).format(now);
+    const userTime = timeFormatter.format(now);
     
     let [currentHour, currentMinute] = userTime.split(':').map(Number);
     if (currentHour === 24) currentHour = 0;
@@ -352,7 +357,7 @@ export default function App() {
         return currentTimeInMinutes >= startTotal || currentTimeInMinutes < endTotal;
       }
     });
-  };
+  }, [timeFormatter]);
 
   const ONLINE_TIME_WINDOWS = [
     { label: '04:00 - 07:00', value: '04:00-07:00' },
@@ -1152,21 +1157,23 @@ export default function App() {
   const unreadNotifs = notifications.filter(n => !n.is_read).length;
   const unreadMessages = conversations.reduce((acc, curr) => acc + (curr.unread_count || 0), 0) + groupChats.reduce((acc, curr) => acc + (curr.unread_count || 0), 0);
 
-  const formatTimestamp = (ts: string) => {
+  const timestampFormatter = useMemo(() => new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  }), [timezone]);
+
+  const formatTimestamp = useCallback((ts: string) => {
     try {
       const utcTs = ts.replace(' ', 'T') + (ts.endsWith('Z') ? '' : 'Z');
-      return new Intl.DateTimeFormat('en-GB', {
-        timeZone: timezone,
-        hour: '2-digit',
-        minute: '2-digit',
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      }).format(new Date(utcTs));
+      return timestampFormatter.format(new Date(utcTs));
     } catch (e) {
       return new Date(ts).toLocaleString();
     }
-  };
+  }, [timestampFormatter]);
 
   const [characterSearch, setCharacterSearch] = useState('');
   const [visibleCharacters, setVisibleCharacters] = useState(20);
