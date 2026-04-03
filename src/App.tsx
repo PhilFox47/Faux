@@ -1385,7 +1385,9 @@ export default function App() {
               />
               <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); }} />
               <NavItem icon={<UserCheck />} label="Following" active={activeTab === 'following'} onClick={() => setActiveTab('following')} />
-              <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(); }} />
+              {loggedInUser?.role === 'admin' && (
+                <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(); }} />
+              )}
               <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); }} />
             </nav>
             <button 
@@ -2243,7 +2245,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'relationships' && (
+          {activeTab === 'relationships' && loggedInUser?.role === 'admin' && (
             <div className="p-6 max-w-4xl mx-auto">
               <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
                 <Users className="text-orange-500" />
