@@ -162,12 +162,33 @@ Format your response as a friendly chat message, but make sure all the informati
 }
 
 function buildCharacterPrompt(character: any) {
-  let prompt = `You are ${character.display_name}. `;
-  if (character.ai_persona) prompt += `${character.ai_persona} `;
-  if (character.description) prompt += `\nYour personality and background: ${character.description}`;
-  if (character.writing_style) prompt += `\nYour writing style: ${character.writing_style}`;
-  if (character.physical_appearance) prompt += `\nYour physical appearance: ${character.physical_appearance}`;
-  if (character.clothing_style) prompt += `\nYour clothing style: ${character.clothing_style}`;
+  let prompt = '';
+  
+  if (character.account_type === 'company') {
+    prompt = `You are managing the official Faux social media account for ${character.company_name || character.display_name}. `;
+    if (character.brand_identity) prompt += `\nBrand Identity: ${character.brand_identity}`;
+    if (character.products_services) prompt += `\nProducts/Services: ${character.products_services}`;
+    if (character.target_audience) prompt += `\nTarget Audience: ${character.target_audience}`;
+    if (character.writing_style) prompt += `\nYour writing style: ${character.writing_style}`;
+    
+    if (character.run_by_character_id) {
+      try {
+        const runner = db.prepare("SELECT display_name, ai_persona, description FROM users WHERE id = ?").get(character.run_by_character_id) as any;
+        if (runner) {
+          prompt += `\nThis account is run by ${runner.display_name}. ${runner.ai_persona ? runner.ai_persona : ''} ${runner.description ? runner.description : ''}. Your personal traits might occasionally bleed into the corporate posts, or you might sign off with your name.`;
+        }
+      } catch (e) {}
+    } else {
+      prompt += `\nThis account is run by a nameless social media manager. You should sound like a corporate entity or a typical social media manager.`;
+    }
+  } else {
+    prompt = `You are ${character.display_name}. `;
+    if (character.ai_persona) prompt += `${character.ai_persona} `;
+    if (character.description) prompt += `\nYour personality and background: ${character.description}`;
+    if (character.writing_style) prompt += `\nYour writing style: ${character.writing_style}`;
+    if (character.physical_appearance) prompt += `\nYour physical appearance: ${character.physical_appearance}`;
+    if (character.clothing_style) prompt += `\nYour clothing style: ${character.clothing_style}`;
+  }
   
   if (character.universe_id) {
     try {
@@ -303,12 +324,15 @@ Reply with ONLY the ID of the chosen user.`;
   return candidateUsers[Math.floor(Math.random() * candidateUsers.length)].id;
 }
 
-export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false) {
+export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false, accountType: string = 'character') {
   if (isFirstPost) {
+    if (accountType === 'company') {
+      return { id: 'company_announcement', name: 'Company Announcement', description: 'Make them announce that they just joined Faux. Whatever fits their brand identity.' };
+    }
     return { id: 'introduction', name: 'Introduction', description: 'Make them "introduce" themselves on Faux or write about that they just joined Faux. Whatever fits their character.' };
   }
 
-  const archetypes = db.prepare("SELECT * FROM post_archetypes").all() as any[];
+  const archetypes = db.prepare("SELECT * FROM post_archetypes WHERE account_type = ?").all(accountType) as any[];
   
   if (forceImage) {
     return archetypes.find(a => a.id === 'image_post') || { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15 };
@@ -461,7 +485,7 @@ Output ONLY the JSON object, nothing else.`;
 export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false) {
   let prompt = `${buildCharacterPrompt(character)}
 ${isIntroduction ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.` : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
-Your post should be independent and reflect your current thoughts, feelings, or activities. 
+${character.account_type === 'company' ? 'Your post should reflect your brand identity, promote your products/services, or engage with your target audience in a corporate or brand-appropriate way.' : 'Your post should be independent and reflect your current thoughts, feelings, or activities.'}
 For this specific post, your post archetype is: "${postTypeObj.name}".
 Instructions for this archetype: ${postTypeObj.description}
 Avoid referencing other people's posts directly unless it's a very general observation or the archetype requires it.
@@ -534,6 +558,7 @@ ${isReply ? `You are participating in a comment thread. Here is the context of t
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
 ${isReply ? `Write a reply that fits your character perfectly and continues the conversation naturally. Notice the timestamps to understand the flow of time.` : `Write a comment that fits your character perfectly. Notice the timestamp of the post to understand how recent it is.`}
+${character.account_type === 'company' ? 'Your comment should reflect your brand identity, promote your products/services if relevant, or engage with your target audience in a corporate or brand-appropriate way.' : ''}
 Keep it short, natural, and in character. Focus on the topic being discussed. Do not wrap in quotes. Keep it under 150 characters.`;
 
   try {
@@ -632,9 +657,15 @@ ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipCon
 ${context ? `Context for this message: ${context}` : ''}
 ${historyStr}
 Write a short, in-character message. 
+${character.account_type === 'company' ? 'Your message should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be a promotional message, customer support, or a brand partnership inquiry.' : ''}
+CRITICAL: Make it feel like a REALISTIC text message/DM. 
+- Do NOT write long, overly formal paragraphs. 
+- Use casual language, abbreviations, or slang if it fits your character. 
+- People text in short bursts. Keep it brief and conversational.
+- Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
 If there is previous history, you can pick up where you left off or start a new topic. 
 Notice the timestamps in the history to understand how much time has passed since the last message.
-${context ? 'Use the provided context as the reason for reaching out.' : (recentActivity ? 'Give a good reason for reaching out (e.g., asking a question about their recent post or comment, sharing a secret, or checking in).' : 'Give a good reason for reaching out (e.g., sharing a secret, asking a random question, talking about your own life, or just checking in).')} 
+${context ? 'Use the provided context as the reason for reaching out.' : (recentActivity ? 'Give a good reason for reaching out (e.g., asking a casual question about their recent post or comment, sharing a quick thought, or checking in).' : 'Give a good reason for reaching out (e.g., sharing a quick thought, asking a random question, talking about your own life, or just checking in).')} 
 IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never actually posted. ${context ? 'Focus on the provided context.' : (recentActivity ? 'Only reference the recent posts/comments provided above, or find another reason to reach out.' : 'Since no recent posts/comments are provided, you MUST find another reason to reach out.')}
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.`;
 
@@ -704,7 +735,14 @@ ${historyStr}
 
 Reply in character to their latest message. 
 Notice the timestamps to understand the flow of time between messages.
-Make sure to actually write like it's a Direct Message Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character. Focus on the conversation topic.
+${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be customer support, answering inquiries, or maintaining brand voice.' : ''}
+CRITICAL: Make it feel like a REALISTIC text message/DM. 
+- Do NOT write long, overly formal paragraphs. 
+- Use casual language, abbreviations, or slang if it fits your character. 
+- People text in short bursts. Keep it brief and conversational.
+- Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
+- Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
+Focus on the conversation topic.
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
 
   const messages: any[] = [
@@ -773,8 +811,16 @@ ${otherMembersBios}
 Conversation history (with timestamps):
 ${historyStr}
 
-Reply in character to the latest messages. Make sure to actually write like it's a Group Chat, don't default to Roleplaying with actions in asteriks. Keep it concise and natural, but stay in character. You can address specific people by name if you want.
-Notice the timestamps to understand the flow of time between messages.`;
+Reply in character to the latest messages. 
+Notice the timestamps to understand the flow of time between messages.
+${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the group in a corporate or brand-appropriate way. You are representing the company in this group chat.' : ''}
+CRITICAL: Make it feel like a REALISTIC group chat message. 
+- Do NOT write long, overly formal paragraphs. 
+- Use casual language, abbreviations, or slang if it fits your character. 
+- People text in short bursts. Keep it brief and conversational.
+- Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
+- Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
+You can address specific people by name if you want.`;
 
   const messages = [
     { role: "system", content: systemPrompt },

@@ -15,6 +15,13 @@ export function initDb() {
       is_ai BOOLEAN DEFAULT 1,
       is_active BOOLEAN DEFAULT 0,
       ai_persona TEXT, -- Description of who they are impersonating
+      universe_id INTEGER REFERENCES universes(id),
+      account_type TEXT DEFAULT 'character',
+      company_name TEXT,
+      brand_identity TEXT,
+      products_services TEXT,
+      target_audience TEXT,
+      run_by_character_id INTEGER REFERENCES users(id),
       online_times TEXT DEFAULT '[]', -- JSON array of time windows
       activity_level INTEGER DEFAULT 5, -- Scale of 1-10
       current_online_status INTEGER DEFAULT 0,
@@ -182,7 +189,8 @@ export function initDb() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
-      probability REAL NOT NULL
+      probability REAL NOT NULL,
+      account_type TEXT DEFAULT 'character'
     );
 
     CREATE TABLE IF NOT EXISTS dm_favorites (
@@ -237,41 +245,76 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_group_chat_members_user_id ON group_chat_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_users_is_ai_is_active ON users(is_ai, is_active);
     CREATE INDEX IF NOT EXISTS idx_users_is_ai ON users(is_ai);
-    CREATE INDEX IF NOT EXISTS idx_users_universe_id ON users(universe_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver ON direct_messages(sender_id, receiver_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender ON direct_messages(receiver_id, sender_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver_id ON direct_messages(sender_id, receiver_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender_id ON direct_messages(receiver_id, sender_id, id DESC);
   `);
 
+  // Add account_type column to post_archetypes if it doesn't exist
+  try {
+    db.exec("ALTER TABLE post_archetypes ADD COLUMN account_type TEXT DEFAULT 'character'");
+  } catch (e) {
+    // Column might already exist
+  }
+
   // Initialize default archetypes if table is empty
   const archetypeCount = db.prepare("SELECT COUNT(*) as count FROM post_archetypes").get() as any;
   if (archetypeCount.count === 0) {
     const defaultArchetypes = [
-      { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30 },
-      { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15 },
-      { id: 'question', name: 'Question', description: 'A Character asking a question.', probability: 10 },
-      { id: 'random_thought', name: 'Random Thought', description: 'A random thought a character had they want to share on Faux.', probability: 10 },
-      { id: 'discussion', name: 'Discussion', description: 'Similar to a Question, but with more arguing in the comments.', probability: 5 },
-      { id: 'recommendation', name: 'Recommendation', description: 'A Character recommending a Book, TV Show, Movie and so on.', probability: 5 },
-      { id: 'follow_up', name: 'Follow up', description: 'A character following up on a previous post. Sharing an update on their previous live update, thanking users for answering a previous question and so on. Always make sure it references a previous post of that character in some way.', probability: 5 },
-      { id: 'picking_up_trend', name: 'Picking up a Trend', description: 'Check what other characters have been posing about recently. If you notice a pattern, comment on it or even continue the "Trend".', probability: 5 },
-      { id: 'mention', name: 'Mention', description: 'A Character mentioning another character (with their @username) about something which leads to that mentioned character to react in a comment.', probability: 5 },
-      { id: 'joke', name: 'Joke', description: 'A character making a joke, that fits their personality.', probability: 5 },
-      { id: 'shitpost', name: 'Shitpost / Rage Bait', description: 'A shitpost or rage bait.', probability: 5 },
-      { id: 'venting', name: 'Venting', description: 'A character venting about something that made them angry.', probability: 5 },
-      { id: 'dm_invitation', name: 'DM Invitation', description: 'A Character mentions something and invites other users to contact them via DM.', probability: 2 },
-      { id: 'event', name: 'Event', description: 'Something that affects multiple characters has happened and they are now reacting to it.', probability: 2 },
-      { id: 'meetup', name: 'Meetup', description: 'A meetup between 2-5 characters. If they are from different universes, this MUST be a digital meetup (gaming, video call, etc). If they are from the same universe, it can be a real-world meetup.', probability: 2 }
+      { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30, account_type: 'character' },
+      { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15, account_type: 'character' },
+      { id: 'question', name: 'Question', description: 'A Character asking a question.', probability: 10, account_type: 'character' },
+      { id: 'random_thought', name: 'Random Thought', description: 'A random thought a character had they want to share on Faux.', probability: 10, account_type: 'character' },
+      { id: 'discussion', name: 'Discussion', description: 'Similar to a Question, but with more arguing in the comments.', probability: 5, account_type: 'character' },
+      { id: 'recommendation', name: 'Recommendation', description: 'A Character recommending a Book, TV Show, Movie and so on.', probability: 5, account_type: 'character' },
+      { id: 'follow_up', name: 'Follow up', description: 'A character following up on a previous post. Sharing an update on their previous live update, thanking users for answering a previous question and so on. Always make sure it references a previous post of that character in some way.', probability: 5, account_type: 'character' },
+      { id: 'picking_up_trend', name: 'Picking up a Trend', description: 'Check what other characters have been posing about recently. If you notice a pattern, comment on it or even continue the "Trend".', probability: 5, account_type: 'character' },
+      { id: 'mention', name: 'Mention', description: 'A Character mentioning another character (with their @username) about something which leads to that mentioned character to react in a comment.', probability: 5, account_type: 'character' },
+      { id: 'joke', name: 'Joke', description: 'A character making a joke, that fits their personality.', probability: 5, account_type: 'character' },
+      { id: 'shitpost', name: 'Shitpost / Rage Bait', description: 'A shitpost or rage bait.', probability: 5, account_type: 'character' },
+      { id: 'venting', name: 'Venting', description: 'A character venting about something that made them angry.', probability: 5, account_type: 'character' },
+      { id: 'dm_invitation', name: 'DM Invitation', description: 'A Character mentions something and invites other users to contact them via DM.', probability: 2, account_type: 'character' },
+      { id: 'event', name: 'Event', description: 'Something that affects multiple characters has happened and they are now reacting to it.', probability: 2, account_type: 'character' },
+      { id: 'meetup', name: 'Meetup', description: 'A meetup between 2-5 characters. If they are from different universes, this MUST be a digital meetup (gaming, video call, etc). If they are from the same universe, it can be a real-world meetup.', probability: 2, account_type: 'character' },
+      
+      // Company Archetypes
+      { id: 'direct_advertisement', name: 'Direct Advertisement', description: 'Simple, straightforward posts that advertise the company in general, highlight a specific product, or announce a sale.', probability: 30, account_type: 'company' },
+      { id: 'meme_trend_chaser', name: 'Meme & Trend Chaser', description: 'Often used by "younger" brands or those wanting an edgy persona. They post jokes, adapt viral internet memes to fit their product, or jump on current trending audio/formats.', probability: 15, account_type: 'company' },
+      { id: 'public_apology', name: 'Public Apology', description: 'Crisis communication in action. Something went wrong—a service outage, a delayed shipment, or a PR disaster—and the company posts a formal apology.', probability: 5, account_type: 'company' },
+      { id: 'company_announcement', name: 'Company Announcement', description: 'Official news and PR. They announce something significant about their company, such as a new product launch, hitting a user milestone, a new partnership, or an upcoming event.', probability: 15, account_type: 'company' },
+      { id: 'engagement_bait', name: 'Engagement Bait', description: 'Posts specifically engineered to hack the algorithm by driving replies and shares. These include polls, "this or that" questions, or prompts like "Drop your favorite GIF that describes our product."', probability: 15, account_type: 'company' },
+      { id: 'brand_banter', name: 'Brand Banter', description: 'Playful, sarcastic, or slightly petty interactions with competitor companies or other verified corporate accounts to generate a viral moment.', probability: 10, account_type: 'company' },
+      { id: 'giveaway_contest', name: 'Giveaway & Contest', description: 'High-traction posts used to rapidly gain followers and reach. They usually require a specific set of actions to enter, such as "Like, Retweet, and tag 2 friends to win!"', probability: 10, account_type: 'company' }
     ];
     
-    const insertArchetype = db.prepare("INSERT INTO post_archetypes (id, name, description, probability) VALUES (?, ?, ?, ?)");
+    const insertArchetype = db.prepare("INSERT INTO post_archetypes (id, name, description, probability, account_type) VALUES (?, ?, ?, ?, ?)");
     for (const arch of defaultArchetypes) {
-      insertArchetype.run(arch.id, arch.name, arch.description, arch.probability);
+      insertArchetype.run(arch.id, arch.name, arch.description, arch.probability, arch.account_type);
     }
   } else {
     // Update meetup description for existing databases
     db.prepare("UPDATE post_archetypes SET description = ? WHERE id = 'meetup' AND description = 'A meetup between 2-5 characters.'").run('A meetup between 2-5 characters. If they are from different universes, this MUST be a digital meetup (gaming, video call, etc). If they are from the same universe, it can be a real-world meetup.');
+    
+    // Insert company archetypes if they don't exist
+    const companyArchetypes = [
+      { id: 'direct_advertisement', name: 'Direct Advertisement', description: 'Simple, straightforward posts that advertise the company in general, highlight a specific product, or announce a sale.', probability: 30, account_type: 'company' },
+      { id: 'meme_trend_chaser', name: 'Meme & Trend Chaser', description: 'Often used by "younger" brands or those wanting an edgy persona. They post jokes, adapt viral internet memes to fit their product, or jump on current trending audio/formats.', probability: 15, account_type: 'company' },
+      { id: 'public_apology', name: 'Public Apology', description: 'Crisis communication in action. Something went wrong—a service outage, a delayed shipment, or a PR disaster—and the company posts a formal apology.', probability: 5, account_type: 'company' },
+      { id: 'company_announcement', name: 'Company Announcement', description: 'Official news and PR. They announce something significant about their company, such as a new product launch, hitting a user milestone, a new partnership, or an upcoming event.', probability: 15, account_type: 'company' },
+      { id: 'engagement_bait', name: 'Engagement Bait', description: 'Posts specifically engineered to hack the algorithm by driving replies and shares. These include polls, "this or that" questions, or prompts like "Drop your favorite GIF that describes our product."', probability: 15, account_type: 'company' },
+      { id: 'brand_banter', name: 'Brand Banter', description: 'Playful, sarcastic, or slightly petty interactions with competitor companies or other verified corporate accounts to generate a viral moment.', probability: 10, account_type: 'company' },
+      { id: 'giveaway_contest', name: 'Giveaway & Contest', description: 'High-traction posts used to rapidly gain followers and reach. They usually require a specific set of actions to enter, such as "Like, Retweet, and tag 2 friends to win!"', probability: 10, account_type: 'company' }
+    ];
+    
+    const checkArchetype = db.prepare("SELECT COUNT(*) as count FROM post_archetypes WHERE id = ?");
+    const insertArchetype = db.prepare("INSERT INTO post_archetypes (id, name, description, probability, account_type) VALUES (?, ?, ?, ?, ?)");
+    for (const arch of companyArchetypes) {
+      const exists = checkArchetype.get(arch.id) as any;
+      if (exists.count === 0) {
+        insertArchetype.run(arch.id, arch.name, arch.description, arch.probability, arch.account_type);
+      }
+    }
   }
 
   // Add last_read_at column if it doesn't exist
@@ -306,6 +349,18 @@ export function initDb() {
     db.prepare('SELECT universe_id FROM users').get();
   } catch (e) {
     db.exec("ALTER TABLE users ADD COLUMN universe_id INTEGER REFERENCES universes(id)");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_users_universe_id ON users(universe_id);");
+
+  try {
+    db.prepare('SELECT account_type FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN account_type TEXT DEFAULT 'character'");
+    db.exec("ALTER TABLE users ADD COLUMN company_name TEXT");
+    db.exec("ALTER TABLE users ADD COLUMN brand_identity TEXT");
+    db.exec("ALTER TABLE users ADD COLUMN products_services TEXT");
+    db.exec("ALTER TABLE users ADD COLUMN target_audience TEXT");
+    db.exec("ALTER TABLE users ADD COLUMN run_by_character_id INTEGER REFERENCES users(id)");
   }
 
   try {

@@ -122,6 +122,20 @@ function pickWeightedRandomUser(users: any[]) {
 async function checkDynamicRelationship(user1Id: number, user2Id: number) {
   if (user1Id === user2Id) return;
   
+  const user1 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user1Id) as any;
+  const user2 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user2Id) as any;
+
+  if (!user1 || !user2) return;
+
+  const isUser1Company = user1.account_type === 'company';
+  const isUser2Company = user2.account_type === 'company';
+
+  // Companies cannot form relationships with characters
+  if ((isUser1Company && !isUser2Company) || (!isUser1Company && isUser2Company)) return;
+
+  // If both are companies, they must be from the same universe
+  if (isUser1Company && isUser2Company && user1.universe_id !== user2.universe_id) return;
+
   // Check if relationship already exists
   const existingRel = db.prepare("SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any;
 
@@ -215,10 +229,17 @@ function filterAvailableUsersForComment(opId: number, availableAiUsers: any[]) {
   const settings = db.prepare("SELECT cross_universe_prob FROM settings WHERE id = 1").get() as any;
   const crossUniverseProb = (settings?.cross_universe_prob ?? 50.0) / 100;
 
-  const opUser = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(opId) as any;
+  const opUser = db.prepare("SELECT universe_id, account_type FROM users WHERE id = ?").get(opId) as any;
   const opUniverseId = opUser?.universe_id;
+  const opAccountType = opUser?.account_type || 'character';
 
   const filteredAiUsers = availableAiUsers.filter(u => {
+    // Company commenting logic
+    if (u.account_type === 'company') {
+      const companyCommentProb = opAccountType === 'company' ? 0.1 : 0.02;
+      if (Math.random() > companyCommentProb) return false;
+    }
+
     if (u.universe_id === opUniverseId) return true;
     return Math.random() < crossUniverseProb;
   });
@@ -755,13 +776,35 @@ async function startServer() {
     const { user_id_2, description } = req.body;
     const user_id_1 = req.params.id;
     try {
-      // Two-sided relationship
+      const user1 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user_id_1) as any;
+      const user2 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user_id_2) as any;
+
+      if (!user1 || !user2) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const isUser1Company = user1.account_type === 'company';
+      const isUser2Company = user2.account_type === 'company';
+
+      // Companies cannot form relationships with characters
+      if (isUser1Company && !isUser2Company) {
+        return res.status(400).json({ error: "Companies cannot form relationships with characters." });
+      }
+
+      // If either is a company, they must be from the same universe
+      if ((isUser1Company || isUser2Company) && user1.universe_id !== user2.universe_id) {
+        return res.status(400).json({ error: "Relationships involving companies must be within the same universe." });
+      }
+
+      // Insert relationship for user 1 -> user 2
       db.prepare("INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(user_id_1, user_id_2, description);
-      db.prepare("INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(user_id_2, user_id_1, description);
-      
-      // Mutual follow
       db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user_id_1, user_id_2);
-      db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user_id_2, user_id_1);
+
+      // If it's Character -> Company, it's one-sided. Otherwise, it's two-sided.
+      if (!(!isUser1Company && isUser2Company)) {
+        db.prepare("INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(user_id_2, user_id_1, description);
+        db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user_id_2, user_id_1);
+      }
       
       res.json({ success: true });
     } catch (e: any) {
@@ -865,13 +908,13 @@ async function startServer() {
   });
 
   app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images } = req.body;
+    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
     try {
       db.prepare(`
         UPDATE users 
-        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency), reference_images = ?
+        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency), reference_images = ?, account_type = COALESCE(?, account_type), company_name = ?, brand_identity = ?, products_services = ?, target_audience = ?, run_by_character_id = ?
         WHERE id = ?
-      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, reference_images ? JSON.stringify(reference_images) : '[]', req.params.id);
+      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, reference_images ? JSON.stringify(reference_images) : '[]', account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id || null, req.params.id);
 
       res.json({ success: true });
     } catch (e: any) {
@@ -897,10 +940,10 @@ async function startServer() {
   });
 
   app.post("/api/users", (req, res) => {
-    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images } = req.body;
+    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
       "ROUTE_ADD_USER",
-      JSON.stringify({ username, display_name, universe_id }),
+      JSON.stringify({ username, display_name, universe_id, account_type }),
       "Request Received"
     );
     try {
@@ -910,10 +953,10 @@ async function startServer() {
       }
 
       const stmt = db.prepare(`
-        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, reference_images ? JSON.stringify(reference_images) : '[]');
+      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, reference_images ? JSON.stringify(reference_images) : '[]', account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
       const userId = info.lastInsertRowid;
       
       // AI character follows real user by default, but real user does NOT follow AI character by default
@@ -987,7 +1030,7 @@ async function startServer() {
       const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
 
       const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
-      const archetype = pickArchetype(isFirstPost, type === 'image');
+      const archetype = pickArchetype(isFirstPost, type === 'image', aiUser.account_type);
       const relatedUsers = db.prepare(`
         SELECT u.username, u.universe_id, un.name as universe_name
         FROM users u
@@ -1064,6 +1107,7 @@ async function startServer() {
   app.get("/api/posts", (req, res) => {
     const user = getRealUser(req);
     const userId = user ? user.id : 0;
+    const limit = parseInt(req.query.limit as string) || 50;
     
     const posts = db.prepare(`
       SELECT p.*, u.username, u.display_name, u.avatar_url,
@@ -1075,8 +1119,8 @@ async function startServer() {
       WHERE (p.user_id = ? OR p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?))
       AND p.is_visible = 1
       ORDER BY p.created_at DESC
-      LIMIT 50
-    `).all(userId, userId, userId);
+      LIMIT ?
+    `).all(userId, userId, userId, limit);
     res.json(posts);
   });
 
@@ -1195,7 +1239,7 @@ async function startServer() {
   app.get("/api/posts/:id", (req, res) => {
     const user = getRealUser(req);
     const post = db.prepare(`
-      SELECT p.*, u.username, u.display_name, u.avatar_url,
+      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as likes,
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments,
       EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
@@ -1797,7 +1841,7 @@ async function startServer() {
         const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
 
         const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
-        const archetype = pickArchetype(isFirstPost, isImage);
+        const archetype = pickArchetype(isFirstPost, isImage, aiUser.account_type);
         const relatedUsers = db.prepare(`
           SELECT u.username, u.universe_id, un.name as universe_name
           FROM users u

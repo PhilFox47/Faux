@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -130,6 +130,12 @@ export default function App() {
   const [charOnlineTimes, setCharOnlineTimes] = useState<string[]>([]);
   const [charActivityLevel, setCharActivityLevel] = useState<number>(5);
   const [charNewUniverseName, setCharNewUniverseName] = useState('');
+  const [charAccountType, setCharAccountType] = useState<'character' | 'company'>('character');
+  const [charCompanyName, setCharCompanyName] = useState('');
+  const [charBrandIdentity, setCharBrandIdentity] = useState('');
+  const [charProductsServices, setCharProductsServices] = useState('');
+  const [charTargetAudience, setCharTargetAudience] = useState('');
+  const [charRunByCharacterId, setCharRunByCharacterId] = useState<number | null>(null);
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [universes, setUniverses] = useState<any[]>([]);
   const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
@@ -241,6 +247,12 @@ export default function App() {
   const [profileOnlineTimes, setProfileOnlineTimes] = useState<string[]>([]);
   const [profileActivityLevel, setProfileActivityLevel] = useState<number>(5);
   const [profileNewUniverseName, setProfileNewUniverseName] = useState('');
+  const [profileAccountType, setProfileAccountType] = useState<'character' | 'company'>('character');
+  const [profileCompanyName, setProfileCompanyName] = useState('');
+  const [profileBrandIdentity, setProfileBrandIdentity] = useState('');
+  const [profileProductsServices, setProfileProductsServices] = useState('');
+  const [profileTargetAudience, setProfileTargetAudience] = useState('');
+  const [profileRunByCharacterId, setProfileRunByCharacterId] = useState<number | null>(null);
   const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
   const [newRelUserId, setNewRelUserId] = useState('');
   const [newRelDesc, setNewRelDesc] = useState('');
@@ -390,6 +402,12 @@ export default function App() {
     setProfileArtstyle(user.artstyle || '');
     setProfileUniverseId(user.universe_id || null);
     setProfileActivityLevel(user.activity_level ?? 5);
+    setProfileAccountType(user.account_type || 'character');
+    setProfileCompanyName(user.company_name || '');
+    setProfileBrandIdentity(user.brand_identity || '');
+    setProfileProductsServices(user.products_services || '');
+    setProfileTargetAudience(user.target_audience || '');
+    setProfileRunByCharacterId(user.run_by_character_id || null);
     
     let onlineTimes = [];
     try {
@@ -416,18 +434,24 @@ export default function App() {
     if (!newRelUserId || !newRelDesc || isAddingRelationship) return;
     setIsAddingRelationship(true);
     try {
-      await apiFetch(`/api/users/${editingProfile.id}/relationships`, {
+      const res = await apiFetch(`/api/users/${editingProfile.id}/relationships`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id_2: newRelUserId, description: newRelDesc })
       });
+      if (!res.ok) {
+        const err = await res.json();
+        showToast(err.error || 'Failed to add relationship');
+        return;
+      }
       setNewRelUserId('');
       setNewRelDesc('');
-      const res = await apiFetch(`/api/users/${editingProfile.id}/relationships`);
-      setProfileRelationships(await res.json());
+      const relsRes = await apiFetch(`/api/users/${editingProfile.id}/relationships`);
+      setProfileRelationships(await relsRes.json());
       showToast('Relationship added!');
     } catch (e) {
       console.error(e);
+      showToast('An error occurred');
     } finally {
       setIsAddingRelationship(false);
     }
@@ -488,7 +512,13 @@ export default function App() {
           activity_level: profileActivityLevel,
           pin: profilePin,
           dm_frequency: profileDmFrequency,
-          reference_images: profileReferenceImages
+          reference_images: profileReferenceImages,
+          account_type: profileAccountType,
+          company_name: profileCompanyName,
+          brand_identity: profileBrandIdentity,
+          products_services: profileProductsServices,
+          target_audience: profileTargetAudience,
+          run_by_character_id: profileRunByCharacterId
         })
       });
       
@@ -538,9 +568,9 @@ export default function App() {
     });
   };
 
-  const fetchPosts = () => {
-    apiFetch('/api/posts').then(r => r.json()).then(setPosts);
-  };
+  const fetchPosts = useCallback(() => {
+    apiFetch(`/api/posts?limit=${visiblePostsRef.current + 1}`).then(r => r.json()).then(setPosts);
+  }, [apiFetch]);
 
   const fetchUsers = () => {
     apiFetch('/api/users').then(r => r.json()).then(setUsers);
@@ -940,7 +970,13 @@ export default function App() {
           universe_id: finalUniverseId,
           online_times: JSON.stringify(charOnlineTimes),
           activity_level: charActivityLevel,
-          reference_images: charReferenceImages
+          reference_images: charReferenceImages,
+          account_type: charAccountType,
+          company_name: charCompanyName,
+          brand_identity: charBrandIdentity,
+          products_services: charProductsServices,
+          target_audience: charTargetAudience,
+          run_by_character_id: charRunByCharacterId
         })
       });
 
@@ -965,6 +1001,12 @@ export default function App() {
       setCharOnlineTimes([]);
       setCharActivityLevel(5);
       setCharNewUniverseName('');
+      setCharAccountType('character');
+      setCharCompanyName('');
+      setCharBrandIdentity('');
+      setCharProductsServices('');
+      setCharTargetAudience('');
+      setCharRunByCharacterId(null);
       setPersonaChatResponse('');
       fetchUsers();
       showToast('Character added!');
@@ -1178,6 +1220,13 @@ export default function App() {
   const [characterSearch, setCharacterSearch] = useState('');
   const [visibleCharacters, setVisibleCharacters] = useState(20);
   const [visiblePosts, setVisiblePosts] = useState(30);
+  const visiblePostsRef = useRef(visiblePosts);
+  useEffect(() => {
+    if (visiblePostsRef.current !== visiblePosts) {
+      visiblePostsRef.current = visiblePosts;
+      fetchPosts();
+    }
+  }, [visiblePosts, fetchPosts]);
   const [visibleProfilePosts, setVisibleProfilePosts] = useState(30);
 
   if (!loggedInUser) {
@@ -1497,16 +1546,69 @@ export default function App() {
           {activeTab === 'explore' && (
             <div className="flex h-[calc(100vh-60px)]">
               <div className="flex-1 p-6 overflow-y-auto">
-                <h2 className="text-2xl font-bold mb-6">Add AI Character</h2>
+                <h2 className="text-2xl font-bold mb-6">Add Account</h2>
                 <form onSubmit={handleAddCharacter} className="space-y-4 max-w-3xl mx-auto">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Character Name</label>
-                    <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Geralt of Rivia" />
+                  <div className="flex gap-4 mb-6">
+                    <button
+                      type="button"
+                      onClick={() => setCharAccountType('character')}
+                      className={`flex-1 py-3 rounded-lg font-bold transition-colors ${charAccountType === 'character' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                    >
+                      Character
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCharAccountType('company')}
+                      className={`flex-1 py-3 rounded-lg font-bold transition-colors ${charAccountType === 'company' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                    >
+                      Company Account
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Additional Info (Franchise, Context, etc.)</label>
-                    <textarea value={charPersona} onChange={e => setCharPersona(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. From The Witcher 3, currently looking for Ciri..."></textarea>
-                  </div>
+
+                  {charAccountType === 'character' ? (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Character Name</label>
+                        <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Geralt of Rivia" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Additional Info (Franchise, Context, etc.)</label>
+                        <textarea value={charPersona} onChange={e => setCharPersona(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. From The Witcher 3, currently looking for Ciri..."></textarea>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Company / Brand Name</label>
+                        <input required value={charCompanyName} onChange={e => { setCharCompanyName(e.target.value); setCharName(e.target.value); }} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Vought International" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Brand Identity</label>
+                        <textarea value={charBrandIdentity} onChange={e => setCharBrandIdentity(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Corporate, patriotic, slightly sinister..."></textarea>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Products / Services</label>
+                        <textarea value={charProductsServices} onChange={e => setCharProductsServices(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Compound V, Superheroes, Energy Drinks..."></textarea>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Target Audience</label>
+                        <input value={charTargetAudience} onChange={e => setCharTargetAudience(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. General public, superhero fans" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Run By Character (Optional)</label>
+                        <select 
+                          value={charRunByCharacterId || ''} 
+                          onChange={e => setCharRunByCharacterId(e.target.value ? parseInt(e.target.value) : null)}
+                          className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"
+                        >
+                          <option value="">Nameless Employee</option>
+                          {users.filter(u => u.is_ai).map(u => (
+                            <option key={u.id} value={u.id}>{u.display_name} (@{u.username})</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-400 mb-1">Username</label>
@@ -1581,14 +1683,18 @@ export default function App() {
                     <label className="block text-sm font-medium text-gray-400 mb-1">Writing Style (Private)</label>
                     <textarea value={charWritingStyle} onChange={e => setCharWritingStyle(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Tone of voice, catchphrases, interaction style..."></textarea>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Physical Appearance (Private)</label>
-                    <textarea value={charPhysicalAppearance} onChange={e => setCharPhysicalAppearance(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Hair color, body type, facial features..."></textarea>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Clothing Style (Private)</label>
-                    <textarea value={charClothingStyle} onChange={e => setCharClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Usual outfits, fashion sense, accessories..."></textarea>
-                  </div>
+                  {charAccountType === 'character' && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Physical Appearance (Private)</label>
+                        <textarea value={charPhysicalAppearance} onChange={e => setCharPhysicalAppearance(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Hair color, body type, facial features..."></textarea>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Clothing Style (Private)</label>
+                        <textarea value={charClothingStyle} onChange={e => setCharClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Usual outfits, fashion sense, accessories..."></textarea>
+                      </div>
+                    </>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle (Private)</label>
                     <textarea value={charArtstyle} onChange={e => setCharArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Anime, Realistic, Pixel Art, Oil Painting..."></textarea>
@@ -2805,8 +2911,60 @@ export default function App() {
                 
                 {editingProfile.is_ai === 1 && (
                   <div className="mt-8 pt-6 border-t border-gray-800">
-                    <h3 className="text-lg font-bold mb-4 text-orange-500">AI Character Settings (Private)</h3>
+                    <h3 className="text-lg font-bold mb-4 text-orange-500">AI Account Settings (Private)</h3>
                     <div className="space-y-4">
+                      <div className="flex gap-4 mb-6">
+                        <button
+                          type="button"
+                          onClick={() => setProfileAccountType('character')}
+                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'character' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                        >
+                          Character
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProfileAccountType('company')}
+                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'company' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                        >
+                          Company Account
+                        </button>
+                      </div>
+
+                      {profileAccountType === 'company' && (
+                        <div className="space-y-4 bg-gray-900/50 p-4 rounded-xl border border-gray-800 mb-6">
+                          <h4 className="font-bold text-orange-400 mb-2 flex items-center gap-2"><Briefcase size={16} /> Company Details</h4>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Company / Brand Name</label>
+                            <input value={profileCompanyName} onChange={e => setProfileCompanyName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Brand Identity</label>
+                            <textarea value={profileBrandIdentity} onChange={e => setProfileBrandIdentity(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Products / Services</label>
+                            <textarea value={profileProductsServices} onChange={e => setProfileProductsServices(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Target Audience</label>
+                            <input value={profileTargetAudience} onChange={e => setProfileTargetAudience(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Run By Character (Optional)</label>
+                            <select 
+                              value={profileRunByCharacterId || ''} 
+                              onChange={e => setProfileRunByCharacterId(e.target.value ? parseInt(e.target.value) : null)}
+                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"
+                            >
+                              <option value="">Nameless Employee</option>
+                              {users.filter(u => u.is_ai && u.id !== editingProfile.id).map(u => (
+                                <option key={u.id} value={u.id}>{u.display_name} (@{u.username})</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
                       <div>
                         <label className="block text-sm font-medium text-gray-400 mb-1">General Description</label>
                         <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
@@ -2815,14 +2973,18 @@ export default function App() {
                         <label className="block text-sm font-medium text-gray-400 mb-1">Writing Style</label>
                         <textarea value={profileWritingStyle} onChange={e => setProfileWritingStyle(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Physical Appearance</label>
-                        <textarea value={profilePhysicalAppearance} onChange={e => setProfilePhysicalAppearance(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Clothing Style</label>
-                        <textarea value={profileClothingStyle} onChange={e => setProfileClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
-                      </div>
+                      {profileAccountType === 'character' && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Physical Appearance</label>
+                            <textarea value={profilePhysicalAppearance} onChange={e => setProfilePhysicalAppearance(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Clothing Style</label>
+                            <textarea value={profileClothingStyle} onChange={e => setProfileClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                          </div>
+                        </>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle</label>
                         <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
@@ -2929,7 +3091,18 @@ export default function App() {
                         className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
                       >
                         <option value="">Select character...</option>
-                        {users.filter(u => u.id !== editingProfile.id && !profileRelationships.find(r => r.user_id_2 === u.id) && (u.display_name.toLowerCase().includes(relSearch.toLowerCase()) || u.username.toLowerCase().includes(relSearch.toLowerCase()))).map(u => (
+                        {users.filter(u => {
+                          if (u.id === editingProfile.id) return false;
+                          if (profileRelationships.find(r => r.user_id_2 === u.id)) return false;
+                          
+                          const isEditingCompany = editingProfile.account_type === 'company';
+                          const isTargetCompany = u.account_type === 'company';
+
+                          if (isEditingCompany && !isTargetCompany) return false;
+                          if ((isEditingCompany || isTargetCompany) && editingProfile.universe_id !== u.universe_id) return false;
+
+                          return u.display_name.toLowerCase().includes(relSearch.toLowerCase()) || u.username.toLowerCase().includes(relSearch.toLowerCase());
+                        }).map(u => (
                           <option key={u.id} value={u.id}>{u.display_name} (@{u.username})</option>
                         ))}
                       </select>
@@ -3161,6 +3334,37 @@ export default function App() {
                 </div>
                 
                 <p className="mb-4 whitespace-pre-wrap">{viewingProfile.bio}</p>
+                
+                {viewingProfile.account_type === 'company' && (
+                  <div className="mb-4 space-y-2 text-sm bg-gray-950 p-4 rounded-xl border border-gray-800">
+                    <div className="flex items-center gap-2 text-orange-400 font-bold mb-2">
+                      <Briefcase size={16} /> Company Account
+                    </div>
+                    {viewingProfile.brand_identity && (
+                      <p><span className="text-gray-500">Brand Identity:</span> {viewingProfile.brand_identity}</p>
+                    )}
+                    {viewingProfile.products_services && (
+                      <p><span className="text-gray-500">Products/Services:</span> {viewingProfile.products_services}</p>
+                    )}
+                    {viewingProfile.target_audience && (
+                      <p><span className="text-gray-500">Target Audience:</span> {viewingProfile.target_audience}</p>
+                    )}
+                    {viewingProfile.run_by_character_id && users.find(u => u.id === viewingProfile.run_by_character_id) && (
+                      <p className="mt-2 pt-2 border-t border-gray-800">
+                        <span className="text-gray-500">Run by:</span>{' '}
+                        <span 
+                          className="text-orange-400 hover:underline cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleViewProfile(viewingProfile.run_by_character_id);
+                          }}
+                        >
+                          {users.find(u => u.id === viewingProfile.run_by_character_id)?.display_name}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
                 
                 <div className="flex gap-4 text-sm text-gray-500 mb-6">
                   <span 
@@ -3583,8 +3787,12 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   useEffect(() => {
     if (showComments) {
       fetchComments();
+      const interval = setInterval(() => {
+        fetchComments();
+      }, 10000); // Poll every 10s
+      return () => clearInterval(interval);
     }
-  }, [showComments]);
+  }, [showComments, post.comment_count]);
 
   const handleDelete = async () => {
     await apiFetch(`/api/posts/${post.id}`, { method: 'DELETE' });
