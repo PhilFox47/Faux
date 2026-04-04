@@ -215,6 +215,34 @@ export function initDb() {
       FOREIGN KEY (user_id_2) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS character_arcs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      start_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      target_end_date DATETIME NOT NULL,
+      completion_summary TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS universe_arcs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      universe_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      current_status_text TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      start_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      target_end_date DATETIME NOT NULL,
+      last_update_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completion_summary TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (universe_id) REFERENCES universes(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_is_visible ON posts(is_visible);
@@ -269,6 +297,7 @@ export function initDb() {
       { id: 'discussion', name: 'Discussion', description: 'Similar to a Question, but with more arguing in the comments.', probability: 5, account_type: 'character' },
       { id: 'recommendation', name: 'Recommendation', description: 'A Character recommending a Book, TV Show, Movie and so on.', probability: 5, account_type: 'character' },
       { id: 'follow_up', name: 'Follow up', description: 'A character following up on a previous post. Sharing an update on their previous live update, thanking users for answering a previous question and so on. Always make sure it references a previous post of that character in some way.', probability: 5, account_type: 'character' },
+      { id: 'seeking_advice', name: 'Seeking Advice', description: 'Asking the community for help, advice, or input on a current problem or situation. Actively looking for influence from other characters.', probability: 10, account_type: 'character' },
       { id: 'picking_up_trend', name: 'Picking up a Trend', description: 'Check what other characters have been posing about recently. If you notice a pattern, comment on it or even continue the "Trend".', probability: 5, account_type: 'character' },
       { id: 'mention', name: 'Mention', description: 'A Character mentioning another character (with their @username) about something which leads to that mentioned character to react in a comment.', probability: 5, account_type: 'character' },
       { id: 'joke', name: 'Joke', description: 'A character making a joke, that fits their personality.', probability: 5, account_type: 'character' },

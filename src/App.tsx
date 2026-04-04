@@ -162,8 +162,12 @@ export default function App() {
   // Profile Viewing
   const [viewingProfile, setViewingProfile] = useState<any>(null);
   const [viewingProfilePosts, setViewingProfilePosts] = useState<any[]>([]);
+  const [viewingProfileArcs, setViewingProfileArcs] = useState<any[]>([]);
+  const [profileActiveTab, setProfileActiveTab] = useState<'posts' | 'arcs'>('posts');
   const [viewingUniverse, setViewingUniverse] = useState<any>(null);
   const [viewingUniverseCharacters, setViewingUniverseCharacters] = useState<any[]>([]);
+  const [viewingUniverseArcs, setViewingUniverseArcs] = useState<any[]>([]);
+  const [universeActiveTab, setUniverseActiveTab] = useState<'characters' | 'arcs'>('characters');
   const [viewingPostData, setViewingPostData] = useState<any>(null);
   const [highlightedPostId, setHighlightedPostId] = useState<number | null>(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState<number | null>(null);
@@ -271,20 +275,30 @@ export default function App() {
   const [apiLogSearch, setApiLogSearch] = useState('');
   
   const [relationshipChecks, setRelationshipChecks] = useState<any[]>([]);
+  const [relationshipChecksOffset, setRelationshipChecksOffset] = useState(0);
+  const [hasMoreRelationshipChecks, setHasMoreRelationshipChecks] = useState(true);
 
-  const fetchRelationshipChecks = () => {
-    apiFetch('/api/relationship-checks')
+  const fetchRelationshipChecks = (reset = false) => {
+    const offset = reset ? 0 : relationshipChecksOffset;
+    apiFetch(`/api/relationship-checks?limit=20&offset=${offset}`)
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
-          setRelationshipChecks(data);
+          if (reset) {
+            setRelationshipChecks(data);
+          } else {
+            setRelationshipChecks(prev => [...prev, ...data]);
+          }
+          setRelationshipChecksOffset(offset + 20);
+          setHasMoreRelationshipChecks(data.length === 20);
         } else {
-          setRelationshipChecks([]);
+          if (reset) setRelationshipChecks([]);
+          setHasMoreRelationshipChecks(false);
         }
       })
       .catch(err => {
         console.error("Failed to fetch relationship checks:", err);
-        setRelationshipChecks([]);
+        if (reset) setRelationshipChecks([]);
       });
   };
 
@@ -704,9 +718,14 @@ export default function App() {
     if (!user) return;
     setViewingProfile(user);
     setVisibleProfilePosts(30);
+    setProfileActiveTab('posts');
     const res = await apiFetch(`/api/users/${userId}/posts`);
     const posts = await res.json();
     setViewingProfilePosts(posts);
+    
+    const arcsRes = await apiFetch(`/api/users/${userId}/arcs`);
+    const arcs = await arcsRes.json();
+    setViewingProfileArcs(arcs);
   };
 
   const handleViewUniverse = async (universeId: number) => {
@@ -723,12 +742,18 @@ export default function App() {
     const universe = universes.find(u => u.id === universeId);
     if (!universe) return;
     setViewingUniverse(universe);
+    setUniverseActiveTab('characters');
     setEditUniverseDescription(universe.description || '');
     setEditUniverseImageUrl(universe.image_url || '');
     setIsEditingUniverse(false);
     const res = await apiFetch(`/api/universes/${universeId}/characters`);
     const chars = await res.json();
     setViewingUniverseCharacters(chars);
+
+    const arcsRes = await apiFetch(`/api/universes/${universeId}/arcs`);
+    const arcs = await arcsRes.json();
+    setViewingUniverseArcs(arcs);
+    
     setActiveTab('universe_details');
   };
 
@@ -1386,7 +1411,7 @@ export default function App() {
               <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); }} />
               <NavItem icon={<UserCheck />} label="Following" active={activeTab === 'following'} onClick={() => setActiveTab('following')} />
               {loggedInUser?.role === 'admin' && (
-                <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(); }} />
+                <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(true); }} />
               )}
               <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); }} />
             </nav>
@@ -2156,8 +2181,21 @@ export default function App() {
               </div>
 
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold">Characters in this Universe</h3>
-                {viewingUniverseCharacters.length > 0 && (
+                <div className="flex gap-6">
+                  <button 
+                    onClick={() => setUniverseActiveTab('characters')}
+                    className={`pb-2 font-bold transition-colors ${universeActiveTab === 'characters' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    Characters
+                  </button>
+                  <button 
+                    onClick={() => setUniverseActiveTab('arcs')}
+                    className={`pb-2 font-bold transition-colors ${universeActiveTab === 'arcs' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    Universe Arcs
+                  </button>
+                </div>
+                {universeActiveTab === 'characters' && viewingUniverseCharacters.length > 0 && (
                   <div className="flex gap-2">
                     <button 
                       onClick={() => handleFollowAllInUniverse(viewingUniverseCharacters)}
@@ -2174,28 +2212,71 @@ export default function App() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {viewingUniverseCharacters.map(char => (
-                  <div key={char.id} onClick={() => handleViewProfile(char.id)} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
-                    <div className="relative">
-                      <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
-                      {char.is_active && isUserOnline(char) && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
-                      )}
+
+              {universeActiveTab === 'characters' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {viewingUniverseCharacters.map(char => (
+                    <div key={char.id} onClick={() => handleViewProfile(char.id)} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
+                      <div className="relative">
+                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
+                        {char.is_active && isUserOnline(char) && (
+                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
+                        )}
+                      </div>
+                      <div className="overflow-hidden flex-1">
+                        <p className="font-bold truncate flex items-center gap-2">
+                          {char.display_name}
+                          {!char.is_active && <span className="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-400">Inactive</span>}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">@{char.username}</p>
+                      </div>
                     </div>
-                    <div className="overflow-hidden flex-1">
-                      <p className="font-bold truncate flex items-center gap-2">
-                        {char.display_name}
-                        {!char.is_active && <span className="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-400">Inactive</span>}
-                      </p>
-                      <p className="text-xs text-gray-500 truncate">@{char.username}</p>
-                    </div>
-                  </div>
-                ))}
-                {viewingUniverseCharacters.length === 0 && (
-                  <p className="text-gray-500 col-span-full">No characters found in this universe.</p>
-                )}
-              </div>
+                  ))}
+                  {viewingUniverseCharacters.length === 0 && (
+                    <p className="text-gray-500 col-span-full">No characters found in this universe.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {viewingUniverseArcs.length === 0 ? (
+                    <p className="text-center text-gray-500 py-4">No universe arcs yet.</p>
+                  ) : (
+                    viewingUniverseArcs.map(arc => (
+                      <div key={arc.id} className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                        <div className="flex justify-between items-start mb-4">
+                          <h3 className="font-bold text-xl text-white">{arc.title}</h3>
+                          <span className={`text-xs font-bold px-3 py-1 rounded-full ${arc.status === 'active' ? 'bg-green-500/20 text-green-500 border border-green-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                            {arc.status.toUpperCase()}
+                          </span>
+                        </div>
+                        
+                        <div className="mb-4">
+                          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Overall Premise</p>
+                          <p className="text-gray-300 text-sm whitespace-pre-wrap">{arc.description}</p>
+                        </div>
+
+                        <div className="mb-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                          <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">Current Status / Latest Developments</p>
+                          <p className="text-gray-200 text-sm whitespace-pre-wrap">{arc.current_status_text}</p>
+                        </div>
+
+                        {arc.status === 'completed' && arc.completion_summary && (
+                          <div className="mb-4 p-4 bg-orange-500/10 rounded-lg border border-orange-500/20">
+                            <p className="text-xs font-bold text-orange-500 uppercase tracking-wider mb-1">Conclusion</p>
+                            <p className="text-orange-200 text-sm whitespace-pre-wrap">{arc.completion_summary}</p>
+                          </div>
+                        )}
+                        
+                        <div className="flex gap-6 text-xs text-gray-500 border-t border-gray-800 pt-4 mt-4">
+                          <span>Started: {new Date(arc.start_date).toLocaleDateString()}</span>
+                          <span>Target End: {new Date(arc.target_end_date).toLocaleDateString()}</span>
+                          <span>Last Updated: {new Date(arc.last_update_date).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -2294,6 +2375,15 @@ export default function App() {
                       </div>
                     </div>
                   ))
+                )}
+                
+                {hasMoreRelationshipChecks && relationshipChecks.length > 0 && (
+                  <button 
+                    onClick={() => fetchRelationshipChecks(false)}
+                    className="w-full py-4 text-center text-gray-400 hover:text-white bg-gray-900 hover:bg-gray-800 rounded-xl transition font-bold mt-4"
+                  >
+                    Load More Checks
+                  </button>
                 )}
               </div>
             </div>
@@ -3417,36 +3507,82 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="border-t border-gray-800 pt-6">
-                  <h3 className="font-bold mb-4">Posts</h3>
-                  <div className="space-y-4">
-                    {viewingProfilePosts.slice(0, visibleProfilePosts).map(post => (
-                      <PostItem 
-                        apiFetch={apiFetch}
-                        loggedInUser={loggedInUser}
-                        key={post.id} 
-                        post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
-                        onLike={() => handleLike(post.id)} 
-                        onViewProfile={handleViewProfile}
-                        onShowLikers={handleShowLikers}
-                        formatTimestamp={formatTimestamp}
-                        onRefresh={() => handleViewProfile(viewingProfile.id)}
-                        onViewApiLogs={handleViewApiLogs}
-                        users={users}
-                      />
-                    ))}
-                    {viewingProfilePosts.length > visibleProfilePosts && (
-                      <div className="flex justify-center py-4">
-                        <button 
-                          onClick={() => setVisibleProfilePosts(prev => prev + 30)}
-                          className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
-                        >
-                          Load More
-                        </button>
-                      </div>
-                    )}
-                    {viewingProfilePosts.length === 0 && <p className="text-center text-gray-500 py-4">No posts yet.</p>}
-                  </div>
+                <div className="border-b border-gray-800 mb-4 flex gap-6">
+                  <button 
+                    onClick={() => setProfileActiveTab('posts')}
+                    className={`pb-2 font-bold transition-colors ${profileActiveTab === 'posts' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    Posts
+                  </button>
+                  {viewingProfile.is_ai === 1 && (
+                    <button 
+                      onClick={() => setProfileActiveTab('arcs')}
+                      className={`pb-2 font-bold transition-colors ${profileActiveTab === 'arcs' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                    >
+                      Character Arcs
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-6">
+                  {profileActiveTab === 'posts' ? (
+                    <div className="space-y-4">
+                      {viewingProfilePosts.slice(0, visibleProfilePosts).map(post => (
+                        <PostItem 
+                          apiFetch={apiFetch}
+                          loggedInUser={loggedInUser}
+                          key={post.id} 
+                          post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
+                          onLike={() => handleLike(post.id)} 
+                          onViewProfile={handleViewProfile}
+                          onShowLikers={handleShowLikers}
+                          formatTimestamp={formatTimestamp}
+                          onRefresh={() => handleViewProfile(viewingProfile.id)}
+                          onViewApiLogs={handleViewApiLogs}
+                          users={users}
+                        />
+                      ))}
+                      {viewingProfilePosts.length > visibleProfilePosts && (
+                        <div className="flex justify-center py-4">
+                          <button 
+                            onClick={() => setVisibleProfilePosts(prev => prev + 30)}
+                            className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
+                          >
+                            Load More
+                          </button>
+                        </div>
+                      )}
+                      {viewingProfilePosts.length === 0 && <p className="text-center text-gray-500 py-4">No posts yet.</p>}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {viewingProfileArcs.length === 0 ? (
+                        <p className="text-center text-gray-500 py-4">No arcs yet.</p>
+                      ) : (
+                        viewingProfileArcs.map(arc => (
+                          <div key={arc.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                            <div className="flex justify-between items-start mb-2">
+                              <h3 className="font-bold text-lg text-white">{arc.title}</h3>
+                              <span className={`text-xs font-bold px-2 py-1 rounded-full ${arc.status === 'active' ? 'bg-green-500/20 text-green-500 border border-green-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                                {arc.status.toUpperCase()}
+                              </span>
+                            </div>
+                            <p className="text-gray-400 text-sm mb-4 whitespace-pre-wrap">{arc.description}</p>
+                            {arc.status === 'completed' && arc.completion_summary && (
+                              <div className="mt-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+                                <p className="text-xs font-bold text-orange-500 mb-1">Conclusion</p>
+                                <p className="text-sm text-gray-300">{arc.completion_summary}</p>
+                              </div>
+                            )}
+                            <div className="mt-4 flex gap-4 text-xs text-gray-500">
+                              <span>Started: {new Date(arc.start_date).toLocaleDateString()}</span>
+                              <span>Target End: {new Date(arc.target_end_date).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

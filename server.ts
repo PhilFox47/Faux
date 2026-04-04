@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc } from "./src/ai";
 
 const pendingComments = new Set<string>();
 const pendingDMs = new Set<string>();
@@ -296,7 +296,7 @@ async function triggerPostComments(postId: number, postType: string) {
   const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
   const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
-  const baseCount = (postType === 'question' || postType === 'discussion') ? 5 : 3;
+  const baseCount = (postType === 'question' || postType === 'discussion' || postType === 'seeking_advice') ? 5 : 3;
   const count = Math.max(0, Math.round(baseCount * onlineRatio));
   if (count === 0) return;
 
@@ -479,6 +479,174 @@ async function handleOPReplies() {
   }
 }
 
+async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null) {
+  const recentContext = db.prepare(`
+    SELECT p.content, p.created_at, u.display_name 
+    FROM posts p JOIN users u ON p.user_id = u.id 
+    ORDER BY p.created_at DESC LIMIT 5
+  `).all() as any[];
+  const contextStr = recentContext.map(p => `[${p.created_at}] ${p.display_name}: ${p.content}`).join(" | ");
+  
+  const rels = db.prepare(`
+    SELECT u.display_name, r.description 
+    FROM relationships r 
+    JOIN users u ON r.user_id_2 = u.id 
+    WHERE r.user_id_1 = ?
+  `).all(aiUser.id) as any[];
+  const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
+
+  const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
+  const archetype = pickArchetype(isFirstPost, forceType === 'image', aiUser.account_type);
+  const relatedUsers = db.prepare(`
+    SELECT u.username, u.universe_id, un.name as universe_name
+    FROM users u
+    LEFT JOIN universes un ON u.universe_id = un.id
+    JOIN relationships r ON (r.user_id_1 = u.id AND r.user_id_2 = ?) OR (r.user_id_2 = u.id AND r.user_id_1 = ?)
+    WHERE u.id != ?
+  `).all(aiUser.id, aiUser.id, aiUser.id) as any[];
+  const availableUsernames = relatedUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
+  
+  // UNIVERSE ARC LOGIC
+  let activeUniverseArc = null;
+  let pastUniverseArcs: any[] = [];
+  const universe = aiUser.universe_id ? db.prepare("SELECT * FROM universes WHERE id = ?").get(aiUser.universe_id) as any : null;
+  const arcArchetypes = ['life_update', 'follow_up', 'seeking_advice', 'company_announcement', 'public_apology'];
+
+  if (universe) {
+    pastUniverseArcs = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(universe.id) as any[];
+    activeUniverseArc = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'active'").get(universe.id) as any;
+
+    if (!activeUniverseArc && arcArchetypes.includes(archetype.id)) {
+      const newUniverseArcData = await generateNewUniverseArc(universe);
+      if (newUniverseArcData && newUniverseArcData.title && newUniverseArcData.description && newUniverseArcData.duration_days) {
+        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'))").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
+        activeUniverseArc = db.prepare("SELECT * FROM universe_arcs WHERE id = ?").get(info.lastInsertRowid);
+      }
+    } else if (activeUniverseArc) {
+      const now = new Date();
+      const targetDate = new Date(activeUniverseArc.target_end_date);
+      const lastUpdateDate = new Date(activeUniverseArc.last_update_date);
+
+      if (now >= targetDate) {
+        const recentUniversePosts = db.prepare(`
+          SELECT p.content, u.display_name 
+          FROM posts p 
+          JOIN users u ON p.user_id = u.id 
+          WHERE u.universe_id = ? AND p.created_at >= ? 
+          ORDER BY p.created_at DESC LIMIT 20
+        `).all(universe.id, activeUniverseArc.start_date).map((p: any) => `${p.display_name}: ${p.content}`).join(" | ");
+        
+        const conclusion = await concludeUniverseArc(universe, activeUniverseArc, recentUniversePosts);
+        db.prepare("UPDATE universe_arcs SET status = 'completed', completion_summary = ? WHERE id = ?").run(conclusion, activeUniverseArc.id);
+        activeUniverseArc = null;
+      } else if (now.getTime() - lastUpdateDate.getTime() >= 24 * 60 * 60 * 1000) {
+        const recentUniversePosts = db.prepare(`
+          SELECT p.content, u.display_name 
+          FROM posts p 
+          JOIN users u ON p.user_id = u.id 
+          WHERE u.universe_id = ? AND p.created_at >= ? 
+          ORDER BY p.created_at DESC LIMIT 20
+        `).all(universe.id, activeUniverseArc.last_update_date).map((p: any) => `${p.display_name}: ${p.content}`).join(" | ");
+        
+        const newStatusText = await updateUniverseArc(universe, activeUniverseArc, recentUniversePosts);
+        db.prepare("UPDATE universe_arcs SET current_status_text = ?, last_update_date = datetime('now') WHERE id = ?").run(newStatusText, activeUniverseArc.id);
+        activeUniverseArc.current_status_text = newStatusText;
+      }
+    }
+  }
+
+  // ARC LOGIC
+  let activeArc = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'active'").get(aiUser.id) as any;
+  const pastArcs = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(aiUser.id) as any[];
+  let arcInstruction = '';
+  let arcComments = '';
+
+  if (arcArchetypes.includes(archetype.id)) {
+    if (!activeArc) {
+      const newArcData = await generateNewArc(aiUser);
+      if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
+        const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
+        activeArc = db.prepare("SELECT * FROM character_arcs WHERE id = ?").get(info.lastInsertRowid);
+        arcInstruction = 'START_ARC';
+      }
+    } else {
+      const now = new Date();
+      const targetDate = new Date(activeArc.target_end_date);
+      if (now >= targetDate) {
+        // Fetch recent posts for context
+        const recentUserPosts = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5").all(aiUser.id).map((p: any) => `[${p.created_at}] ${p.content}`).join(" | ");
+        // Fetch recent comments on those posts
+        const recentUserComments = db.prepare(`
+          SELECT c.content, u.display_name 
+          FROM comments c 
+          JOIN users u ON c.user_id = u.id 
+          WHERE c.post_id IN (SELECT id FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5) 
+          AND c.user_id != ? 
+          ORDER BY c.created_at DESC LIMIT 10
+        `).all(aiUser.id, aiUser.id).map((c: any) => `${c.display_name}: ${c.content}`).join(" | ");
+
+        const conclusion = await concludeArc(aiUser, activeArc, recentUserPosts, recentUserComments);
+        db.prepare("UPDATE character_arcs SET status = 'completed', completion_summary = ? WHERE id = ?").run(conclusion, activeArc.id);
+        activeArc.completion_summary = conclusion;
+        arcInstruction = 'CONCLUDE_ARC';
+      } else {
+        arcInstruction = 'PROGRESS_ARC';
+        const recentUserComments = db.prepare(`
+          SELECT c.content, u.display_name 
+          FROM comments c 
+          JOIN users u ON c.user_id = u.id 
+          WHERE c.post_id IN (SELECT id FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 2) 
+          AND c.user_id != ? 
+          ORDER BY c.created_at DESC LIMIT 5
+        `).all(aiUser.id, aiUser.id).map((c: any) => `${c.display_name}: ${c.content}`).join(" | ");
+        arcComments = recentUserComments;
+      }
+    }
+  }
+
+  let postContent = "";
+  let positivePrompt = "";
+  let negativePrompt = "";
+  let characterVisible = false;
+  
+  if (archetype.id === 'image_post') {
+    const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
+    if (imageData) {
+      postContent = imageData.textPost;
+      positivePrompt = imageData.positivePrompt;
+      negativePrompt = imageData.negativePrompt;
+      characterVisible = imageData.characterVisible;
+    }
+  } else {
+    postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost, activeArc, pastArcs, arcInstruction, arcComments, activeUniverseArc, pastUniverseArcs)) || "";
+  }
+
+  if (postContent) {
+    const isVisible = archetype.id === 'image_post' ? 0 : 1;
+    const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible);
+    const postId = info.lastInsertRowid as number;
+
+    if (archetype.id === 'image_post') {
+      generateImage(aiUser, positivePrompt, negativePrompt, characterVisible).then(imageUrl => {
+        if (imageUrl) {
+          db.prepare("UPDATE posts SET image_url = ?, is_visible = 1, image_prompt = ? WHERE id = ?").run(imageUrl, positivePrompt, postId);
+        } else {
+          db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+        }
+      }).catch(err => {
+        console.error("Failed to generate image:", err);
+        db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+      });
+    }
+
+    if (isFirstPost) {
+      db.prepare("UPDATE users SET is_active = 1 WHERE id = ?").run(aiUser.id);
+    }
+    return true;
+  }
+  return false;
+}
+
 async function startServer() {
   try {
     const app = express();
@@ -512,14 +680,16 @@ async function startServer() {
   });
 
   app.get("/api/relationship-checks", (req, res) => {
+    const limit = parseInt(req.query.limit as string) || 20;
+    const offset = parseInt(req.query.offset as string) || 0;
     const checks = db.prepare(`
       SELECT rc.*, u1.display_name as user1_name, u1.avatar_url as user1_avatar, u2.display_name as user2_name, u2.avatar_url as user2_avatar
       FROM relationship_checks rc
       JOIN users u1 ON rc.user_id_1 = u1.id
       JOIN users u2 ON rc.user_id_2 = u2.id
       ORDER BY rc.created_at DESC
-      LIMIT 100
-    `).all();
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
     res.json(checks);
   });
 
@@ -752,6 +922,15 @@ async function startServer() {
     res.json(users);
   });
 
+  app.get("/api/users/:id/arcs", (req, res) => {
+    try {
+      const arcs = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? ORDER BY created_at DESC").all(req.params.id);
+      res.json(arcs);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/users/:id/relationships", (req, res) => {
     const loggedInUser = getRealUser(req);
     
@@ -907,6 +1086,45 @@ async function startServer() {
     res.json(characters);
   });
 
+  app.get("/api/universes/:id/arcs", (req, res) => {
+    const arcs = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? ORDER BY created_at DESC").all(req.params.id);
+    res.json(arcs);
+  });
+
+  app.put("/api/universes/arcs/:arcId", (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    const { title, description, current_status_text, status, completion_summary } = req.body;
+    try {
+      db.prepare(`
+        UPDATE universe_arcs 
+        SET title = ?, description = ?, current_status_text = ?, status = ?, completion_summary = ?
+        WHERE id = ?
+      `).run(title, description, current_status_text, status, completion_summary || null, req.params.arcId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.put("/api/users/arcs/:arcId", (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    const { title, description, status, completion_summary } = req.body;
+    try {
+      db.prepare(`
+        UPDATE character_arcs 
+        SET title = ?, description = ?, status = ?, completion_summary = ?
+        WHERE id = ?
+      `).run(title, description, status, completion_summary || null, req.params.arcId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   app.put("/api/users/:id", (req, res) => {
     const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
     try {
@@ -1014,87 +1232,9 @@ async function startServer() {
       const aiUser = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1").get(req.params.id) as any;
       if (!aiUser) return res.status(404).json({ error: "AI User not found" });
 
-      const recentContext = db.prepare(`
-        SELECT p.content, p.created_at, u.display_name 
-        FROM posts p JOIN users u ON p.user_id = u.id 
-        ORDER BY p.created_at DESC LIMIT 5
-      `).all() as any[];
-      const contextStr = recentContext.map(p => `[${p.created_at}] ${p.display_name}: ${p.content}`).join(" | ");
-      
-      const rels = db.prepare(`
-        SELECT u.display_name, r.description 
-        FROM relationships r 
-        JOIN users u ON r.user_id_2 = u.id 
-        WHERE r.user_id_1 = ?
-      `).all(aiUser.id) as any[];
-      const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
-
-      const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
-      const archetype = pickArchetype(isFirstPost, type === 'image', aiUser.account_type);
-      const relatedUsers = db.prepare(`
-        SELECT u.username, u.universe_id, un.name as universe_name
-        FROM users u
-        LEFT JOIN universes un ON u.universe_id = un.id
-        JOIN relationships r ON (r.user_id_1 = u.id AND r.user_id_2 = ?) OR (r.user_id_2 = u.id AND r.user_id_1 = ?)
-        WHERE u.id != ?
-      `).all(aiUser.id, aiUser.id, aiUser.id) as any[];
-      const availableUsernames = relatedUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
-      
-      let postContent = "";
-      let positivePrompt = "";
-      let negativePrompt = "";
-      let characterVisible = false;
-      
-      if (archetype.id === 'image_post') {
-        const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
-        if (imageData) {
-          postContent = imageData.textPost;
-          positivePrompt = imageData.positivePrompt;
-          negativePrompt = imageData.negativePrompt;
-          characterVisible = imageData.characterVisible;
-        }
-      } else {
-        postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost)) || "";
-      }
-
-      if (postContent) {
-        const isVisible = archetype.id === 'image_post' ? 0 : 1;
-        const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible);
-        const postId = info.lastInsertRowid;
-        
-        if (!aiUser.is_active) {
-          db.prepare("UPDATE users SET is_active = 1 WHERE id = ?").run(aiUser.id);
-        }
-
-        // Respond immediately so UI doesn't hang
-        res.json({ success: true, postId });
-
-        // Generate image in background
-        if (archetype.id === 'image_post') {
-          try {
-            let referenceImageUrls: string[] | undefined = undefined;
-            if (characterVisible) {
-              const refImages = JSON.parse(aiUser.reference_images || '[]');
-              if (refImages.length > 0) {
-                referenceImageUrls = refImages;
-              } else if (aiUser.avatar_url) {
-                referenceImageUrls = [aiUser.avatar_url];
-              }
-            }
-            const imageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
-            if (imageUrl) {
-              db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
-              triggerPostComments(postId, archetype.id);
-            } else {
-              db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-            }
-          } catch (err) {
-            console.error("Failed to generate image for post", postId, err);
-            db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-          }
-        } else {
-          triggerPostComments(postId, archetype.id);
-        }
+      const success = await doAiPost(aiUser, type);
+      if (success) {
+        res.json({ success: true });
       } else {
         res.status(500).json({ error: "Failed to generate post" });
       }

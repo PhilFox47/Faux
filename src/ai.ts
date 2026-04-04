@@ -482,7 +482,165 @@ Output ONLY the JSON object, nothing else.`;
   }
 }
 
-export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false) {
+export async function generateNewArc(character: any) {
+  const prompt = `${buildCharacterPrompt(character)}
+You are planning the next narrative arc for this social media character. Create a 2-week to 3-month storyline. 
+Do NOT define a strict ending; instead, provide 2-3 possible directions it could go based on interactions. 
+Return ONLY a valid JSON object with the following structure:
+{
+  "title": "A short, catchy title for the arc",
+  "description": "A detailed description of the arc's premise and possible directions",
+  "duration_days": 30
+}
+Ensure duration_days is an integer between 14 and 90.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: getModelName(),
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+    return JSON.parse(response.text || '{}');
+  } catch (e) {
+    console.error("Error generating new arc:", e);
+    return null;
+  }
+}
+
+export async function concludeArc(character: any, arc: any, recentPosts: string, recentComments: string) {
+  const prompt = `${buildCharacterPrompt(character)}
+This character's narrative arc has reached its end date. 
+Arc Title: ${arc.title}
+Arc Original Plan: ${arc.description}
+
+Recent Posts by Character:
+${recentPosts}
+
+Recent Comments from Others:
+${recentComments}
+
+Based on their original plan and their recent posts/comments, write a summary of how the arc ACTUALLY concluded. 
+Return ONLY a valid JSON object with the following structure:
+{
+  "completion_summary": "A detailed summary of how the arc ended and what the character learned or experienced."
+}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: getModelName(),
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+    return JSON.parse(response.text || '{}').completion_summary;
+  } catch (e) {
+    console.error("Error concluding arc:", e);
+    return "The arc concluded naturally over time.";
+  }
+}
+
+export async function generateNewUniverseArc(universe: any) {
+  const prompt = `You are the narrative director for the universe "${universe.name}".
+Universe Description:
+${universe.description}
+
+It is time to start a new "Universe Arc". This is a long-term, overarching storyline or event that will affect ALL characters within this universe. It should be broad enough to allow individual characters to have their own personal journeys (Character Arcs) within it, but impactful enough to change the status quo.
+
+Create a new Universe Arc that will last between 1 to 6 months in real time.
+
+Return ONLY a JSON object with the following structure:
+{
+  "title": "A catchy title for the universe arc",
+  "description": "A detailed description of the overarching event, conflict, or change happening in the universe.",
+  "current_status_text": "The initial state of this arc as it begins today.",
+  "duration_days": 60 // An integer between 30 and 180 representing how long this arc should last
+}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: getModelName(),
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+    return JSON.parse(response.text || '{}');
+  } catch (e) {
+    console.error("Error generating new universe arc:", e);
+    return null;
+  }
+}
+
+export async function updateUniverseArc(universe: any, arc: any, recentPosts: string) {
+  const prompt = `You are the narrative director for the universe "${universe.name}".
+There is an ongoing Universe Arc:
+Title: ${arc.title}
+Overall Premise: ${arc.description}
+Previous Status: ${arc.current_status_text}
+
+It has been 24 hours since the last update. The universe arc should progress naturally. It can progress on its own, or it can be influenced by what the characters in this universe have been doing recently.
+
+Recent posts from characters in this universe:
+${recentPosts}
+
+Write an updated "current_status_text" (2-4 sentences) that describes the latest developments in this overarching storyline.
+
+Return ONLY a JSON object with the following structure:
+{
+  "current_status_text": "The updated status of the universe arc."
+}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: getModelName(),
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+    return JSON.parse(response.text || '{}').current_status_text;
+  } catch (e) {
+    console.error("Error updating universe arc:", e);
+    return arc.current_status_text;
+  }
+}
+
+export async function concludeUniverseArc(universe: any, arc: any, recentPosts: string) {
+  const prompt = `You are the narrative director for the universe "${universe.name}".
+The following Universe Arc has reached its conclusion:
+Title: ${arc.title}
+Overall Premise: ${arc.description}
+Final Status: ${arc.current_status_text}
+
+Based on the premise and the recent activity in the universe, write a satisfying conclusion summary (3-5 sentences) of how this universe-wide event resolved and what the new status quo is.
+
+Recent posts from characters in this universe:
+${recentPosts}
+
+Return ONLY a JSON object with the following structure:
+{
+  "completion_summary": "The summary of how the universe arc concluded."
+}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: getModelName(),
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      }
+    });
+    return JSON.parse(response.text || '{}').completion_summary;
+  } catch (e) {
+    console.error("Error concluding universe arc:", e);
+    return "The universe event concluded naturally over time.";
+  }
+}
+
+export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false, activeArc: any = null, pastArcs: any[] = [], arcInstruction: string = '', arcComments: string = '', activeUniverseArc: any = null, pastUniverseArcs: any[] = []) {
   let prompt = `${buildCharacterPrompt(character)}
 ${isIntroduction ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.` : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
 ${character.account_type === 'company' ? 'Your post should reflect your brand identity, promote your products/services, or engage with your target audience in a corporate or brand-appropriate way.' : 'Your post should be independent and reflect your current thoughts, feelings, or activities.'}
@@ -491,6 +649,29 @@ Instructions for this archetype: ${postTypeObj.description}
 Avoid referencing other people's posts directly unless it's a very general observation or the archetype requires it.
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
+
+${pastUniverseArcs.length > 0 ? `PAST UNIVERSE ARCS (Historical events in your world):\n${pastUniverseArcs.map(a => `- ${a.title}: ${a.completion_summary}`).join('\n')}\n` : ''}
+
+${activeUniverseArc ? `CURRENT UNIVERSE ARC (The overarching setting/event happening in your world right now):
+Title: ${activeUniverseArc.title}
+Overall Premise: ${activeUniverseArc.description}
+Current Status/Latest Developments: ${activeUniverseArc.current_status_text}
+NOTE: You are aware of this universe arc. It is the setting and outer influence of your world right now. It may affect your personal journey or you might just comment on it.
+` : ''}
+
+${pastArcs.length > 0 ? `PAST ARCS (For background context only):\n${pastArcs.map(a => `- ${a.title}: ${a.completion_summary}`).join('\n')}\n` : ''}
+
+${activeArc ? `CURRENT ACTIVE ARC:
+Title: ${activeArc.title}
+Description: ${activeArc.description}
+` : ''}
+
+${arcInstruction === 'START_ARC' ? `ARC INSTRUCTION: You are starting a new narrative arc. Write a post that kicks off this journey.` : ''}
+${arcInstruction === 'PROGRESS_ARC' ? `ARC INSTRUCTION: You are currently in the middle of this arc. Progress this story naturally. Do not rush it.
+${arcComments ? `Consider these recent comments from others on your past posts:\n${arcComments}` : ''}` : ''}
+${arcInstruction === 'CONCLUDE_ARC' ? `ARC INSTRUCTION: Your arc has concluded with the following summary: "${activeArc?.completion_summary}". Write a post that wraps up this storyline based on this conclusion.` : ''}
+${(!arcInstruction && activeArc) ? `ARC INSTRUCTION: Keep your current active arc in mind for your general mood and context, even if this post isn't directly about it.` : ''}
+
 ${context ? `Your recent posts (with timestamps): ${context}
 CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
 ${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : ''}
