@@ -673,7 +673,7 @@ async function startServer() {
     const errorOnly = req.query.error === 'true';
     
     let queryStr = `
-      SELECT l.*, u.display_name as user_display_name, u.profile_picture as user_profile_picture 
+      SELECT l.*, u.display_name as user_display_name, u.avatar_url as user_profile_picture 
       FROM api_logs l 
       LEFT JOIN users u ON l.user_id = u.id 
       WHERE 1=1
