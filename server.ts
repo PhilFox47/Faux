@@ -566,6 +566,9 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   let arcInstruction = '';
   let arcComments = '';
 
+  console.log(`[DEBUG] Entering ARC LOGIC for ${aiUser.display_name}. Archetype: ${archetype.id}`);
+  console.log(`[DEBUG] arcArchetypes: ${JSON.stringify(arcArchetypes)}`);
+  
   if (arcArchetypes.includes(archetype.id)) {
     console.log(`[DEBUG] Archetype ${archetype.id} matched for arc generation for ${aiUser.display_name}`);
     logApi('DEBUG_ARC_LOGIC', { archetypeId: archetype.id, userId: aiUser.id, activeArc: activeArc ? activeArc.id : null }, { message: `Archetype matched for user ${aiUser.display_name}` }, aiUser.id);
@@ -647,7 +650,16 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
     console.log(`${aiUser.display_name} created a post (${archetype.id})`);
 
     if (archetype.id === 'image_post') {
-      generateImage(positivePrompt, negativePrompt).then(imageUrl => {
+      let referenceImageUrls: string[] | undefined = undefined;
+      if (characterVisible) {
+        const refImages = JSON.parse(aiUser.reference_images || '[]');
+        if (refImages.length > 0) {
+          referenceImageUrls = refImages;
+        } else if (aiUser.avatar_url) {
+          referenceImageUrls = [aiUser.avatar_url];
+        }
+      }
+      generateImage(positivePrompt, negativePrompt, referenceImageUrls).then(imageUrl => {
         if (imageUrl) {
           db.prepare("UPDATE posts SET image_url = ?, is_visible = 1, image_prompt = ? WHERE id = ?").run(imageUrl, positivePrompt, postId);
           triggerPostComments(postId, archetype.id);
@@ -2055,126 +2067,6 @@ async function startServer() {
         }
       }
 
-      const doAiPost = async (aiUser: any, isImage: boolean) => {
-        const recentContext = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? AND is_visible = 1 ORDER BY created_at DESC LIMIT 10").all(aiUser.id) as any[];
-        const contextStr = recentContext.map(p => `[${p.created_at}] ${p.content}`).join(" | ");
-        
-        const rels = db.prepare(`
-          SELECT u.display_name, r.description 
-          FROM relationships r 
-          JOIN users u ON r.user_id_2 = u.id 
-          WHERE r.user_id_1 = ?
-        `).all(aiUser.id) as any[];
-        const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
-
-        const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
-        const archetype = pickArchetype(isFirstPost, isImage, aiUser.account_type);
-        const relatedUsers = db.prepare(`
-          SELECT u.username, u.universe_id, un.name as universe_name
-          FROM users u
-          LEFT JOIN universes un ON u.universe_id = un.id
-          JOIN relationships r ON (r.user_id_1 = u.id AND r.user_id_2 = ?) OR (r.user_id_2 = u.id AND r.user_id_1 = ?)
-          WHERE u.id != ?
-        `).all(aiUser.id, aiUser.id, aiUser.id) as any[];
-        const availableUsernames = relatedUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
-        
-        let postContent = "";
-        let positivePrompt = "";
-        let negativePrompt = "";
-        let characterVisible = false;
-        
-        if (archetype.id === 'image_post') {
-          const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
-          if (imageData) {
-            postContent = imageData.textPost;
-            positivePrompt = imageData.positivePrompt;
-            negativePrompt = imageData.negativePrompt;
-            characterVisible = imageData.characterVisible;
-          }
-        } else {
-          postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost)) || "";
-        }
-
-        if (postContent) {
-          const isVisible = archetype.id === 'image_post' ? 0 : 1;
-          const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible);
-          const postId = info.lastInsertRowid;
-          console.log(`${aiUser.display_name} created a post (${archetype.id})`);
-
-          if (isFirstPost) {
-            db.prepare("UPDATE users SET is_active = 1 WHERE id = ?").run(aiUser.id);
-          }
-
-          if (archetype.id === 'image_post') {
-            try {
-              let referenceImageUrls: string[] | undefined = undefined;
-              if (characterVisible) {
-                const refImages = JSON.parse(aiUser.reference_images || '[]');
-                if (refImages.length > 0) {
-                  referenceImageUrls = refImages;
-                } else if (aiUser.avatar_url) {
-                  referenceImageUrls = [aiUser.avatar_url];
-                }
-              }
-              const imageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
-              if (imageUrl) {
-                db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(imageUrl, positivePrompt, postId);
-                console.log(`Image attached to post ${postId} by ${aiUser.display_name}`);
-                triggerPostComments(postId, archetype.id);
-              } else {
-                db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-              }
-            } catch (err) {
-              console.error("Failed to generate image for auto post", postId, err);
-              db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-            }
-          } else {
-            triggerPostComments(postId, archetype.id);
-          }
-
-          if (archetype.id === 'event' || archetype.id === 'meetup') {
-            // Trigger other characters to react
-            const baseCount = archetype.id === 'event' ? Math.floor(Math.random() * 5) + 1 : Math.floor(Math.random() * 4) + 1;
-            const count = Math.max(0, Math.round(baseCount * onlineRatio));
-            const crossUniverseProb = (settings.cross_universe_prob ?? 50.0) / 100;
-            const otherAis = activeAiUsers.filter(u => {
-              if (u.id === aiUser.id) return false;
-              if (u.universe_id === aiUser.universe_id) return true;
-              return Math.random() < crossUniverseProb;
-            });
-            if (otherAis.length > 0) {
-              const selectedAis = [];
-              let availableAis = [...otherAis];
-              for (let i = 0; i < count && availableAis.length > 0; i++) {
-                const picked = pickWeightedRandomUser(availableAis);
-                selectedAis.push(picked);
-                availableAis = availableAis.filter(u => u.id !== picked.id);
-              }
-              
-              // These characters will comment on the post shortly
-              for (const otherAi of selectedAis) {
-                pendingComments.add(`${otherAi.id}:post:${postId}`);
-                setTimeout(async () => {
-                  try {
-                    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(otherAi.id, aiUser.id) as any;
-                    const relContext = rel ? rel.description : '';
-                    const post = db.prepare("SELECT created_at FROM posts WHERE id = ?").get(postId) as any;
-                    const commentContent = await generateComment(otherAi, postContent, aiUser.display_name, '', false, relContext, aiUser.id, undefined, post?.created_at);
-                    if (commentContent) {
-                      db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
-                        .run(postId, otherAi.id, commentContent);
-                      checkDynamicRelationship(otherAi.id, aiUser.id).catch(console.error);
-                      console.log(`${otherAi.display_name} reacted to ${archetype.id} by ${aiUser.display_name}`);
-                    }
-                  } finally {
-                    pendingComments.delete(`${otherAi.id}:post:${postId}`);
-                  }
-                }, 5000 + Math.random() * 30000);
-              }
-            }
-          }
-        }
-      };
 
       const realUsers = db.prepare("SELECT * FROM users WHERE is_ai = 0").all() as any[];
       if (realUsers.length > 0 && activeAiUsers.length > 0) {
@@ -2430,7 +2322,7 @@ async function startServer() {
         else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
 
         if (Math.random() < probPost * multiplier) {
-          await doAiPost(randomAi, false);
+          await doAiPost(randomAi, null);
         }
       }
 
@@ -2458,7 +2350,7 @@ async function startServer() {
         else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
 
         if (introProb > 0 && Math.random() < introProb * multiplier) {
-          await doAiPost(inactiveUser, false);
+          await doAiPost(inactiveUser, null);
           introPostsThisMinute++;
         }
       }
@@ -2488,7 +2380,7 @@ async function startServer() {
           else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
 
           if (catchupProb > 0 && Math.random() < catchupProb * multiplier) {
-            await doAiPost(activeUser, false);
+            await doAiPost(activeUser, null);
             catchupPostsThisMinute++;
           }
         }
