@@ -2841,99 +2841,17 @@ export default function App() {
                         <MessageSquare size={20} />
                         API Logs
                       </h3>
-                      <button 
-                        onClick={() => fetchApiLogs()}
-                        className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1 rounded-lg transition-colors"
-                      >
-                        Refresh Logs
-                      </button>
                     </div>
                     <p className="text-sm text-gray-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
-                    
-                    <div className="mb-4 flex gap-2">
-                      <input 
-                        type="text" 
-                        value={apiLogSearch} 
-                        onChange={(e) => setApiLogSearch(e.target.value)} 
-                        onKeyDown={(e) => e.key === 'Enter' && fetchApiLogs()}
-                        placeholder="Search logs by content..." 
-                        className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
-                      <button 
-                        onClick={() => fetchApiLogs()}
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-                      >
-                        Search
-                      </button>
-                      {apiLogSearch && (
-                        <button 
-                          onClick={() => { setApiLogSearch(''); fetchApiLogs(''); }}
-                          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                      {apiLogs.map((log: any) => {
-                        let requestObj = {};
-                        try {
-                          requestObj = JSON.parse(log.request_payload);
-                        } catch (e) {}
-                        
-                        return (
-                          <div key={log.id} className="bg-gray-800 p-4 rounded-xl text-xs font-mono border border-gray-700 hover:border-blue-500 transition-colors">
-                            <div className="flex justify-between text-gray-400 mb-3 items-center">
-                              <span className="font-bold text-blue-400 text-sm">{log.endpoint}</span>
-                              <span className="text-[10px] opacity-60">{formatTimestamp(log.created_at)}</span>
-                            </div>
-                            <div className="mb-3 space-y-1">
-                              <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Request Details</div>
-                              <div className="bg-black/30 p-2 rounded border border-white/5 overflow-x-auto whitespace-pre-wrap">
-                                {Object.entries(requestObj).map(([key, val]) => (
-                                  <div key={key} className="mb-1 last:mb-0">
-                                    <span className="text-orange-400">{key}:</span> <span className="text-gray-300">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
-                              {(() => {
-                                try {
-                                  const resObj = JSON.parse(log.response_payload);
-                                  return (
-                                    <div className="space-y-2">
-                                      {resObj.reasoning && (
-                                        <div className="bg-blue-900/10 border border-blue-500/20 p-2 rounded">
-                                          <div className="text-[10px] text-blue-400 font-bold mb-1 uppercase tracking-tighter">Thinking / Reasoning</div>
-                                          <div className="text-gray-400 italic">{resObj.reasoning}</div>
-                                        </div>
-                                      )}
-                                      <div className={`p-2 rounded border ${!resObj.content ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
-                                        <div className="text-[10px] opacity-50 font-bold mb-1 uppercase tracking-tighter">Final Output</div>
-                                        {resObj.content || "Empty Response"}
-                                      </div>
-                                    </div>
-                                  );
-                                } catch (e) {
-                                  const payload = log.response_payload || "";
-                                  return (
-                                    <div className={`p-2 rounded border ${payload.includes('Error') || payload === 'Empty Response' ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
-                                      {payload}
-                                    </div>
-                                  );
-                                }
-                              })()}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {apiLogs.length === 0 && (
-                        <p className="text-center text-gray-500 py-4 italic">No logs found. Click refresh to load.</p>
-                      )}
-                    </div>
+                    <button 
+                      onClick={() => {
+                        fetchApiLogs();
+                        setShowApiLogsModal(true);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors w-full"
+                    >
+                      Open API Logs Viewer
+                    </button>
                   </section>
                 )}
               </div>

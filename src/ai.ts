@@ -522,8 +522,12 @@ Output ONLY the JSON object, nothing else.`;
 }
 
 export async function generateNewArc(character: any) {
+  const isCompany = character.account_type === 'company';
+  const entityType = isCompany ? 'company' : 'social media character';
+  
   const prompt = `${buildCharacterPrompt(character)}
-You are planning the next narrative arc for this social media character. Create a 2-week to 3-month storyline. 
+You are planning the next narrative arc for this ${entityType}. Create a 2-week to 3-month storyline. 
+${isCompany ? 'Focus on business goals, product launches, PR campaigns, or corporate drama.' : 'Focus on personal growth, relationships, life changes, or personal projects.'}
 Do NOT define a strict ending; instead, provide 2-3 possible directions it could go based on interactions. 
 Return ONLY a valid JSON object with the following structure:
 {
@@ -539,9 +543,12 @@ Ensure duration_days is an integer between 14 and 90.`;
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1000,
     });
-    return extractJSON(response.choices[0].message.content || '{}');
+    const result = extractJSON(response.choices[0].message.content || '{}');
+    logApi('generateNewArc', { characterId: character.id, accountType: character.account_type, prompt }, { response: response.choices[0].message.content, parsed: result }, character.id);
+    return result;
   } catch (e) {
     console.error("Error generating new arc:", e);
+    logApi('generateNewArc_error', { characterId: character.id, prompt }, { error: String(e) }, character.id);
     return null;
   }
 }
@@ -600,9 +607,12 @@ Return ONLY a JSON object with the following structure:
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1000,
     });
-    return extractJSON(response.choices[0].message.content || '{}');
+    const result = extractJSON(response.choices[0].message.content || '{}');
+    logApi('generateNewUniverseArc', { universeId: universe.id, prompt }, { response: response.choices[0].message.content, parsed: result }, null);
+    return result;
   } catch (e) {
     console.error("Error generating new universe arc:", e);
+    logApi('generateNewUniverseArc_error', { universeId: universe.id, prompt }, { error: String(e) }, null);
     return null;
   }
 }

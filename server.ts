@@ -479,7 +479,7 @@ async function handleOPReplies() {
   }
 }
 
-async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null) {
+async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, forcedArchetypeId?: string) {
   const recentContext = db.prepare(`
     SELECT p.content, p.created_at, u.display_name 
     FROM posts p JOIN users u ON p.user_id = u.id 
@@ -496,7 +496,11 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null) 
   const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
 
   const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
-  const archetype = pickArchetype(isFirstPost, forceType === 'image', aiUser.account_type);
+  let archetype = pickArchetype(isFirstPost, forceType === 'image', aiUser.account_type);
+  if (forcedArchetypeId) {
+    const forced = db.prepare("SELECT * FROM post_archetypes WHERE id = ?").get(forcedArchetypeId) as any;
+    if (forced) archetype = forced;
+  }
   const relatedUsers = db.prepare(`
     SELECT u.username, u.universe_id, un.name as universe_name
     FROM users u
@@ -510,7 +514,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null) 
   let activeUniverseArc = null;
   let pastUniverseArcs: any[] = [];
   const universe = aiUser.universe_id ? db.prepare("SELECT * FROM universes WHERE id = ?").get(aiUser.universe_id) as any : null;
-  const arcArchetypes = ['life_update', 'follow_up', 'seeking_advice', 'company_announcement', 'public_apology'];
+  const arcArchetypes = ['life_update', 'follow_up', 'seeking_advice', 'company_announcement', 'public_apology', 'giveaway_contest', 'brand_banter'];
 
   if (universe) {
     pastUniverseArcs = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(universe.id) as any[];
@@ -562,12 +566,17 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null) 
   let arcComments = '';
 
   if (arcArchetypes.includes(archetype.id)) {
+    logApi('DEBUG_ARC_LOGIC', { archetypeId: archetype.id, userId: aiUser.id, activeArc: activeArc ? activeArc.id : null }, { message: `Archetype matched for user ${aiUser.display_name}` }, aiUser.id);
     if (!activeArc) {
       const newArcData = await generateNewArc(aiUser);
+      logApi('DEBUG_ARC_LOGIC_NEW_DATA', { characterId: aiUser.id }, { newArcData }, aiUser.id);
       if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
         const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
         activeArc = db.prepare("SELECT * FROM character_arcs WHERE id = ?").get(info.lastInsertRowid);
         arcInstruction = 'START_ARC';
+        logApi('DEBUG_ARC_LOGIC_CREATED', { characterId: aiUser.id, arcId: activeArc.id }, { arcTitle: activeArc.title }, aiUser.id);
+      } else {
+        logApi('DEBUG_ARC_LOGIC_INVALID_DATA', { characterId: aiUser.id }, { newArcData }, aiUser.id);
       }
     } else {
       const now = new Date();
@@ -1244,11 +1253,11 @@ async function startServer() {
 
   app.post("/api/users/:id/force-post", async (req, res) => {
     try {
-      const { type } = req.body; // 'text' or 'image'
+      const { type, archetypeId } = req.body; // 'text' or 'image', optional archetypeId
       const aiUser = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1").get(req.params.id) as any;
       if (!aiUser) return res.status(404).json({ error: "AI User not found" });
 
-      const success = await doAiPost(aiUser, type);
+      const success = await doAiPost(aiUser, type, archetypeId);
       if (success) {
         res.json({ success: true });
       } else {
