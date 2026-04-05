@@ -38,6 +38,28 @@ function stripReasoning(text: string): string {
   return cleaned.trim();
 }
 
+function extractJSON(text: string): any {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+      try {
+        return JSON.parse(match[1]);
+      } catch (e2) {}
+    }
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      try {
+        return JSON.parse(text.substring(start, end + 1));
+      } catch (e3) {}
+    }
+    return {};
+  }
+}
+
 function getModel() {
   try {
     const settings = db.prepare("SELECT model_name FROM settings WHERE id = 1").get() as any;
@@ -65,6 +87,19 @@ function getImageModel() {
   }
 }
 
+export function logApi(endpoint: string, request: any, response: any, userId: number | null = null) {
+  try {
+    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload, user_id) VALUES (?, ?, ?, ?)").run(
+      endpoint,
+      typeof request === 'string' ? request : JSON.stringify(request),
+      typeof response === 'string' ? response : JSON.stringify(response),
+      userId
+    );
+  } catch (e) {
+    console.error("Failed to log API call", e);
+  }
+}
+
 export async function testConnection() {
   try {
     const model = getModel();
@@ -86,18 +121,18 @@ export async function testConnection() {
       console.log(`testConnection: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "testConnection",
-      JSON.stringify({ model, max_tokens: 10000 }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model, max_tokens: 10000 },
+      { content, reasoning, raw: rawContent }
     );
 
     return { success: true, message: content || (reasoning ? "Thinking..." : "Empty Response") };
   } catch (error: any) {
     console.error('API Test Error:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "testConnection",
-      JSON.stringify({ model: getModel(), error: "Catch Block" }),
+      { model: getModel(), error: "Catch Block" },
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return { success: false, error: error.message };
@@ -143,18 +178,18 @@ Format your response as a friendly chat message, but make sure all the informati
       console.log(`generatePersona: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generatePersona",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent }
     );
     
     return content || (reasoning ? "The AI is still thinking. Please try again in a moment." : "Failed to generate persona.");
   } catch (error: any) {
     console.error("Error generating persona:", error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generatePersona",
-      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      { model: getModel(), prompt, error: "Catch Block" },
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return "Error: " + error.message;
@@ -305,20 +340,22 @@ Reply with ONLY the ID of the chosen user.`;
       console.log(`pickBestCommenter: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "pickBestCommenter",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.2, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.2, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      post.user_id
     );
 
     const id = parseInt(content || '');
     if (!isNaN(id)) return id;
   } catch (error: any) {
     console.error('Error picking commenter:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "pickBestCommenter",
-      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error")
+      { model: getModel(), prompt, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error"),
+      post.user_id
     );
   }
   return candidateUsers[Math.floor(Math.random() * candidateUsers.length)].id;
@@ -388,10 +425,11 @@ export async function generateImagePostData(character: any, context: string = ''
       console.log(`${endpointName}: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       endpointName,
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: temp, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: temp, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      character.id
     );
     
     return content.trim();
@@ -460,9 +498,9 @@ Output ONLY the JSON object, nothing else.`;
     let positivePrompt = "";
     let characterVisible = false;
     try {
-      const parsed = JSON.parse(positivePromptRaw.replace(/```json|```/g, '').trim());
-      positivePrompt = parsed.prompt;
-      characterVisible = parsed.character_visible;
+      const parsed = extractJSON(positivePromptRaw);
+      positivePrompt = parsed.prompt || positivePromptRaw;
+      characterVisible = !!parsed.character_visible;
     } catch (e) {
       positivePrompt = positivePromptRaw;
     }
@@ -473,10 +511,11 @@ Output ONLY the JSON object, nothing else.`;
     return { idea, textPost, positivePrompt, negativePrompt, characterVisible };
   } catch (error: any) {
     console.error('Error generating image post data:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateImagePostData",
-      JSON.stringify({ model: getModel(), error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      { model: getModel(), error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      character.id
     );
     return null;
   }
@@ -495,14 +534,12 @@ Return ONLY a valid JSON object with the following structure:
 Ensure duration_days is an integer between 14 and 90.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getModelName(),
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1000,
     });
-    return JSON.parse(response.text || '{}');
+    return extractJSON(response.choices[0].message.content || '{}');
   } catch (e) {
     console.error("Error generating new arc:", e);
     return null;
@@ -528,14 +565,12 @@ Return ONLY a valid JSON object with the following structure:
 }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getModelName(),
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1000,
     });
-    return JSON.parse(response.text || '{}').completion_summary;
+    return extractJSON(response.choices[0].message.content || '{}').completion_summary || "The arc concluded naturally over time.";
   } catch (e) {
     console.error("Error concluding arc:", e);
     return "The arc concluded naturally over time.";
@@ -560,14 +595,12 @@ Return ONLY a JSON object with the following structure:
 }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getModelName(),
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1000,
     });
-    return JSON.parse(response.text || '{}');
+    return extractJSON(response.choices[0].message.content || '{}');
   } catch (e) {
     console.error("Error generating new universe arc:", e);
     return null;
@@ -594,14 +627,12 @@ Return ONLY a JSON object with the following structure:
 }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getModelName(),
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1000,
     });
-    return JSON.parse(response.text || '{}').current_status_text;
+    return extractJSON(response.choices[0].message.content || '{}').current_status_text || arc.current_status_text;
   } catch (e) {
     console.error("Error updating universe arc:", e);
     return arc.current_status_text;
@@ -626,14 +657,12 @@ Return ONLY a JSON object with the following structure:
 }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: getModelName(),
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1000,
     });
-    return JSON.parse(response.text || '{}').completion_summary;
+    return extractJSON(response.choices[0].message.content || '{}').completion_summary || "The universe arc concluded naturally.";
   } catch (e) {
     console.error("Error concluding universe arc:", e);
     return "The universe event concluded naturally over time.";
@@ -703,19 +732,21 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
       console.log(`generatePost: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generatePost",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.9, archetype: postTypeObj.id, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.9, archetype: postTypeObj.id, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      character.id
     );
     
     return content;
   } catch (error: any) {
     console.error('Error generating post:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generatePost",
-      JSON.stringify({ model: getModel(), prompt, archetype: postTypeObj.id, error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      { model: getModel(), prompt, archetype: postTypeObj.id, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      character.id
     );
     return null;
   }
@@ -764,19 +795,21 @@ Keep it short, natural, and in character. Focus on the topic being discussed. Do
       console.log(`generateComment: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateComment",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, isReply, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, isReply, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      character.id
     );
     
     return content;
   } catch (error: any) {
     console.error('Error generating comment:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateComment",
-      JSON.stringify({ model: getModel(), prompt, isReply, error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      { model: getModel(), prompt, isReply, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      character.id
     );
     return null;
   }
@@ -872,19 +905,21 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not w
       console.log(`generateDM: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateDM",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      character.id
     );
     
     return content;
   } catch (error: any) {
     console.error('Error generating DM:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateDM",
-      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      { model: getModel(), prompt, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      character.id
     );
     return null;
   }
@@ -953,19 +988,21 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
       console.log(`replyToDM: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "replyToDM",
-      JSON.stringify({ model: getModel(), messages, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), messages, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      character.id
     );
     
     return content;
   } catch (error: any) {
     console.error('Error replying to DM:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "replyToDM",
-      JSON.stringify({ model: getModel(), messages, error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      { model: getModel(), messages, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      character.id
     );
     return null;
   }
@@ -1030,19 +1067,21 @@ You can address specific people by name if you want.`;
       console.log(`generateGroupChatReply: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateGroupChatReply",
-      JSON.stringify({ model: getModel(), messages, max_tokens: 10000 }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), messages, max_tokens: 10000 },
+      { content, reasoning, raw: rawContent },
+      character.id
     );
     
     return content;
   } catch (error: any) {
     console.error('Error replying to Group Chat:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateGroupChatReply",
-      JSON.stringify({ model: getModel(), messages }),
-      "Error: " + error.message
+      { model: getModel(), messages },
+      "Error: " + error.message,
+      character.id
     );
     return null;
   }
@@ -1105,18 +1144,19 @@ Output ONLY the JSON object, nothing else.`;
       console.log(`generateImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateImagePrompt",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      character.id
     );
 
     let finalPrompt = content || "";
     let characterVisible = false;
     try {
-      const parsed = JSON.parse(finalPrompt.replace(/```json|```/g, '').trim());
-      finalPrompt = parsed.prompt;
-      characterVisible = parsed.character_visible;
+      const parsed = extractJSON(finalPrompt);
+      finalPrompt = parsed.prompt || finalPrompt;
+      characterVisible = !!parsed.character_visible;
     } catch (e) {
       // fallback
     }
@@ -1124,10 +1164,11 @@ Output ONLY the JSON object, nothing else.`;
     return { prompt: finalPrompt, characterVisible };
   } catch (error: any) {
     console.error('Error generating image prompt:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateImagePrompt",
-      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      { model: getModel(), prompt, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      character.id
     );
     return { prompt: "", characterVisible: false };
   }
@@ -1164,18 +1205,18 @@ ${positivePrompt}`;
       console.log(`generateNegativeImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateNegativeImagePrompt",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent }
     );
 
     return content || "";
   } catch (error: any) {
     console.error('Error generating negative image prompt:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateNegativeImagePrompt",
-      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
+      { model: getModel(), prompt, error: "Catch Block" },
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return "";
@@ -1225,18 +1266,18 @@ export async function analyzeImage(imageUrl: string): Promise<string> {
     
     const content = response.choices[0].message.content || "";
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "analyzeImage",
-      JSON.stringify({ model: getVisionModel(), prompt, imageUrl }),
-      JSON.stringify({ content })
+      { model: getVisionModel(), prompt, imageUrl },
+      { content }
     );
     
     return content;
   } catch (error: any) {
     console.error('Error analyzing image:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "analyzeImage",
-      JSON.stringify({ model: getVisionModel(), prompt, imageUrl, error: "Catch Block" }),
+      { model: getVisionModel(), prompt, imageUrl, error: "Catch Block" },
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return "An image was posted, but it could not be analyzed.";
@@ -1304,18 +1345,18 @@ export async function generateImage(prompt: string, negative_prompt?: string, re
       url = `/uploads/${filename}`;
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateImage",
-      JSON.stringify(requestBody),
+      requestBody,
       url || "Empty Response (No Image Data)"
     );
     
     return url;
   } catch (error: any) {
     console.error('Error generating image:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "generateImage",
-      JSON.stringify({ model: getImageModel(), prompt, negative_prompt, error: "Catch Block" }),
+      { model: getImageModel(), prompt, negative_prompt, error: "Catch Block" },
       "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
     );
     return null;
@@ -1353,11 +1394,9 @@ ${contextStr}
 First, evaluate if they have formed a meaningful relationship (or if their existing relationship has changed significantly) (Yes or No).
 If Yes, provide a 1-2 sentence description of their relationship from a neutral third-party perspective.
 
-Respond strictly in JSON format:
-{
-  "result": boolean,
-  "description": "string (only if result is true, otherwise empty string)"
-}`;
+Format your response exactly like this:
+RESULT: Yes or No
+DESCRIPTION: Your description here (if Yes)`;
 
   try {
     let content = "";
@@ -1369,7 +1408,6 @@ Respond strictly in JSON format:
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
         messages: [{ role: 'user', content: prompt }],
-        response_format: { type: "json_object" },
         max_tokens: 1000,
         temperature: 0.7,
       });
@@ -1382,23 +1420,30 @@ Respond strictly in JSON format:
       console.log(`evaluateDynamicRelationship: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
     
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "evaluateDynamicRelationship",
-      JSON.stringify({ model: getModel(), prompt, max_tokens: 1000, temperature: 0.7, finish_reason: finishReason }),
-      JSON.stringify({ content, reasoning, raw: rawContent })
+      { model: getModel(), prompt, max_tokens: 1000, temperature: 0.7, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      user1.id
     );
 
-    const parsed = JSON.parse(content);
+    const resultMatch = content.match(/RESULT:\s*(Yes|No)/i);
+    const descriptionMatch = content.match(/DESCRIPTION:\s*(.*)/is);
+
+    const result = resultMatch ? resultMatch[1].toLowerCase() === 'yes' : false;
+    const description = descriptionMatch ? descriptionMatch[1].trim() : undefined;
+
     return {
-      result: !!parsed.result,
-      description: parsed.description || undefined
+      result,
+      description: result ? description : undefined
     };
   } catch (error: any) {
     console.error('Error evaluating dynamic relationship:', error);
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "evaluateDynamicRelationship",
-      JSON.stringify({ model: getModel(), prompt, error: "Catch Block" }),
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      { model: getModel(), prompt, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      user1.id
     );
     return { result: false };
   }

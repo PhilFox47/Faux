@@ -273,6 +273,8 @@ export default function App() {
   // API Logs
   const [apiLogs, setApiLogs] = useState<any[]>([]);
   const [apiLogSearch, setApiLogSearch] = useState('');
+  const [apiLogShowErrorsOnly, setApiLogShowErrorsOnly] = useState(false);
+  const [expandedLogs, setExpandedLogs] = useState<Record<number, boolean>>({});
   
   const [relationshipChecks, setRelationshipChecks] = useState<any[]>([]);
   const [relationshipChecksOffset, setRelationshipChecksOffset] = useState(0);
@@ -302,9 +304,13 @@ export default function App() {
       });
   };
 
-  const fetchApiLogs = (query?: string | React.MouseEvent | React.KeyboardEvent) => {
+  const fetchApiLogs = (query?: string | React.MouseEvent | React.KeyboardEvent, errorOnly?: boolean) => {
     const q = typeof query === 'string' ? query : apiLogSearch;
-    const url = q ? `/api/logs?q=${encodeURIComponent(q)}` : '/api/logs';
+    const isErrorOnly = typeof errorOnly === 'boolean' ? errorOnly : apiLogShowErrorsOnly;
+    let url = `/api/logs?`;
+    if (q) url += `q=${encodeURIComponent(q)}&`;
+    if (isErrorOnly) url += `error=true&`;
+    
     apiFetch(url)
       .then(r => r.json())
       .then(data => {
@@ -318,6 +324,10 @@ export default function App() {
         console.error("Failed to fetch API logs:", err);
         setApiLogs([]);
       });
+  };
+
+  const toggleLogExpansion = (id: number) => {
+    setExpandedLogs(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const [showApiLogsModal, setShowApiLogsModal] = useState(false);
@@ -3676,6 +3686,16 @@ export default function App() {
               >
                 Search
               </button>
+              <button
+                onClick={() => {
+                  const newErrorOnly = !apiLogShowErrorsOnly;
+                  setApiLogShowErrorsOnly(newErrorOnly);
+                  fetchApiLogs(apiLogSearch, newErrorOnly);
+                }}
+                className={`${apiLogShowErrorsOnly ? 'bg-red-600 hover:bg-red-500' : 'bg-gray-700 hover:bg-gray-600'} text-white px-4 py-2 rounded-lg text-sm transition-colors`}
+              >
+                Errors Only
+              </button>
               {apiLogSearch && (
                 <button 
                   onClick={() => { setApiLogSearch(''); fetchApiLogs(''); }}
@@ -3692,54 +3712,88 @@ export default function App() {
               ) : (
                 apiLogs.map((log: any) => {
                   let requestObj: any = {};
+                  let isError = false;
                   try {
                     requestObj = JSON.parse(log.request_payload);
+                    if (requestObj.error) isError = true;
                   } catch (e) {}
                   
+                  if (log.response_payload && (log.response_payload.includes('Error:') || log.response_payload.includes('"error"'))) {
+                    isError = true;
+                  }
+                  
+                  const isExpanded = !!expandedLogs[log.id];
+                  
                   return (
-                    <div key={log.id} className="bg-gray-800 p-4 rounded-xl text-xs font-mono border border-gray-700 hover:border-blue-500 transition-colors">
-                      <div className="flex justify-between text-gray-400 mb-3 items-center">
-                        <span className="font-bold text-blue-400 text-sm">{log.endpoint}</span>
-                        <span className="text-[10px] opacity-60">{formatTimestamp(log.created_at)}</span>
-                      </div>
-                      <div className="mb-3 space-y-1">
-                        <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Request Details</div>
-                        <div className="bg-black/30 p-2 rounded border border-white/5 overflow-x-auto whitespace-pre-wrap">
-                          {Object.entries(requestObj).map(([key, val]) => (
-                            <div key={key} className="mb-1 last:mb-0">
-                              <span className="text-orange-400">{key}:</span> <span className="text-gray-300">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+                    <div key={log.id} className={`bg-gray-800 rounded-xl text-xs font-mono border ${isError ? 'border-red-500/50' : 'border-green-500/50'} overflow-hidden transition-colors`}>
+                      <div 
+                        className={`p-3 flex justify-between items-center cursor-pointer ${isError ? 'bg-red-900/20 hover:bg-red-900/30' : 'bg-green-900/20 hover:bg-green-900/30'}`}
+                        onClick={() => toggleLogExpansion(log.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          {log.user_profile_picture ? (
+                            <img src={log.user_profile_picture} alt={log.user_display_name} className="w-8 h-8 rounded-full object-cover" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-gray-400">
+                              <User size={16} />
                             </div>
-                          ))}
+                          )}
+                          <div>
+                            <div className="font-bold text-white text-sm flex items-center gap-2">
+                              {log.endpoint}
+                              {isError && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">Error</span>}
+                            </div>
+                            <div className="text-gray-400 text-[10px]">{log.user_display_name || 'System'}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="text-[10px] opacity-60 text-gray-400">{formatTimestamp(log.created_at)}</span>
+                          <span className="text-gray-500">{isExpanded ? '▼' : '▶'}</span>
                         </div>
                       </div>
-                      <div className="space-y-1">
-                        <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
-                        {(() => {
-                          try {
-                            const resObj = JSON.parse(log.response_payload);
-                            return (
-                              <div className="space-y-2">
-                                {resObj.reasoning && (
-                                  <div className="bg-blue-900/10 border border-blue-500/20 p-2 rounded">
-                                    <div className="text-[10px] text-blue-400 font-bold mb-1 uppercase tracking-tighter">Thinking / Reasoning</div>
-                                    <div className="text-gray-400 italic">{resObj.reasoning}</div>
-                                  </div>
-                                )}
-                                <div className={`p-2 rounded border ${!resObj.content ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
-                                  <div className="text-[10px] opacity-50 font-bold mb-1 uppercase tracking-tighter">Final Output</div>
-                                  {resObj.content || "Empty Response"}
+                      
+                      {isExpanded && (
+                        <div className="p-4 border-t border-gray-700">
+                          <div className="mb-3 space-y-1">
+                            <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Request Details</div>
+                            <div className="bg-black/30 p-2 rounded border border-white/5 overflow-x-auto whitespace-pre-wrap">
+                              {Object.entries(requestObj).map(([key, val]) => (
+                                <div key={key} className="mb-1 last:mb-0">
+                                  <span className="text-orange-400">{key}:</span> <span className="text-gray-300">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
                                 </div>
-                              </div>
-                            );
-                          } catch (e) {
-                            return (
-                              <div className="bg-red-900/20 border border-red-500/30 text-red-200 p-2 rounded whitespace-pre-wrap overflow-x-auto">
-                                {log.response_payload}
-                              </div>
-                            );
-                          }
-                        })()}
-                      </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
+                            {(() => {
+                              try {
+                                const resObj = JSON.parse(log.response_payload);
+                                return (
+                                  <div className="space-y-2">
+                                    {resObj.reasoning && (
+                                      <div className="bg-blue-900/10 border border-blue-500/20 p-2 rounded">
+                                        <div className="text-[10px] text-blue-400 font-bold mb-1 uppercase tracking-tighter">Thinking / Reasoning</div>
+                                        <div className="text-gray-400 italic">{resObj.reasoning}</div>
+                                      </div>
+                                    )}
+                                    <div className={`p-2 rounded border ${!resObj.content ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
+                                      <div className="text-[10px] opacity-50 font-bold mb-1 uppercase tracking-tighter">Final Output</div>
+                                      {resObj.content || "Empty Response"}
+                                    </div>
+                                  </div>
+                                );
+                              } catch (e) {
+                                return (
+                                  <div className="bg-red-900/20 border border-red-500/30 text-red-200 p-2 rounded whitespace-pre-wrap overflow-x-auto">
+                                    {log.response_payload}
+                                  </div>
+                                );
+                              }
+                            })()}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })

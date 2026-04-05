@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi } from "./src/ai";
 
 const pendingComments = new Set<string>();
 const pendingDMs = new Set<string>();
@@ -627,7 +627,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null) 
     const postId = info.lastInsertRowid as number;
 
     if (archetype.id === 'image_post') {
-      generateImage(aiUser, positivePrompt, negativePrompt, characterVisible).then(imageUrl => {
+      generateImage(positivePrompt, negativePrompt).then(imageUrl => {
         if (imageUrl) {
           db.prepare("UPDATE posts SET image_url = ?, is_visible = 1, image_prompt = ? WHERE id = ?").run(imageUrl, positivePrompt, postId);
         } else {
@@ -670,13 +670,29 @@ async function startServer() {
   // API Routes
   app.get("/api/logs", (req, res) => {
     const q = req.query.q as string;
+    const errorOnly = req.query.error === 'true';
+    
+    let queryStr = `
+      SELECT l.*, u.display_name as user_display_name, u.profile_picture as user_profile_picture 
+      FROM api_logs l 
+      LEFT JOIN users u ON l.user_id = u.id 
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
     if (q) {
-      const logs = db.prepare("SELECT * FROM api_logs WHERE response_payload LIKE ? OR request_payload LIKE ? ORDER BY created_at DESC LIMIT 50").all(`%${q}%`, `%${q}%`);
-      res.json(logs);
-    } else {
-      const logs = db.prepare("SELECT * FROM api_logs ORDER BY created_at DESC LIMIT 50").all();
-      res.json(logs);
+      queryStr += ` AND (l.response_payload LIKE ? OR l.request_payload LIKE ?)`;
+      params.push(`%${q}%`, `%${q}%`);
     }
+
+    if (errorOnly) {
+      queryStr += ` AND (l.response_payload LIKE '%"error"%' OR l.response_payload LIKE '%Error:%' OR l.request_payload LIKE '%"error"%')`;
+    }
+
+    queryStr += ` ORDER BY l.created_at DESC LIMIT 50`;
+
+    const logs = db.prepare(queryStr).all(...params);
+    res.json(logs);
   });
 
   app.get("/api/relationship-checks", (req, res) => {
@@ -852,9 +868,9 @@ async function startServer() {
   app.post("/api/generate-persona", async (req, res) => {
     try {
       const { name, extraInfo } = req.body;
-      db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+      logApi(
         "ROUTE_GENERATE_PERSONA",
-        JSON.stringify({ name, extraInfo }),
+        { name, extraInfo },
         "Request Received"
       );
       const universes = db.prepare("SELECT name FROM universes").all().map((u: any) => u.name);
@@ -1159,9 +1175,9 @@ async function startServer() {
 
   app.post("/api/users", (req, res) => {
     const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload) VALUES (?, ?, ?)").run(
+    logApi(
       "ROUTE_ADD_USER",
-      JSON.stringify({ username, display_name, universe_id, account_type }),
+      { username, display_name, universe_id, account_type },
       "Request Received"
     );
     try {

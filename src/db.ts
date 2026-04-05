@@ -279,6 +279,13 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender_id ON direct_messages(receiver_id, sender_id, id DESC);
   `);
 
+  // Add user_id column to api_logs if it doesn't exist
+  try {
+    db.exec("ALTER TABLE api_logs ADD COLUMN user_id INTEGER REFERENCES users(id)");
+  } catch (e) {
+    // Column might already exist
+  }
+
   // Add account_type column to post_archetypes if it doesn't exist
   try {
     db.exec("ALTER TABLE post_archetypes ADD COLUMN account_type TEXT DEFAULT 'character'");
@@ -290,7 +297,7 @@ export function initDb() {
   const archetypeCount = db.prepare("SELECT COUNT(*) as count FROM post_archetypes").get() as any;
   if (archetypeCount.count === 0) {
     const defaultArchetypes = [
-      { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30, account_type: 'character' },
+      { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 100, account_type: 'character' },
       { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15, account_type: 'character' },
       { id: 'question', name: 'Question', description: 'A Character asking a question.', probability: 10, account_type: 'character' },
       { id: 'random_thought', name: 'Random Thought', description: 'A random thought a character had they want to share on Faux.', probability: 10, account_type: 'character' },
@@ -324,6 +331,9 @@ export function initDb() {
   } else {
     // Update meetup description for existing databases
     db.prepare("UPDATE post_archetypes SET description = ? WHERE id = 'meetup' AND description = 'A meetup between 2-5 characters.'").run('A meetup between 2-5 characters. If they are from different universes, this MUST be a digital meetup (gaming, video call, etc). If they are from the same universe, it can be a real-world meetup.');
+    
+    // Update life_update probability to increase frequency
+    db.prepare("UPDATE post_archetypes SET probability = 100 WHERE id = 'life_update'").run();
     
     // Insert company archetypes if they don't exist
     const companyArchetypes = [
