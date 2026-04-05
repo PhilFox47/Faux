@@ -88,6 +88,7 @@ function getImageModel() {
 }
 
 export function logApi(endpoint: string, request: any, response: any, userId: number | null = null) {
+  console.log(`[DEBUG] logApi called for endpoint: ${endpoint}`);
   try {
     db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload, user_id) VALUES (?, ?, ?, ?)").run(
       endpoint,
@@ -544,6 +545,7 @@ Ensure duration_days is an integer between 14 and 90.`;
       max_tokens: 1000,
     });
     const result = extractJSON(response.choices[0].message.content || '{}');
+    console.log(`[DEBUG] generateNewArc result for ${character.display_name}:`, JSON.stringify(result));
     logApi('generateNewArc', { characterId: character.id, accountType: character.account_type, prompt }, { response: response.choices[0].message.content, parsed: result }, character.id);
     return result;
   } catch (e) {

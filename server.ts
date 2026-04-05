@@ -480,6 +480,7 @@ async function handleOPReplies() {
 }
 
 async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, forcedArchetypeId?: string) {
+  const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
   const recentContext = db.prepare(`
     SELECT p.content, p.created_at, u.display_name 
     FROM posts p JOIN users u ON p.user_id = u.id 
@@ -566,16 +567,25 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   let arcComments = '';
 
   if (arcArchetypes.includes(archetype.id)) {
+    console.log(`[DEBUG] Archetype ${archetype.id} matched for arc generation for ${aiUser.display_name}`);
     logApi('DEBUG_ARC_LOGIC', { archetypeId: archetype.id, userId: aiUser.id, activeArc: activeArc ? activeArc.id : null }, { message: `Archetype matched for user ${aiUser.display_name}` }, aiUser.id);
     if (!activeArc) {
+      console.log(`[DEBUG] No active arc for ${aiUser.display_name}, generating new one...`);
       const newArcData = await generateNewArc(aiUser);
+      console.log(`[DEBUG] New arc data for ${aiUser.display_name}:`, JSON.stringify(newArcData));
       logApi('DEBUG_ARC_LOGIC_NEW_DATA', { characterId: aiUser.id }, { newArcData }, aiUser.id);
       if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
-        const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
-        activeArc = db.prepare("SELECT * FROM character_arcs WHERE id = ?").get(info.lastInsertRowid);
-        arcInstruction = 'START_ARC';
-        logApi('DEBUG_ARC_LOGIC_CREATED', { characterId: aiUser.id, arcId: activeArc.id }, { arcTitle: activeArc.title }, aiUser.id);
+        try {
+          const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
+          activeArc = db.prepare("SELECT * FROM character_arcs WHERE id = ?").get(info.lastInsertRowid);
+          arcInstruction = 'START_ARC';
+          console.log(`[DEBUG] Successfully created arc ${activeArc.id} for ${aiUser.display_name}: ${activeArc.title}`);
+          logApi('DEBUG_ARC_LOGIC_CREATED', { characterId: aiUser.id, arcId: activeArc.id }, { arcTitle: activeArc.title }, aiUser.id);
+        } catch (e) {
+          console.error(`[DEBUG] Failed to insert arc for ${aiUser.display_name}:`, e);
+        }
       } else {
+        console.log(`[DEBUG] Invalid arc data generated for ${aiUser.display_name}`);
         logApi('DEBUG_ARC_LOGIC_INVALID_DATA', { characterId: aiUser.id }, { newArcData }, aiUser.id);
       }
     } else {
@@ -634,11 +644,13 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
     const isVisible = archetype.id === 'image_post' ? 0 : 1;
     const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible);
     const postId = info.lastInsertRowid as number;
+    console.log(`${aiUser.display_name} created a post (${archetype.id})`);
 
     if (archetype.id === 'image_post') {
       generateImage(positivePrompt, negativePrompt).then(imageUrl => {
         if (imageUrl) {
           db.prepare("UPDATE posts SET image_url = ?, is_visible = 1, image_prompt = ? WHERE id = ?").run(imageUrl, positivePrompt, postId);
+          triggerPostComments(postId, archetype.id);
         } else {
           db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
         }
@@ -646,10 +658,60 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
         console.error("Failed to generate image:", err);
         db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
       });
+    } else {
+      triggerPostComments(postId, archetype.id);
     }
 
     if (isFirstPost) {
       db.prepare("UPDATE users SET is_active = 1 WHERE id = ?").run(aiUser.id);
+    }
+
+    if (archetype.id === 'event' || archetype.id === 'meetup') {
+      const allUsers = db.prepare("SELECT * FROM users").all() as any[];
+      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+      const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
+      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1);
+      const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
+
+      // Trigger other characters to react
+      const baseCount = archetype.id === 'event' ? Math.floor(Math.random() * 5) + 1 : Math.floor(Math.random() * 4) + 1;
+      const count = Math.max(0, Math.round(baseCount * onlineRatio));
+      const crossUniverseProb = (settings.cross_universe_prob ?? 50.0) / 100;
+      const otherAis = activeAiUsers.filter(u => {
+        if (u.id === aiUser.id) return false;
+        if (u.universe_id === aiUser.universe_id) return true;
+        return Math.random() < crossUniverseProb;
+      });
+      if (otherAis.length > 0) {
+        const selectedAis = [];
+        let availableAis = [...otherAis];
+        for (let i = 0; i < count && availableAis.length > 0; i++) {
+          const picked = pickWeightedRandomUser(availableAis);
+          selectedAis.push(picked);
+          availableAis = availableAis.filter(u => u.id !== picked.id);
+        }
+        
+        // These characters will comment on the post shortly
+        for (const otherAi of selectedAis) {
+          pendingComments.add(`${otherAi.id}:post:${postId}`);
+          setTimeout(async () => {
+            try {
+              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(otherAi.id, aiUser.id) as any;
+              const relContext = rel ? rel.description : '';
+              const post = db.prepare("SELECT created_at FROM posts WHERE id = ?").get(postId) as any;
+              const commentContent = await generateComment(otherAi, postContent, aiUser.display_name, '', false, relContext, aiUser.id, undefined, post?.created_at);
+              if (commentContent) {
+                db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
+                  .run(postId, otherAi.id, commentContent);
+                checkDynamicRelationship(otherAi.id, aiUser.id).catch(console.error);
+                console.log(`${otherAi.display_name} reacted to ${archetype.id} by ${aiUser.display_name}`);
+              }
+            } finally {
+              pendingComments.delete(`${otherAi.id}:post:${postId}`);
+            }
+          }, 5000 + Math.random() * 30000);
+        }
+      }
     }
     return true;
   }
