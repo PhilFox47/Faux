@@ -2475,9 +2475,9 @@ async function startServer() {
                 const relContext = rel ? rel.description : '';
 
                 const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true);
-                if (reply) {
+                if (reply && reply.content) {
                   db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                    .run(aiUser.id, realUser.id, reply);
+                    .run(aiUser.id, realUser.id, reply.content.trim());
                   checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
                   console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
                 }
