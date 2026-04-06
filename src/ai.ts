@@ -526,16 +526,16 @@ export async function generateNewArc(character: any) {
   const entityType = isCompany ? 'company' : 'social media character';
   
   const prompt = `${buildCharacterPrompt(character)}
-You are planning the next narrative arc for this ${entityType}. Create a 2-week to 3-month storyline. 
+You are planning the next narrative arc for this ${entityType}. Create a 1-week to 6-week storyline. 
 ${isCompany ? 'Focus on business goals, product launches, PR campaigns, or corporate drama.' : 'Focus on personal growth, relationships, life changes, or personal projects.'}
 Do NOT define a strict ending; instead, provide 2-3 possible directions it could go based on interactions. 
 Return ONLY a valid JSON object with the following structure:
 {
   "title": "A short, catchy title for the arc",
   "description": "A detailed description of the arc's premise and possible directions",
-  "duration_days": 30
+  "duration_days": 21
 }
-Ensure duration_days is an integer between 14 and 90.`;
+Ensure duration_days is an integer between 7 and 42.`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -592,14 +592,14 @@ ${universe.description}
 
 It is time to start a new "Universe Arc". This is a long-term, overarching storyline or event that will affect ALL characters within this universe. It should be broad enough to allow individual characters to have their own personal journeys (Character Arcs) within it, but impactful enough to change the status quo.
 
-Create a new Universe Arc that will last between 1 to 6 months in real time.
+Create a new Universe Arc that will last between 2 to 10 weeks in real time.
 
 Return ONLY a JSON object with the following structure:
 {
   "title": "A catchy title for the universe arc",
   "description": "A detailed description of the overarching event, conflict, or change happening in the universe.",
   "current_status_text": "The initial state of this arc as it begins today.",
-  "duration_days": 60 // An integer between 30 and 180 representing how long this arc should last
+  "duration_days": 42 // An integer between 14 and 70 representing how long this arc should last
 }`;
 
   try {

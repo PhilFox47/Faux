@@ -1023,7 +1023,7 @@ async function startServer() {
 
   app.get("/api/users/:id/arcs", (req, res) => {
     try {
-      const arcs = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? ORDER BY created_at DESC").all(req.params.id);
+      const arcs = db.prepare("SELECT *, 'character' as arc_type FROM character_arcs WHERE user_id = ? ORDER BY created_at DESC").all(req.params.id);
       res.json(arcs);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1189,7 +1189,7 @@ async function startServer() {
       const info = db.prepare(`
         INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date)
         VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'))
-      `).run(req.params.id, title, description, current_status_text, duration_days || 7);
+      `).run(req.params.id, title, description, current_status_text, duration_days || 42);
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
@@ -1225,7 +1225,7 @@ async function startServer() {
       const info = db.prepare(`
         INSERT INTO character_arcs (user_id, title, description, target_end_date)
         VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))
-      `).run(req.params.id, title, description, duration_days || 7);
+      `).run(req.params.id, title, description, duration_days || 21);
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
@@ -1258,7 +1258,7 @@ async function startServer() {
   });
 
   app.get("/api/universes/:id/arcs", (req, res) => {
-    const arcs = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? ORDER BY created_at DESC").all(req.params.id);
+    const arcs = db.prepare("SELECT *, 'universe' as arc_type FROM universe_arcs WHERE universe_id = ? ORDER BY created_at DESC").all(req.params.id);
     res.json(arcs);
   });
 
