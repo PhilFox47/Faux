@@ -232,6 +232,7 @@ export default function App() {
   // DM Editing
   const [editingDmId, setEditingDmId] = useState<number | null>(null);
   const [editingDmContent, setEditingDmContent] = useState('');
+  const [expandedImageUrl, setExpandedImageUrl] = useState<string | null>(null);
 
   // Profile Editing
   const [editingProfile, setEditingProfile] = useState<any>(null);
@@ -1569,6 +1570,26 @@ export default function App() {
             </form>
           </div>
         )}
+        {expandedImageUrl && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+            onClick={() => setExpandedImageUrl(null)}
+          >
+            <img 
+              src={expandedImageUrl} 
+              alt="Expanded image" 
+              className="max-w-full max-h-full object-contain rounded-lg" 
+              referrerPolicy="no-referrer" 
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button 
+              className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition"
+              onClick={() => setExpandedImageUrl(null)}
+            >
+              <X size={24} />
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -2353,7 +2374,7 @@ export default function App() {
                             <div className={`group flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`rounded-2xl p-3 whitespace-pre-wrap break-words ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
                                 {msg.image_url && (
-                                  <div className="mb-2 rounded-lg overflow-hidden border border-white/10">
+                                  <div className="mb-2 rounded-lg overflow-hidden border border-white/10 cursor-pointer" onClick={() => setExpandedImageUrl(msg.image_url)}>
                                     <img src={msg.image_url} alt="" className="w-full h-auto max-h-64 object-cover" referrerPolicy="no-referrer" />
                                   </div>
                                 )}
