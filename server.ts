@@ -1180,6 +1180,78 @@ async function startServer() {
     }
   });
 
+  app.post("/api/universes/:id/arcs", (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    const { title, description, current_status_text, duration_days } = req.body;
+    try {
+      const info = db.prepare(`
+        INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date)
+        VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'))
+      `).run(req.params.id, title, description, current_status_text, duration_days || 7);
+      res.json({ success: true, id: info.lastInsertRowid });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/universes/:id/arcs/generate", async (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    const universe = db.prepare("SELECT * FROM universes WHERE id = ?").get(req.params.id) as any;
+    if (!universe) return res.status(404).json({ error: "Universe not found" });
+    
+    try {
+      const newUniverseArcData = await generateNewUniverseArc(universe);
+      if (newUniverseArcData && newUniverseArcData.title && newUniverseArcData.description && newUniverseArcData.duration_days) {
+        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'))").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
+        res.json({ success: true, id: info.lastInsertRowid });
+      } else {
+        res.status(500).json({ error: "Failed to generate arc data" });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/users/:id/arcs", (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    const { title, description, duration_days } = req.body;
+    try {
+      const info = db.prepare(`
+        INSERT INTO character_arcs (user_id, title, description, target_end_date)
+        VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))
+      `).run(req.params.id, title, description, duration_days || 7);
+      res.json({ success: true, id: info.lastInsertRowid });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/users/:id/arcs/generate", async (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    const aiUser = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id) as any;
+    if (!aiUser) return res.status(404).json({ error: "User not found" });
+    
+    try {
+      const newArcData = await generateNewArc(aiUser);
+      if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
+        const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
+        res.json({ success: true, id: info.lastInsertRowid });
+      } else {
+        res.status(500).json({ error: "Failed to generate arc data" });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/universes/:id/characters", (req, res) => {
     const characters = db.prepare("SELECT id, username, display_name, avatar_url, bio, is_ai, is_active, online_times, current_online_status, status_expires_at FROM users WHERE universe_id = ?").all(req.params.id);
     res.json(characters);
