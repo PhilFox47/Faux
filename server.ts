@@ -1207,6 +1207,18 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/universes/arcs/:arcId", (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    try {
+      db.prepare("DELETE FROM universe_arcs WHERE id = ?").run(req.params.arcId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   app.put("/api/users/arcs/:arcId", (req, res) => {
     const user = getRealUser(req);
     if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
@@ -1218,6 +1230,18 @@ async function startServer() {
         SET title = ?, description = ?, status = ?, completion_summary = ?
         WHERE id = ?
       `).run(title, description, status, completion_summary || null, req.params.arcId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/users/arcs/:arcId", (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    
+    try {
+      db.prepare("DELETE FROM character_arcs WHERE id = ?").run(req.params.arcId);
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });

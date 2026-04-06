@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -235,6 +235,12 @@ export default function App() {
 
   // Profile Editing
   const [editingProfile, setEditingProfile] = useState<any>(null);
+  const [editingArc, setEditingArc] = useState<any>(null);
+  const [arcTitle, setArcTitle] = useState('');
+  const [arcDescription, setArcDescription] = useState('');
+  const [arcStatus, setArcStatus] = useState('active');
+  const [arcCompletionSummary, setArcCompletionSummary] = useState('');
+  const [arcCurrentStatusText, setArcCurrentStatusText] = useState('');
   const [profileName, setProfileName] = useState('');
   const [profileUsername, setProfileUsername] = useState('');
   const [profilePin, setProfilePin] = useState('');
@@ -521,6 +527,78 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleEditArc = (arc: any) => {
+    setEditingArc(arc);
+    setArcTitle(arc.title || '');
+    setArcDescription(arc.description || '');
+    setArcStatus(arc.status || 'active');
+    setArcCompletionSummary(arc.completion_summary || '');
+    setArcCurrentStatusText(arc.current_status_text || '');
+  };
+
+  const handleSaveArc = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingArc) return;
+    
+    const endpoint = editingArc.arc_type === 'universe' 
+      ? `/api/universes/arcs/${editingArc.id}` 
+      : `/api/users/arcs/${editingArc.id}`;
+    
+    try {
+      const res = await apiFetch(endpoint, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: arcTitle,
+          description: arcDescription,
+          status: arcStatus,
+          completion_summary: arcCompletionSummary,
+          current_status_text: arcCurrentStatusText
+        })
+      });
+      if (res.ok) {
+        showToast('Arc updated!');
+        setEditingArc(null);
+        fetchArcs(true);
+      } else {
+        const err = await res.json();
+        showToast(err.error || 'Failed to update arc');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('An error occurred');
+    }
+  };
+
+  const handleDeleteArc = async (arc: any) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Arc',
+      message: `Are you sure you want to delete the arc "${arc.title}"? This action cannot be undone.`,
+      onConfirm: async () => {
+        const endpoint = arc.arc_type === 'universe' 
+          ? `/api/universes/arcs/${arc.id}` 
+          : `/api/users/arcs/${arc.id}`;
+        
+        try {
+          const res = await apiFetch(endpoint, { method: 'DELETE' });
+          if (res.ok) {
+            showToast('Arc deleted!');
+            fetchArcs(true);
+          } else {
+            const err = await res.json();
+            showToast(err.error || 'Failed to delete arc');
+          }
+        } catch (e) {
+          console.error(e);
+          showToast('An error occurred');
+        } finally {
+          setConfirmModal(null);
+        }
+      }
+    });
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -1284,6 +1362,7 @@ export default function App() {
   const [characterSearch, setCharacterSearch] = useState('');
   const [visibleCharacters, setVisibleCharacters] = useState(20);
   const [visiblePosts, setVisiblePosts] = useState(30);
+  const fauxPicsPosts = useMemo(() => posts.filter(p => p.archetype_id === 'image_post'), [posts]);
   const visiblePostsRef = useRef(visiblePosts);
   useEffect(() => {
     if (visiblePostsRef.current !== visiblePosts) {
@@ -1395,6 +1474,97 @@ export default function App() {
         </div>
       )}
 
+      {editingArc && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-2xl p-6 relative my-8">
+            <button 
+              onClick={() => setEditingArc(null)}
+              className="absolute top-4 right-4 text-gray-500 hover:text-white transition"
+            >
+              <X size={24} />
+            </button>
+            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <Edit2 className="text-orange-500" />
+              Edit {editingArc.arc_type === 'universe' ? 'Universe' : 'Character'} Arc
+            </h2>
+            <form onSubmit={handleSaveArc} className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-400 mb-1 uppercase tracking-wider">Title</label>
+                <input 
+                  type="text" 
+                  value={arcTitle}
+                  onChange={e => setArcTitle(e.target.value)}
+                  className="w-full bg-black border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition"
+                  placeholder="Arc Title"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-400 mb-1 uppercase tracking-wider">Description</label>
+                <textarea 
+                  value={arcDescription}
+                  onChange={e => setArcDescription(e.target.value)}
+                  className="w-full bg-black border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition min-h-[100px]"
+                  placeholder="What is this arc about?"
+                  required
+                />
+              </div>
+              {editingArc.arc_type === 'universe' && (
+                <div>
+                  <label className="block text-sm font-bold text-gray-400 mb-1 uppercase tracking-wider">Current Status Text</label>
+                  <input 
+                    type="text" 
+                    value={arcCurrentStatusText}
+                    onChange={e => setArcCurrentStatusText(e.target.value)}
+                    className="w-full bg-black border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition"
+                    placeholder="Current status of the universe..."
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-400 mb-1 uppercase tracking-wider">Status</label>
+                  <select 
+                    value={arcStatus}
+                    onChange={e => setArcStatus(e.target.value)}
+                    className="w-full bg-black border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition"
+                  >
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+              </div>
+              {arcStatus === 'completed' && (
+                <div>
+                  <label className="block text-sm font-bold text-gray-400 mb-1 uppercase tracking-wider">Completion Summary</label>
+                  <textarea 
+                    value={arcCompletionSummary}
+                    onChange={e => setArcCompletionSummary(e.target.value)}
+                    className="w-full bg-black border border-gray-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition min-h-[100px]"
+                    placeholder="How did this arc end?"
+                  />
+                </div>
+              )}
+              <div className="flex justify-end gap-3 pt-4">
+                <button 
+                  type="button"
+                  onClick={() => setEditingArc(null)}
+                  className="px-6 py-3 rounded-xl font-bold text-gray-400 hover:text-white hover:bg-gray-800 transition"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="px-8 py-3 rounded-xl font-bold bg-orange-500 hover:bg-orange-600 text-white transition shadow-lg shadow-orange-500/20"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="w-full max-w-7xl flex min-h-screen">
         
         {/* Left Sidebar */}
@@ -1416,6 +1586,7 @@ export default function App() {
             </div>
             <nav className="space-y-2">
               <NavItem icon={<Home />} label="Home" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
+              <NavItem icon={<Camera />} label="FauxPics" active={activeTab === 'fauxpics'} onClick={() => setActiveTab('fauxpics')} />
               <NavItem icon={<Search />} label="Add Character" active={activeTab === 'explore'} onClick={() => setActiveTab('explore')} />
               <NavItem 
                 icon={
@@ -1608,6 +1779,54 @@ export default function App() {
                 )}
               </div>
             </>
+          )}
+
+          {activeTab === 'fauxpics' && (
+            <div className="p-4">
+              <div className="grid grid-cols-1 gap-8 max-w-2xl mx-auto">
+                {fauxPicsPosts.length === 0 ? (
+                  <div className="text-center py-20 text-gray-500">
+                    <Camera size={64} className="mx-auto mb-4 opacity-20" />
+                    <p className="text-xl font-medium">No photos yet</p>
+                  </div>
+                ) : (
+                  fauxPicsPosts.map(post => (
+                    <div key={post.id} className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
+                      <div className="p-4 flex items-center gap-3">
+                        <img src={post.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                        <span className="font-bold text-sm">{post.display_name}</span>
+                      </div>
+                      <div className="bg-black flex items-center justify-center min-h-[300px]">
+                        <img 
+                          src={post.image_url || post.content.match(/\((.*?)\)/)?.[1] || `https://picsum.photos/seed/${post.id}/800/800`} 
+                          alt="FauxPic" 
+                          className="w-full h-auto max-h-[80vh] object-contain" 
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="p-4">
+                        <div className="flex gap-4 mb-3">
+                          <button onClick={() => handleLike(post.id)} className="hover:scale-110 transition">
+                            <Heart className={post.is_liked ? "fill-red-500 text-red-500" : "text-white"} size={24} />
+                          </button>
+                          <button onClick={() => { setHighlightedPostId(post.id); setActiveTab('home'); }} className="hover:scale-110 transition">
+                            <MessageCircle size={24} />
+                          </button>
+                          <Send size={24} />
+                        </div>
+                        <p className="text-sm">
+                          <span className="font-bold mr-2">{post.display_name}</span>
+                          {post.content.replace(/\(.*?\)/g, '').trim()}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-2 uppercase tracking-tighter">
+                          {new Date(post.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           )}
 
           {activeTab === 'explore' && (
@@ -2384,7 +2603,25 @@ export default function App() {
                   </div>
                 ) : (
                   arcs.map((arc: any) => (
-                    <div key={`${arc.arc_type}-${arc.id}`} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-4">
+                    <div key={`${arc.arc_type}-${arc.id}`} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-4 relative group">
+                      {loggedInUser?.role === 'admin' && (
+                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                          <button 
+                            onClick={() => handleEditArc(arc)}
+                            className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-blue-400 transition"
+                            title="Edit Arc"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteArc(arc)}
+                            className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-red-400 transition"
+                            title="Delete Arc"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           {arc.entity_image ? (

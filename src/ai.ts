@@ -715,7 +715,7 @@ ${(!arcInstruction && activeArc) ? `ARC INSTRUCTION: Keep your current active ar
 
 ${context ? `Your recent posts (with timestamps): ${context}
 CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
-${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : ''}
+${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : `IMPORTANT: This is a text-only post. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your post must rely entirely on text and emojis.`}
 ${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
 ${postTypeObj.id === 'event' ? `IMPORTANT: This is an EVENT post. An event has happened that affects you and some other characters. Describe the event and your reaction to it. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
 ${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
@@ -782,6 +782,7 @@ ${isReply ? `You are participating in a comment thread. Here is the context of t
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
 ${isReply ? `Write a reply that fits your character perfectly and continues the conversation naturally. Notice the timestamps to understand the flow of time.` : `Write a comment that fits your character perfectly. Notice the timestamp of the post to understand how recent it is.`}
+IMPORTANT: This is a text-only comment. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your comment must rely entirely on text and emojis.
 ${character.account_type === 'company' ? 'Your comment should reflect your brand identity, promote your products/services if relevant, or engage with your target audience in a corporate or brand-appropriate way.' : ''}
 Keep it short, natural, and in character. Focus on the topic being discussed. Do not wrap in quotes. Keep it under 150 characters.`;
 
@@ -893,7 +894,8 @@ If there is previous history, you can pick up where you left off or start a new 
 Notice the timestamps in the history to understand how much time has passed since the last message.
 ${context ? 'Use the provided context as the reason for reaching out.' : (recentActivity ? 'Give a good reason for reaching out (e.g., asking a casual question about their recent post or comment, sharing a quick thought, or checking in).' : 'Give a good reason for reaching out (e.g., sharing a quick thought, asking a random question, talking about your own life, or just checking in).')} 
 IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never actually posted. ${context ? 'Focus on the provided context.' : (recentActivity ? 'Only reference the recent posts/comments provided above, or find another reason to reach out.' : 'Since no recent posts/comments are provided, you MUST find another reason to reach out.')}
-IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.`;
+IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.
+IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.`;
 
   try {
     let content = "";
@@ -1050,6 +1052,7 @@ CRITICAL: Make it feel like a REALISTIC group chat message.
 - People text in short bursts. Keep it brief and conversational.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
 - Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
+- IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.
 You can address specific people by name if you want.`;
 
   const messages = [

@@ -98,23 +98,23 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
         {...props}
       />
       {showDropdown && filteredUsers.length > 0 && (
-        <div className="absolute z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl mt-1 w-64 max-h-60 overflow-y-auto" style={{ top: '100%', left: 0 }}>
+        <div className="absolute z-50 bg-zinc-900 border border-zinc-800/80 rounded-xl shadow-xl mt-1 w-64 max-h-60 overflow-y-auto custom-scrollbar" style={{ top: '100%', left: 0 }}>
           {filteredUsers.map(user => (
             <div 
               key={user.id} 
-              className="p-2 hover:bg-gray-700 cursor-pointer flex items-center gap-2"
+              className="p-3 hover:bg-zinc-800/50 cursor-pointer flex items-center gap-3 transition-colors"
               onClick={() => insertTag(user.username)}
             >
-              <div className="w-8 h-8 rounded-full bg-orange-900 flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
+              <div className="w-8 h-8 rounded-full bg-indigo-900 flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden ring-1 ring-zinc-800">
                 {user.avatar_url ? (
                   <img src={user.avatar_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 ) : (
-                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.display_name}`} alt="" className="w-full h-full object-cover bg-gray-800" referrerPolicy="no-referrer" />
+                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.display_name}`} alt="" className="w-full h-full object-cover bg-zinc-800" referrerPolicy="no-referrer" />
                 )}
               </div>
               <div className="overflow-hidden">
-                <div className="font-bold text-sm text-white truncate">{user.display_name}</div>
-                <div className="text-xs text-gray-400 truncate">@{user.username}</div>
+                <div className="font-bold text-sm text-zinc-100 truncate">{user.display_name}</div>
+                <div className="text-xs text-zinc-500 truncate">@{user.username}</div>
               </div>
             </div>
           ))}
