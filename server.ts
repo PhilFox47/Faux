@@ -1224,6 +1224,46 @@ async function startServer() {
     }
   });
 
+  app.get("/api/arcs", (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 20;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const characterArcs = db.prepare(`
+        SELECT 
+          ca.*, 
+          'character' as arc_type,
+          u.display_name as entity_name,
+          u.avatar_url as entity_image,
+          u.username as entity_handle
+        FROM character_arcs ca
+        JOIN users u ON ca.user_id = u.id
+      `).all() as any[];
+
+      const universeArcs = db.prepare(`
+        SELECT 
+          ua.*, 
+          'universe' as arc_type,
+          un.name as entity_name,
+          un.image_url as entity_image,
+          NULL as entity_handle
+        FROM universe_arcs ua
+        JOIN universes un ON ua.universe_id = un.id
+      `).all() as any[];
+
+      const allArcs = [...characterArcs, ...universeArcs].sort((a, b) => {
+        const dateA = new Date((a.last_update_date || a.created_at) + 'Z').getTime();
+        const dateB = new Date((b.last_update_date || b.created_at) + 'Z').getTime();
+        return dateB - dateA;
+      });
+
+      res.json(allArcs.slice(offset, offset + limit));
+    } catch (e) {
+      console.error("Failed to fetch arcs:", e);
+      res.status(500).json({ error: "Failed to fetch arcs" });
+    }
+  });
+
   app.put("/api/users/:id", (req, res) => {
     const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
     try {

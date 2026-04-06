@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -279,6 +279,35 @@ export default function App() {
   const [relationshipChecks, setRelationshipChecks] = useState<any[]>([]);
   const [relationshipChecksOffset, setRelationshipChecksOffset] = useState(0);
   const [hasMoreRelationshipChecks, setHasMoreRelationshipChecks] = useState(true);
+
+  const [arcs, setArcs] = useState<any[]>([]);
+  const [arcsOffset, setArcsOffset] = useState(0);
+  const [hasMoreArcs, setHasMoreArcs] = useState(true);
+
+  const fetchArcs = (reset = false) => {
+    const offset = reset ? 0 : arcsOffset;
+    apiFetch(`/api/arcs?limit=20&offset=${offset}`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          if (reset) {
+            setArcs(data);
+          } else {
+            setArcs(prev => [...prev, ...data]);
+          }
+          setArcsOffset(offset + 20);
+          setHasMoreArcs(data.length === 20);
+        } else {
+          if (reset) setArcs([]);
+          setHasMoreArcs(false);
+        }
+      })
+      .catch(err => {
+        console.error("Failed to fetch arcs:", err);
+        if (reset) setArcs([]);
+        setHasMoreArcs(false);
+      });
+  };
 
   const fetchRelationshipChecks = (reset = false) => {
     const offset = reset ? 0 : relationshipChecksOffset;
@@ -1419,6 +1448,7 @@ export default function App() {
                 onClick={() => setActiveTab('messages')} 
               />
               <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); }} />
+              <NavItem icon={<BookOpen />} label="Arcs" active={activeTab === 'arcs'} onClick={() => { setActiveTab('arcs'); fetchArcs(true); }} />
               <NavItem icon={<UserCheck />} label="Following" active={activeTab === 'following'} onClick={() => setActiveTab('following')} />
               {loggedInUser?.role === 'admin' && (
                 <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(true); }} />
@@ -2331,6 +2361,82 @@ export default function App() {
                     <UserCheck size={48} className="mx-auto mb-4 opacity-20" />
                     <p>You are not following any characters yet.</p>
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'arcs' && (
+            <div className="p-6 max-w-4xl mx-auto">
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                <BookOpen className="text-orange-500" />
+                Ongoing Arcs
+              </h2>
+              <p className="text-gray-400 mb-6">
+                This tab shows all active and recently completed arcs for characters and universes.
+              </p>
+              
+              <div className="space-y-4">
+                {arcs.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <BookOpen size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>No arcs have been generated yet.</p>
+                  </div>
+                ) : (
+                  arcs.map((arc: any) => (
+                    <div key={`${arc.arc_type}-${arc.id}`} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {arc.entity_image ? (
+                            <img src={arc.entity_image} alt={arc.entity_name} className="w-10 h-10 rounded-full object-cover bg-gray-800" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-gray-500">
+                              {arc.arc_type === 'universe' ? <Globe size={20} /> : <User size={20} />}
+                            </div>
+                          )}
+                          <div>
+                            <h3 className="font-bold text-lg leading-tight">{arc.title}</h3>
+                            <p className="text-xs text-gray-500">
+                              {arc.entity_name} {arc.entity_handle ? `(@${arc.entity_handle})` : ''} • {new Date(arc.last_update_date || arc.created_at).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${arc.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                          {arc.status === 'completed' ? 'Completed' : 'Active'}
+                        </div>
+                      </div>
+                      
+                      <div className="bg-black/30 rounded-xl p-4 text-sm space-y-3">
+                        <div>
+                          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Description</span>
+                          <p className="text-gray-300 mt-1">{arc.description}</p>
+                        </div>
+                        
+                        {arc.arc_type === 'universe' && arc.current_status_text && (
+                          <div>
+                            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Current Status</span>
+                            <p className="text-gray-300 mt-1 italic">"{arc.current_status_text}"</p>
+                          </div>
+                        )}
+
+                        {arc.status === 'completed' && arc.completion_summary && (
+                          <div className="pt-2 border-t border-gray-800/50">
+                            <span className="text-xs font-bold text-green-500 uppercase tracking-wider">Conclusion</span>
+                            <p className="text-gray-300 mt-1">{arc.completion_summary}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+                
+                {hasMoreArcs && arcs.length > 0 && (
+                  <button 
+                    onClick={() => fetchArcs(false)}
+                    className="w-full py-4 text-center text-gray-400 hover:text-white bg-gray-900 hover:bg-gray-800 rounded-xl transition font-bold mt-4"
+                  >
+                    Load More Arcs
+                  </button>
                 )}
               </div>
             </div>
