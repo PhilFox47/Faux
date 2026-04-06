@@ -1883,38 +1883,18 @@ export default function App() {
                   </div>
                 ) : (
                   fauxPicsPosts.map(post => (
-                    <div key={post.id} className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
-                      <div className="p-4 flex items-center gap-3">
-                        <img src={post.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
-                        <span className="font-bold text-sm">{post.display_name}</span>
-                      </div>
-                      <div className="bg-black flex items-center justify-center min-h-[300px]">
-                        <img 
-                          src={post.image_url || post.content.match(/\((.*?)\)/)?.[1] || `https://picsum.photos/seed/${post.id}/800/800`} 
-                          alt="FauxPic" 
-                          className="w-full h-auto max-h-[80vh] object-contain" 
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                      <div className="p-4">
-                        <div className="flex gap-4 mb-3">
-                          <button onClick={() => handleLike(post.id)} className="hover:scale-110 transition">
-                            <Heart className={post.is_liked ? "fill-red-500 text-red-500" : "text-white"} size={24} />
-                          </button>
-                          <button onClick={() => { setHighlightedPostId(post.id); setActiveTab('home'); }} className="hover:scale-110 transition">
-                            <MessageCircle size={24} />
-                          </button>
-                          <Send size={24} />
-                        </div>
-                        <p className="text-sm">
-                          <span className="font-bold mr-2">{post.display_name}</span>
-                          {post.content.replace(/\(.*?\)/g, '').trim()}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-2 uppercase tracking-tighter">
-                          {new Date(post.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
+                    <FauxPicItem 
+                      key={post.id}
+                      post={post}
+                      onLike={() => handleLike(post.id)}
+                      onViewProfile={handleViewProfile}
+                      onShowLikers={handleShowLikers}
+                      formatTimestamp={formatTimestamp}
+                      onRefresh={fetchPosts}
+                      users={realUsers}
+                      loggedInUser={loggedInUser}
+                      apiFetch={apiFetch}
+                    />
                   ))
                 )}
               </div>
@@ -4301,6 +4281,169 @@ function renderContentWithTags(content: string, users: any[] | undefined, onView
     }
     return <span key={i}>{part}</span>;
   });
+}
+
+function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, users, loggedInUser, apiFetch }: { post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState<any[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [isSendingComment, setIsSendingComment] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<any>(null);
+  const [replyContent, setReplyContent] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
+
+  const fetchComments = useCallback(() => {
+    apiFetch(`/api/posts/${post.id}/comments`).then((r: any) => r.json()).then(setComments);
+  }, [post.id, apiFetch]);
+
+  useEffect(() => {
+    if (showComments) {
+      fetchComments();
+      const interval = setInterval(fetchComments, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [showComments, fetchComments]);
+
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newComment.trim() || isSendingComment) return;
+    setIsSendingComment(true);
+    try {
+      await apiFetch(`/api/posts/${post.id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newComment })
+      });
+      setNewComment('');
+      fetchComments();
+      onRefresh();
+    } finally {
+      setIsSendingComment(false);
+    }
+  };
+
+  const handleCommentLike = async (commentId: number) => {
+    await apiFetch(`/api/comments/${commentId}/like`, { method: 'POST' });
+    fetchComments();
+  };
+
+  const handleAddReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!replyContent.trim() || isSendingReply || !replyingTo) return;
+    setIsSendingReply(true);
+    try {
+      await apiFetch(`/api/posts/${post.id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: replyContent, parent_id: replyingTo.id })
+      });
+      setReplyContent('');
+      setReplyingTo(null);
+      fetchComments();
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
+
+  const rootComments = comments.filter(c => !c.parent_id);
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
+      <div className="p-4 flex items-center gap-3 cursor-pointer" onClick={() => onViewProfile(post.user_id)}>
+        <img src={post.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+        <span className="font-bold text-sm hover:underline">{post.display_name}</span>
+      </div>
+      <div className="bg-black flex items-center justify-center min-h-[300px]">
+        <img 
+          src={post.image_url || post.content.match(/\((.*?)\)/)?.[1] || `https://picsum.photos/seed/${post.id}/800/800`} 
+          alt="FauxPic" 
+          className="w-full h-auto max-h-[80vh] object-contain" 
+          referrerPolicy="no-referrer"
+        />
+      </div>
+      <div className="p-4">
+        <div className="flex gap-4 mb-3 items-center">
+          <div className="flex items-center gap-2">
+            <button onClick={onLike} className="hover:scale-110 transition">
+              <Heart className={post.is_liked ? "fill-red-500 text-red-500" : "text-white"} size={24} />
+            </button>
+            {post.like_count > 0 && (
+              <button onClick={() => onShowLikers('post', post.id)} className="text-sm font-bold hover:underline">{post.like_count}</button>
+            )}
+          </div>
+          <button onClick={() => setShowComments(!showComments)} className="hover:scale-110 transition">
+            <MessageCircle size={24} className={showComments ? "text-orange-500" : "text-white"} />
+          </button>
+          <Send size={24} />
+        </div>
+        <p className="text-sm">
+          <span className="font-bold mr-2 cursor-pointer hover:underline" onClick={() => onViewProfile(post.user_id)}>{post.display_name}</span>
+          {renderContentWithTags(post.content.replace(/\(.*?\)/g, '').trim(), users, onViewProfile)}
+        </p>
+        <p className="text-xs text-gray-500 mt-2 uppercase tracking-tighter">
+          {formatTimestamp(post.created_at)}
+        </p>
+
+        {showComments && (
+          <div className="mt-4 pt-4 border-t border-gray-800 space-y-4">
+            <div className="max-h-[400px] overflow-y-auto space-y-4 pr-2">
+              {rootComments.length === 0 ? (
+                <p className="text-gray-500 text-xs italic">No comments yet</p>
+              ) : (
+                rootComments.map(comment => (
+                  <CommentItem 
+                    key={comment.id}
+                    comment={comment}
+                    apiFetch={apiFetch}
+                    loggedInUser={loggedInUser}
+                    onLike={handleCommentLike}
+                    onReply={(c) => setReplyingTo({ id: c.id, name: c.display_name })}
+                    onViewProfile={onViewProfile}
+                    onShowLikers={onShowLikers}
+                    formatTimestamp={formatTimestamp}
+                    onRefresh={fetchComments}
+                    users={users}
+                  />
+                ))
+              )}
+            </div>
+
+            <form onSubmit={handleAddComment} className="flex gap-2 mt-4">
+              <input 
+                value={newComment}
+                onChange={e => setNewComment(e.target.value)}
+                placeholder="Add a comment..."
+                className="flex-1 bg-transparent border-b border-gray-800 py-1 text-sm outline-none focus:border-orange-500"
+              />
+              <button type="submit" disabled={!newComment.trim()} className="text-orange-500 font-bold text-sm disabled:opacity-50">Post</button>
+            </form>
+          </div>
+        )}
+      </div>
+
+      {replyingTo && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
+            <h3 className="font-bold mb-4">Replying to @{replyingTo.name}</h3>
+            <form onSubmit={handleAddReply}>
+              <textarea 
+                autoFocus
+                value={replyContent}
+                onChange={e => setReplyContent(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500 mb-4"
+                rows={4}
+                placeholder="Write your reply..."
+              />
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setReplyingTo(null)} className="px-4 py-2 text-gray-400 hover:text-white transition">Cancel</button>
+                <button type="submit" disabled={!replyContent.trim() || isSendingReply} className="px-6 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-bold transition disabled:opacity-50">Reply</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
