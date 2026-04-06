@@ -79,6 +79,8 @@ export function initDb() {
       sender_id INTEGER NOT NULL,
       receiver_id INTEGER NOT NULL,
       content TEXT NOT NULL,
+      image_url TEXT,
+      image_prompt TEXT,
       is_read BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (sender_id) REFERENCES users(id),
@@ -243,6 +245,15 @@ export function initDb() {
       FOREIGN KEY (universe_id) REFERENCES universes(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS dm_settings (
+      user_id INTEGER NOT NULL,
+      target_id INTEGER NOT NULL,
+      is_group BOOLEAN NOT NULL DEFAULT 0,
+      allow_image_gen BOOLEAN DEFAULT 0,
+      PRIMARY KEY (user_id, target_id, is_group),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_is_visible ON posts(is_visible);
@@ -382,6 +393,14 @@ export function initDb() {
   } catch (e) {
     db.exec("ALTER TABLE settings ADD COLUMN timezone TEXT DEFAULT 'UTC'");
   }
+
+  // Handle schema migrations for direct_messages
+  try {
+    db.exec("ALTER TABLE direct_messages ADD COLUMN image_url TEXT");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE direct_messages ADD COLUMN image_prompt TEXT");
+  } catch (e) {}
 
   // Handle schema migrations for users
   try {

@@ -3,6 +3,7 @@ import db from './db';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { FAUX_GROUND_RULES } from './groundRules';
 
 function getOpenAI() {
   let apiKey = process.env.NANO_GPT_API_KEY || '';
@@ -240,7 +241,7 @@ function buildCharacterPrompt(character: any) {
     }
   }
 
-  prompt += `\nYou are currently using "Faux", a multiversal social media platform where characters from various franchises, universes, and backgrounds interact.`;
+  prompt += `\n${FAUX_GROUND_RULES}`;
   
   try {
     const settings = db.prepare("SELECT timezone, allow_nsfw FROM settings WHERE id = 1").get() as any;
@@ -443,7 +444,6 @@ Think about something you would post on social media right now that would justif
 Make sure to only create the vision/idea of the post, not the post itself.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
 ${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ''}
-CRITICAL UNIVERSE RULE: Characters from different universes can ONLY interact digitally (e.g., playing a game online, video call, podcast, chatting). They CANNOT meet up in the "real world". Characters from the SAME universe CAN meet up in the real world. Keep this in mind when mentioning other characters.
 ${context ? `Your recent posts (with timestamps): ${context}
 CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
 Respond with ONLY the brief idea.`;
@@ -454,7 +454,6 @@ Respond with ONLY the brief idea.`;
 Based on this idea for a photo post: "${idea}"
 Generate the Text Part of the post. DO NOT include an image description (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.
 ${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ''}
-CRITICAL UNIVERSE RULE: Characters from different universes can ONLY interact digitally (e.g., playing a game online, video call, podcast, chatting). They CANNOT meet up in the "real world". Characters from the SAME universe CAN meet up in the real world. Keep this in mind when mentioning other characters.
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
     const textPost = await helperCallLLM(textPrompt, "generateImagePostData_text", 0.9);
 
@@ -718,8 +717,7 @@ CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same top
 ${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : `IMPORTANT: This is a text-only post. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your post must rely entirely on text and emojis.`}
 ${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
 ${postTypeObj.id === 'event' ? `IMPORTANT: This is an EVENT post. An event has happened that affects you and some other characters. Describe the event and your reaction to it. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
-${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
-CRITICAL UNIVERSE RULE: Characters from different universes can ONLY interact digitally (e.g., playing a game online, video call, podcast, chatting). They CANNOT meet up in the "real world". Characters from the SAME universe CAN meet up in the real world. Keep this in mind when mentioning other characters.`}
+${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}`}
 Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
 
   try {
@@ -939,7 +937,7 @@ IMPORTANT: This is a text-only message. DO NOT include any image descriptions, p
   }
 }
 
-export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string, created_at: string}[], relationshipContext: string = '', otherUserId?: number, isDelayed: boolean = false) {
+export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string, created_at: string}[], relationshipContext: string = '', otherUserId?: number, isDelayed: boolean = false, allowImageGen: boolean = false) {
   let otherUserInfo = '';
   if (otherUserId) {
     const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
@@ -959,6 +957,14 @@ You are having a private direct message conversation with ${userDisplayName}.
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
 ${isDelayed ? `IMPORTANT: You were offline/busy for a while and are just now getting back to this message. You can briefly mention why you took so long if it fits your character (e.g. you were sleeping, busy with something, or just didn't see it).` : ''}
+
+${allowImageGen ? `
+IMAGE GENERATION:
+You can send images in this DM if the user explicitly asks for one (e.g., "show me a picture", "send me a photo", "I'd love to see that").
+To send an image, include the following tag at the END of your message: [GENERATE_IMAGE: a detailed description of the image you want to send].
+The description should be what IS in the image, not instructions for the AI.
+Only send an image if it makes sense in the context of the conversation and the user's request.
+` : 'IMPORTANT: You CANNOT send images in this DM. Do not offer to send images.'}
 
 Conversation history (with timestamps):
 ${historyStr}
@@ -1009,7 +1015,14 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
       character.id
     );
     
-    return content;
+    let imagePrompt: string | undefined = undefined;
+    const imageMatch = content.match(/\[GENERATE_IMAGE:\s*(.*?)\]/i);
+    if (imageMatch) {
+      imagePrompt = imageMatch[1].trim();
+      content = content.replace(/\[GENERATE_IMAGE:\s*.*?\]/gi, '').trim();
+    }
+
+    return { content, imagePrompt };
   } catch (error: any) {
     console.error('Error replying to DM:', error);
     logApi(

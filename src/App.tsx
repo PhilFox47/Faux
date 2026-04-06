@@ -1285,16 +1285,59 @@ export default function App() {
     fetchUsers();
   };
 
+  const [dmSettings, setDmSettings] = useState<any>({ allow_image_gen: 0 });
+  const [dmImage, setDmImage] = useState<string | null>(null);
+  const dmImageInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (activeChat) {
+      apiFetch(`/api/dms/settings/${activeChat.id}?isGroup=${isGroupChat}`)
+        .then(res => res.json())
+        .then(data => setDmSettings(data))
+        .catch(err => console.error(err));
+    }
+  }, [activeChat, isGroupChat, apiFetch]);
+
+  const handleToggleImageGen = async () => {
+    if (!activeChat) return;
+    const newVal = dmSettings.allow_image_gen === 1 ? 0 : 1;
+    try {
+      const res = await apiFetch(`/api/dms/settings/${activeChat.id}?isGroup=${isGroupChat}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allow_image_gen: newVal })
+      });
+      if (res.ok) {
+        setDmSettings({ ...dmSettings, allow_image_gen: newVal });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDmImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setDmImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleSendMsg = async (e: React.FormEvent | React.KeyboardEvent | any) => {
     e.preventDefault();
-    if (!newChatMsg.trim() || !activeChat || isSendingMsg) return;
+    if ((!newChatMsg.trim() && !dmImage) || !activeChat || isSendingMsg) return;
     
     setIsSendingMsg(true);
     // Optimistic update
     const msg = newChatMsg.trim();
+    const image_url = dmImage;
     setNewChatMsg('');
+    setDmImage(null);
     const realUser = loggedInUser;
-    setChatMessages(prev => [...prev, { sender_id: realUser?.id || 1, content: msg, created_at: new Date().toISOString() }]);
+    setChatMessages(prev => [...prev, { sender_id: realUser?.id || 1, content: msg, image_url: image_url, created_at: new Date().toISOString() }]);
 
     const endpoint = isGroupChat ? `/api/group-chats/${activeChat.id}/messages` : `/api/dms/${activeChat.id}`;
     
@@ -1302,7 +1345,7 @@ export default function App() {
       await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: msg })
+        body: JSON.stringify({ content: msg, image_url })
       });
       fetchChatMessages(activeChat.id, isGroupChat);
       if (isGroupChat) fetchGroupChats();
@@ -2245,6 +2288,13 @@ export default function App() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
+                        onClick={handleToggleImageGen}
+                        className={`p-2 rounded-full transition ${dmSettings.allow_image_gen === 1 ? 'text-orange-500 bg-orange-500/10' : 'text-gray-500 hover:text-orange-500 hover:bg-orange-500/10'}`}
+                        title={dmSettings.allow_image_gen === 1 ? "Disable Image Generation" : "Enable Image Generation"}
+                      >
+                        <Zap size={20} fill={dmSettings.allow_image_gen === 1 ? "currentColor" : "none"} />
+                      </button>
+                      <button
                         onClick={() => handleToggleFavorite(activeChat.id, isGroupChat)}
                         className={`p-2 rounded-full transition ${dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? 'text-yellow-500 bg-yellow-500/10' : 'text-gray-500 hover:text-yellow-500 hover:bg-yellow-500/10'}`}
                         title={dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? "Unfavorite" : "Favorite"}
@@ -2294,6 +2344,11 @@ export default function App() {
                             )}
                             <div className={`group flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
                               <div className={`rounded-2xl p-3 whitespace-pre-wrap break-words ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
+                                {msg.image_url && (
+                                  <div className="mb-2 rounded-lg overflow-hidden border border-white/10">
+                                    <img src={msg.image_url} alt="" className="w-full h-auto max-h-64 object-cover" referrerPolicy="no-referrer" />
+                                  </div>
+                                )}
                                 {editingDmId === msg.id ? (
                                   <div className="flex flex-col gap-2 min-w-[200px]">
                                     <textarea 
@@ -2325,7 +2380,33 @@ export default function App() {
                     })}
                   </div>
                   <div className="p-4 border-t border-gray-800">
+                    {dmImage && (
+                      <div className="mb-2 relative inline-block">
+                        <img src={dmImage} alt="Preview" className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                        <button 
+                          onClick={() => setDmImage(null)}
+                          className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 border border-gray-700 hover:bg-gray-800"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
                     <form onSubmit={handleSendMsg} className="flex gap-2 items-end">
+                      <input 
+                        type="file" 
+                        ref={dmImageInputRef} 
+                        onChange={handleDmImageUpload} 
+                        accept="image/*" 
+                        className="hidden" 
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => dmImageInputRef.current?.click()}
+                        className="p-3 text-gray-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition mb-1"
+                        title="Upload Image"
+                      >
+                        <Image size={24} />
+                      </button>
                       <TagTextarea 
                         users={users}
                         value={newChatMsg}
@@ -4371,9 +4452,14 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
               <button onClick={() => onShowLikers('post', post.id)} className="text-sm font-bold hover:underline">{post.like_count}</button>
             )}
           </div>
-          <button onClick={() => setShowComments(!showComments)} className="hover:scale-110 transition">
-            <MessageCircle size={24} className={showComments ? "text-orange-500" : "text-white"} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowComments(!showComments)} className="hover:scale-110 transition">
+              <MessageCircle size={24} className={showComments ? "text-orange-500" : "text-white"} />
+            </button>
+            {post.comment_count > 0 && (
+              <span className="text-sm font-bold">{post.comment_count}</span>
+            )}
+          </div>
           <Send size={24} />
         </div>
         <p className="text-sm">

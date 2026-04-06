@@ -2003,6 +2003,27 @@ async function startServer() {
     res.json(messages);
   });
 
+  app.get("/api/dms/settings/:targetId", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    const isGroup = req.query.isGroup === 'true';
+    const settings = db.prepare("SELECT * FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = ?").get(user.id, req.params.targetId, isGroup ? 1 : 0) as any;
+    res.json(settings || { allow_image_gen: 0 });
+  });
+
+  app.post("/api/dms/settings/:targetId", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    const { allow_image_gen } = req.body;
+    const isGroup = req.query.isGroup === 'true';
+    db.prepare(`
+      INSERT INTO dm_settings (user_id, target_id, is_group, allow_image_gen)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, target_id, is_group) DO UPDATE SET allow_image_gen = excluded.allow_image_gen
+    `).run(user.id, req.params.targetId, isGroup ? 1 : 0, allow_image_gen ? 1 : 0);
+    res.json({ success: true });
+  });
+
   app.delete("/api/dms/:userId", (req, res) => {
     const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
@@ -2046,13 +2067,20 @@ async function startServer() {
 
   app.post("/api/dms/:userId", async (req, res) => {
     try {
-      const { content } = req.body;
+      const { content, image_url } = req.body;
       const user = getRealUser(req);
       if (!user) return res.status(401).json({ error: "User not found" });
 
       const receiverId = req.params.userId;
-      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-        .run(user.id, receiverId, content.trim());
+      
+      let finalContent = content?.trim() || "";
+      if (image_url) {
+        const description = await analyzeImage(image_url);
+        finalContent = `${finalContent}\n\n[User sent an image. Description: ${description}]`.trim();
+      }
+
+      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)")
+        .run(user.id, receiverId, finalContent, image_url || null);
       
       res.json({ success: true });
 
@@ -2067,6 +2095,10 @@ async function startServer() {
         pendingDMs.add(dmKey);
         
         try {
+          // Get dm settings for allow_image_gen
+          const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(user.id, receiverId) as any;
+          const allowImageGen = dmSettings?.allow_image_gen === 1;
+
           // Get recent history
           const history = db.prepare(`
             SELECT sender_id, content, created_at FROM direct_messages
@@ -2083,10 +2115,21 @@ async function startServer() {
           const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
           const relContext = rel ? rel.description : '';
 
-          const reply = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id);
-          if (reply) {
-            db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-              .run(receiverId, user.id, reply.trim());
+          const replyData = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id, false, allowImageGen);
+          if (replyData) {
+            const { content: replyContent, imagePrompt } = replyData;
+            
+            const info = db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
+              .run(receiverId, user.id, replyContent.trim());
+            const msgId = info.lastInsertRowid;
+
+            if (imagePrompt && allowImageGen) {
+              // Generate image
+              const imageUrl = await generateImage(imagePrompt, undefined, receiver.avatar_url ? [receiver.avatar_url] : undefined);
+              if (imageUrl) {
+                db.prepare("UPDATE direct_messages SET image_url = ?, image_prompt = ? WHERE id = ?").run(imageUrl, imagePrompt, msgId);
+              }
+            }
             checkDynamicRelationship(receiver.id, user.id).catch(console.error);
           }
         } finally {
