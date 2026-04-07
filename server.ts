@@ -2586,7 +2586,8 @@ async function startServer() {
         const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(randomAi.id) as any).count;
         
         let multiplier = 0.5;
-        if (followersCount === 1) multiplier = 1.0;
+        if (followersCount === 0) multiplier = 0;
+        else if (followersCount === 1) multiplier = 1.0;
         else if (followersCount === 2) multiplier = 1.5;
         else if (followersCount === 3) multiplier = 1.7;
         else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
@@ -2614,7 +2615,8 @@ async function startServer() {
         
         const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(inactiveUser.id) as any).count;
         let multiplier = 0.5;
-        if (followersCount === 1) multiplier = 1.0;
+        if (followersCount === 0) multiplier = 0;
+        else if (followersCount === 1) multiplier = 1.0;
         else if (followersCount === 2) multiplier = 1.5;
         else if (followersCount === 3) multiplier = 1.7;
         else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
@@ -2644,7 +2646,8 @@ async function startServer() {
           
           const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(activeUser.id) as any).count;
           let multiplier = 0.5;
-          if (followersCount === 1) multiplier = 1.0;
+          if (followersCount === 0) multiplier = 0;
+          else if (followersCount === 1) multiplier = 1.0;
           else if (followersCount === 2) multiplier = 1.5;
           else if (followersCount === 3) multiplier = 1.7;
           else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;

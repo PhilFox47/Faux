@@ -2400,9 +2400,10 @@ export default function App() {
                                 )}
                                 {editingDmId === msg.id ? (
                                   <div className="flex flex-col gap-2 min-w-[200px]">
-                                    <textarea 
+                                    <TagTextarea 
+                                      users={users || []}
                                       value={editingDmContent} 
-                                      onChange={e => setEditingDmContent(e.target.value)}
+                                      onValueChange={setEditingDmContent}
                                       className={`w-full border rounded p-2 text-white outline-none resize-none ${isMe ? 'bg-orange-600 border-orange-400 focus:border-white' : 'bg-gray-700 border-gray-600 focus:border-orange-500'}`}
                                       rows={3}
                                     />
@@ -4645,10 +4646,11 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
           <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
             <h3 className="font-bold mb-4">Replying to @{replyingTo.name}</h3>
             <form onSubmit={handleAddReply}>
-              <textarea 
+              <TagTextarea 
+                users={users || []}
                 autoFocus
                 value={replyContent}
-                onChange={e => setReplyContent(e.target.value)}
+                onValueChange={setReplyContent}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500 mb-4"
                 rows={4}
                 placeholder="Write your reply..."

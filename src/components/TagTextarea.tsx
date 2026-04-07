@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
+import { Smile } from 'lucide-react';
 
 interface TagTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   users: any[];
@@ -13,10 +15,13 @@ interface TagTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElem
 
 export function TagTextarea({ users, value, onValueChange, className, ...props }: TagTextareaProps) {
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [pickerPosition, setPickerPosition] = useState<'top' | 'bottom'>('top');
   const [searchQuery, setSearchQuery] = useState('');
   const [tagIndex, setTagIndex] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
 
   // Extract flex-1 from className to apply to container
   const isFlex1 = className?.includes('flex-1');
@@ -26,6 +31,9 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setShowDropdown(false);
+      }
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
       }
     };
 
@@ -84,19 +92,68 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
     }, 0);
   };
 
+  const onEmojiClick = (emojiObject: any) => {
+    const cursorPosition = textareaRef.current?.selectionStart || value.length;
+    const before = value.slice(0, cursorPosition);
+    const after = value.slice(cursorPosition);
+    const newValue = before + emojiObject.emoji + after;
+    onValueChange(newValue);
+    
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        const newCursorPos = cursorPosition + emojiObject.emoji.length;
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  };
+
   const filteredUsers = (users || [])
     .filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()) || u.display_name.toLowerCase().includes(searchQuery.toLowerCase()))
     .slice(0, 5);
 
   return (
     <div className={`relative ${isFlex1 ? 'flex-1' : 'w-full'}`} ref={containerRef}>
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={handleInput}
-        className={`w-full ${textareaClassName}`}
-        {...props}
-      />
+      <div className="relative w-full h-full flex flex-col">
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={handleInput}
+          className={`w-full !pr-10 md:!pr-12 ${textareaClassName}`}
+          {...props}
+        />
+        <div className="absolute right-2 bottom-2 hidden md:block" ref={emojiPickerRef}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              if (!showEmojiPicker && emojiPickerRef.current) {
+                const rect = emojiPickerRef.current.getBoundingClientRect();
+                // Emoji picker is roughly 450px tall. If there isn't enough space above, open downwards.
+                if (rect.top < 450) {
+                  setPickerPosition('bottom');
+                } else {
+                  setPickerPosition('top');
+                }
+              }
+              setShowEmojiPicker(!showEmojiPicker);
+            }}
+            className="text-gray-500 hover:text-orange-500 transition-colors p-2 rounded-full hover:bg-gray-800/50"
+          >
+            <Smile size={20} />
+          </button>
+          
+          {showEmojiPicker && (
+            <div className={`absolute right-0 z-50 ${pickerPosition === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}`}>
+              <EmojiPicker 
+                theme={Theme.DARK} 
+                onEmojiClick={onEmojiClick}
+                lazyLoadEmojis={true}
+              />
+            </div>
+          )}
+        </div>
+      </div>
       {showDropdown && filteredUsers.length > 0 && (
         <div className="absolute z-50 bg-zinc-900 border border-zinc-800/80 rounded-xl shadow-xl mt-1 w-64 max-h-60 overflow-y-auto custom-scrollbar" style={{ top: '100%', left: 0 }}>
           {filteredUsers.map(user => (
