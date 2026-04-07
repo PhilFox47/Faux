@@ -1391,7 +1391,7 @@ export async function generateImage(prompt: string, negative_prompt?: string, re
   }
 }
 
-export async function evaluateDynamicRelationship(user1: any, user2: any, recentComments: any[], recentDms: any[], difficulty: string, existingRelationship?: string): Promise<{ result: boolean, description?: string }> {
+export async function evaluateDynamicRelationship(user1: any, user2: any, recentComments: any[], recentDms: any[], difficulty: string, existingRelationship?: string, isCrossUniverse: boolean = false): Promise<{ result: boolean, description?: string }> {
   let contextStr = "Recent Interactions:\n";
   if (recentComments.length > 0) {
     contextStr += "Comments:\n" + recentComments.map(c => `[${c.created_at}] ${c.commenter} replied to ${c.poster}'s post ("${c.post_content}"): "${c.content}"`).join("\n") + "\n";
@@ -1408,6 +1408,8 @@ Difficulty Modifier: ${difficulty}
 - Easy: They have few relationships, so be more lenient.
 - Medium: They have some relationships, be moderately strict.
 - Hard: They have many relationships, be very strict. Only the most exceptional dynamics should pass.
+
+${isCrossUniverse ? `CRITICAL CONTEXT: These two characters are from DIFFERENT universes. It should be significantly harder for them to form a meaningful bond compared to characters from the same universe. Only say "Yes" if their interactions show an extraordinary, cross-dimensional connection that transcends their different origins.` : `These characters are from the same universe.`}
 
 User 1: ${user1.display_name} (@${user1.username})
 Bio: ${user1.bio || 'N/A'}

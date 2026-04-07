@@ -81,6 +81,7 @@ export function initDb() {
       content TEXT NOT NULL,
       image_url TEXT,
       image_prompt TEXT,
+      image_description TEXT,
       is_read BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (sender_id) REFERENCES users(id),
@@ -300,6 +301,13 @@ export function initDb() {
   // Add account_type column to post_archetypes if it doesn't exist
   try {
     db.exec("ALTER TABLE post_archetypes ADD COLUMN account_type TEXT DEFAULT 'character'");
+  } catch (e) {
+    // Column might already exist
+  }
+
+  // Add image_description column to direct_messages if it doesn't exist
+  try {
+    db.exec("ALTER TABLE direct_messages ADD COLUMN image_description TEXT");
   } catch (e) {
     // Column might already exist
   }

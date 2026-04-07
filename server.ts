@@ -37,6 +37,33 @@ function isUserOnline(user: any, timezone: string) {
   }
 
   const now = Date.now();
+
+  // Check if they received a DM from a real user in the last 15 minutes
+  if (dbUser.is_ai === 1) {
+    const fifteenMinsAgo = new Date(now - 15 * 60 * 1000).toISOString();
+    const recentDm = db.prepare(`
+      SELECT 1 FROM direct_messages dm
+      JOIN users u ON dm.sender_id = u.id
+      WHERE dm.receiver_id = ? AND u.is_ai = 0 AND dm.created_at >= ?
+      LIMIT 1
+    `).get(userId, fifteenMinsAgo);
+
+    if (recentDm) {
+      const expiresAt = now + (15 * 60 * 1000);
+      if (dbUser.current_online_status !== 1 || !dbUser.status_expires_at || dbUser.status_expires_at < expiresAt) {
+        try {
+          db.prepare("UPDATE users SET current_online_status = 1, status_expires_at = ? WHERE id = ?")
+            .run(expiresAt, userId);
+        } catch(e) {
+          console.error("Failed to update user online status", e);
+        }
+        user.current_online_status = 1;
+        user.status_expires_at = expiresAt;
+      }
+      return true;
+    }
+  }
+
   if (dbUser.status_expires_at && now < dbUser.status_expires_at) {
     return dbUser.current_online_status === 1;
   }
@@ -154,12 +181,14 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
   `).get(user1Id, user2Id, user2Id, user1Id) as any).count;
 
   let expectedChecks = 0;
+  const isCrossUniverse = user1.universe_id !== user2.universe_id;
+
   if (existingRel) {
     // If relationship exists, check every 20 comments or 100 DMs
     expectedChecks = Math.floor(commentsCount / 20) + Math.floor(dmsCount / 100);
   } else {
-    // If no relationship, check every 5 comments or 20 DMs
-    expectedChecks = Math.floor(commentsCount / 5) + Math.floor(dmsCount / 20);
+    // If no relationship, check every 10 comments or 40 DMs
+    expectedChecks = Math.floor(commentsCount / 10) + Math.floor(dmsCount / 40);
   }
 
   if (expectedChecks <= 0) return;
@@ -200,7 +229,7 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
     if (minRels >= 10) difficulty = "Hard";
     else if (minRels >= 5) difficulty = "Medium";
 
-    const { result, description } = await evaluateDynamicRelationship(user1, user2, recentComments, recentDms, difficulty, existingRel?.description);
+    const { result, description } = await evaluateDynamicRelationship(user1, user2, recentComments, recentDms, difficulty, existingRel?.description, isCrossUniverse);
 
     const u1 = Math.min(user1Id, user2Id);
     const u2 = Math.max(user1Id, user2Id);
@@ -1483,8 +1512,9 @@ async function startServer() {
     const user = getRealUser(req);
     const userId = user ? user.id : 0;
     const limit = parseInt(req.query.limit as string) || 50;
+    const type = req.query.type as string;
     
-    const posts = db.prepare(`
+    let query = `
       SELECT p.*, u.username, u.display_name, u.avatar_url,
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
@@ -1493,9 +1523,18 @@ async function startServer() {
       JOIN users u ON p.user_id = u.id
       WHERE (p.user_id = ? OR p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?))
       AND p.is_visible = 1
-      ORDER BY p.created_at DESC
-      LIMIT ?
-    `).all(userId, userId, userId, limit);
+    `;
+    const params: any[] = [userId, userId, userId];
+
+    if (type) {
+      query += ` AND p.post_type = ?`;
+      params.push(type);
+    }
+
+    query += ` ORDER BY p.created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const posts = db.prepare(query).all(...params);
     res.json(posts);
   });
 
@@ -2074,68 +2113,96 @@ async function startServer() {
       const receiverId = req.params.userId;
       
       let finalContent = content?.trim() || "";
-      if (image_url) {
-        const description = await analyzeImage(image_url);
-        finalContent = `${finalContent}\n\n[User sent an image. Description: ${description}]`.trim();
-      }
 
-      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)")
+      const info = db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)")
         .run(user.id, receiverId, finalContent, image_url || null);
       
-      res.json({ success: true });
+      const messageId = info.lastInsertRowid;
+      
+      res.json({ success: true, messageId });
 
-      checkDynamicRelationship(user.id, parseInt(receiverId)).catch(console.error);
-
-      // AI Reply logic
-      const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
-      const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
-      if (receiver && isUserOnline(receiver, settings?.timezone || 'UTC')) {
-        const dmKey = `${receiverId}:${user.id}`;
-        if (pendingDMs.has(dmKey)) return;
-        pendingDMs.add(dmKey);
-        
+      // Background processing
+      (async () => {
         try {
-          // Get dm settings for allow_image_gen
-          const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(user.id, receiverId) as any;
-          const allowImageGen = dmSettings?.allow_image_gen === 1;
-
-          // Get recent history
-          const history = db.prepare(`
-            SELECT sender_id, content, created_at FROM direct_messages
-            WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-            ORDER BY created_at DESC LIMIT 10
-          `).all(user.id, receiverId, receiverId, user.id).reverse();
-
-          const formattedHistory = history.map((msg: any) => ({
-            role: msg.sender_id === receiverId ? 'assistant' : 'user',
-            content: msg.content,
-            created_at: msg.created_at
-          }));
-
-          const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
-          const relContext = rel ? rel.description : '';
-
-          const replyData = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id, false, allowImageGen);
-          if (replyData) {
-            const { content: replyContent, imagePrompt } = replyData;
-            
-            const info = db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-              .run(receiverId, user.id, replyContent.trim());
-            const msgId = info.lastInsertRowid;
-
-            if (imagePrompt && allowImageGen) {
-              // Generate image
-              const imageUrl = await generateImage(imagePrompt, undefined, receiver.avatar_url ? [receiver.avatar_url] : undefined);
-              if (imageUrl) {
-                db.prepare("UPDATE direct_messages SET image_url = ?, image_prompt = ? WHERE id = ?").run(imageUrl, imagePrompt, msgId);
-              }
+          if (image_url) {
+            try {
+              const description = await analyzeImage(image_url);
+              db.prepare("UPDATE direct_messages SET image_description = ? WHERE id = ?")
+                .run(description, messageId);
+            } catch (imgErr) {
+              console.error("Error analyzing image:", imgErr);
             }
-            checkDynamicRelationship(receiver.id, user.id).catch(console.error);
           }
-        } finally {
-          pendingDMs.delete(dmKey);
+
+          checkDynamicRelationship(user.id, parseInt(receiverId)).catch(console.error);
+
+          // AI Reply logic
+          const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
+          const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
+          if (receiver && isUserOnline(receiver, settings?.timezone || 'UTC')) {
+            const dmKey = `${receiverId}:${user.id}`;
+            if (pendingDMs.has(dmKey)) return;
+            pendingDMs.add(dmKey);
+            
+            try {
+              // Get dm settings for allow_image_gen
+              const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(user.id, receiverId) as any;
+              const allowImageGen = dmSettings?.allow_image_gen === 1;
+
+              // Get recent history
+              const history = db.prepare(`
+                SELECT sender_id, content, image_description, created_at FROM direct_messages
+                WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+                ORDER BY created_at DESC LIMIT 10
+              `).all(user.id, receiverId, receiverId, user.id).reverse();
+
+              const formattedHistory = history.map((msg: any) => {
+                let msgContent = msg.content;
+                if (msg.image_description) {
+                  msgContent += `\n\n[User sent an image. Description: ${msg.image_description}]`;
+                }
+                return {
+                  role: msg.sender_id === receiverId ? 'assistant' : 'user',
+                  content: msgContent,
+                  created_at: msg.created_at
+                };
+              });
+
+              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
+              const relContext = rel ? rel.description : '';
+
+              const replyData = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id, false, allowImageGen);
+              if (replyData) {
+                const { content: replyContent, imagePrompt } = replyData;
+                
+                let imageUrl: string | null = null;
+                if (imagePrompt && allowImageGen) {
+                  let refImages: string[] = [];
+                  if (receiver.avatar_url) refImages.push(receiver.avatar_url);
+                  if (receiver.reference_images) {
+                    try {
+                      const parsed = JSON.parse(receiver.reference_images);
+                      if (Array.isArray(parsed)) {
+                        refImages.push(...parsed);
+                      }
+                    } catch(e) {}
+                  }
+                  imageUrl = await generateImage(imagePrompt, undefined, refImages.length > 0 ? refImages : undefined) || null;
+                }
+
+                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt) VALUES (?, ?, ?, ?, ?)")
+                  .run(receiverId, user.id, replyContent.trim(), imageUrl, imagePrompt || null);
+
+                checkDynamicRelationship(receiver.id, user.id).catch(console.error);
+              }
+            } finally {
+              pendingDMs.delete(dmKey);
+            }
+          }
+        } catch (err) {
+          console.error("Error in background DM processing:", err);
         }
-      }
+      })();
     } catch (e: any) {
       console.error("Error in /api/dms/:userId:", e);
       if (!res.headersSent) {
@@ -2460,24 +2527,48 @@ async function startServer() {
 
               try {
                 const history = db.prepare(`
-                  SELECT sender_id, content, created_at FROM direct_messages
+                  SELECT sender_id, content, image_description, created_at FROM direct_messages
                   WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
                   ORDER BY created_at DESC LIMIT 10
                 `).all(realUser.id, aiUser.id, aiUser.id, realUser.id).reverse();
 
-                const formattedHistory = history.map((msg: any) => ({
-                  role: msg.sender_id === aiUser.id ? 'assistant' : 'user',
-                  content: msg.content,
-                  created_at: msg.created_at
-                }));
+                const formattedHistory = history.map((msg: any) => {
+                  let msgContent = msg.content;
+                  if (msg.image_description) {
+                    msgContent += `\n\n[User sent an image. Description: ${msg.image_description}]`;
+                  }
+                  return {
+                    role: msg.sender_id === aiUser.id ? 'assistant' : 'user',
+                    content: msgContent,
+                    created_at: msg.created_at
+                  };
+                });
 
                 const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(aiUser.id, realUser.id) as any;
                 const relContext = rel ? rel.description : '';
 
-                const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true);
+                const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(realUser.id, aiUser.id) as any;
+                const allowImageGen = dmSettings ? dmSettings.allow_image_gen === 1 : false;
+
+                const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true, allowImageGen);
                 if (reply && reply.content) {
-                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                    .run(aiUser.id, realUser.id, reply.content.trim());
+                  let imageUrl: string | null = null;
+                  if (reply.imagePrompt && allowImageGen) {
+                    let refImages: string[] = [];
+                    if (aiUser.avatar_url) refImages.push(aiUser.avatar_url);
+                    if (aiUser.reference_images) {
+                      try {
+                        const parsed = JSON.parse(aiUser.reference_images);
+                        if (Array.isArray(parsed)) {
+                          refImages.push(...parsed);
+                        }
+                      } catch(e) {}
+                    }
+                    imageUrl = await generateImage(reply.imagePrompt, undefined, refImages.length > 0 ? refImages : undefined) || null;
+                  }
+
+                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt) VALUES (?, ?, ?, ?, ?)")
+                    .run(aiUser.id, realUser.id, reply.content.trim(), imageUrl, reply.imagePrompt || null);
                   checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
                   console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
                 }

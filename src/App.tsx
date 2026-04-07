@@ -233,6 +233,7 @@ export default function App() {
   const [editingDmId, setEditingDmId] = useState<number | null>(null);
   const [editingDmContent, setEditingDmContent] = useState('');
   const [expandedImageUrl, setExpandedImageUrl] = useState<string | null>(null);
+  const [showGallery, setShowGallery] = useState(false);
 
   // Profile Editing
   const [editingProfile, setEditingProfile] = useState<any>(null);
@@ -786,10 +787,6 @@ export default function App() {
       }
     });
   };
-
-  const fetchPosts = useCallback(() => {
-    apiFetch(`/api/posts?limit=${visiblePostsRef.current + 1}`).then(r => r.json()).then(setPosts);
-  }, [apiFetch]);
 
   const fetchUsers = () => {
     apiFetch('/api/users').then(r => r.json()).then(setUsers);
@@ -1359,6 +1356,7 @@ export default function App() {
       fetchChatMessages(activeChat.id, isGroupChat);
       if (isGroupChat) fetchGroupChats();
       else fetchConversations();
+      fetchUsers();
     } finally {
       setIsSendingMsg(false);
     }
@@ -1493,14 +1491,39 @@ export default function App() {
   const [characterSearch, setCharacterSearch] = useState('');
   const [visibleCharacters, setVisibleCharacters] = useState(20);
   const [visiblePosts, setVisiblePosts] = useState(30);
-  const fauxPicsPosts = useMemo(() => posts.filter(p => p.post_type === 'image_post'), [posts]);
+  const [fauxPicsPosts, setFauxPicsPosts] = useState<any[]>([]);
+  const [visibleFauxPics, setVisibleFauxPics] = useState(20);
   const visiblePostsRef = useRef(visiblePosts);
+  const visibleFauxPicsRef = useRef(visibleFauxPics);
+
+  const fetchPosts = useCallback(() => {
+    apiFetch(`/api/posts?limit=${visiblePostsRef.current + 1}`).then(r => r.json()).then(setPosts);
+  }, [apiFetch]);
+
+  const fetchFauxPics = useCallback(() => {
+    apiFetch(`/api/posts?type=image_post&limit=${visibleFauxPicsRef.current + 1}`).then(r => r.json()).then(setFauxPicsPosts);
+  }, [apiFetch]);
+
   useEffect(() => {
     if (visiblePostsRef.current !== visiblePosts) {
       visiblePostsRef.current = visiblePosts;
       fetchPosts();
     }
   }, [visiblePosts, fetchPosts]);
+
+  useEffect(() => {
+    if (visibleFauxPicsRef.current !== visibleFauxPics) {
+      visibleFauxPicsRef.current = visibleFauxPics;
+      fetchFauxPics();
+    }
+  }, [visibleFauxPics, fetchFauxPics]);
+
+  useEffect(() => {
+    if (loggedInUser) {
+      fetchFauxPics();
+    }
+  }, [loggedInUser, fetchFauxPics]);
+
   const [visibleProfilePosts, setVisibleProfilePosts] = useState(30);
 
   if (!loggedInUser) {
@@ -1568,26 +1591,6 @@ export default function App() {
                 Cancel
               </button>
             </form>
-          </div>
-        )}
-        {expandedImageUrl && (
-          <div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
-            onClick={() => setExpandedImageUrl(null)}
-          >
-            <img 
-              src={expandedImageUrl} 
-              alt="Expanded image" 
-              className="max-w-full max-h-full object-contain rounded-lg" 
-              referrerPolicy="no-referrer" 
-              onClick={(e) => e.stopPropagation()}
-            />
-            <button 
-              className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition"
-              onClick={() => setExpandedImageUrl(null)}
-            >
-              <X size={24} />
-            </button>
           </div>
         )}
       </div>
@@ -1954,7 +1957,7 @@ export default function App() {
                     <p className="text-xl font-medium">No photos yet</p>
                   </div>
                 ) : (
-                  fauxPicsPosts.map(post => (
+                  fauxPicsPosts.slice(0, visibleFauxPics).map(post => (
                     <FauxPicItem 
                       key={post.id}
                       post={post}
@@ -1962,12 +1965,22 @@ export default function App() {
                       onViewProfile={handleViewProfile}
                       onShowLikers={handleShowLikers}
                       formatTimestamp={formatTimestamp}
-                      onRefresh={fetchPosts}
+                      onRefresh={fetchFauxPics}
                       users={realUsers}
                       loggedInUser={loggedInUser}
                       apiFetch={apiFetch}
                     />
                   ))
+                )}
+                {fauxPicsPosts.length > visibleFauxPics && (
+                  <div className="flex justify-center mt-8">
+                    <button 
+                      onClick={() => setVisibleFauxPics(prev => prev + 20)}
+                      className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-8 rounded-full transition"
+                    >
+                      Load More Images
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -2316,6 +2329,13 @@ export default function App() {
                       {activeChat.name}
                     </div>
                     <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setShowGallery(true)}
+                        className="p-2 text-gray-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition"
+                        title="View Gallery"
+                      >
+                        <Image size={20} />
+                      </button>
                       <button
                         onClick={handleToggleImageGen}
                         className={`p-2 rounded-full transition ${dmSettings.allow_image_gen === 1 ? 'text-orange-500 bg-orange-500/10' : 'text-gray-500 hover:text-orange-500 hover:bg-orange-500/10'}`}
@@ -4384,6 +4404,50 @@ export default function App() {
                 >
                   Create Group
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {expandedImageUrl && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+            onClick={() => setExpandedImageUrl(null)}
+          >
+            <img 
+              src={expandedImageUrl} 
+              alt="Expanded image" 
+              className="max-w-full max-h-full object-contain rounded-lg" 
+              referrerPolicy="no-referrer" 
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button 
+              className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition"
+              onClick={() => setExpandedImageUrl(null)}
+            >
+              <X size={24} />
+            </button>
+          </div>
+        )}
+
+        {showGallery && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-4xl max-h-[80vh] flex flex-col">
+              <div className="flex justify-between items-center p-4 border-b border-gray-800">
+                <h3 className="font-bold text-xl flex items-center gap-2"><Image size={24} /> Gallery</h3>
+                <button onClick={() => setShowGallery(false)} className="text-gray-400 hover:text-white"><X size={24} /></button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {chatMessages.filter(msg => msg.image_url).map((msg, idx) => (
+                    <div key={idx} className="aspect-square rounded-lg overflow-hidden border border-gray-800 cursor-pointer hover:border-orange-500 transition" onClick={() => setExpandedImageUrl(msg.image_url)}>
+                      <img src={msg.image_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  ))}
+                  {chatMessages.filter(msg => msg.image_url).length === 0 && (
+                    <div className="col-span-full text-center text-gray-500 py-8">No images in this chat yet.</div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
