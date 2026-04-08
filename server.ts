@@ -2279,6 +2279,33 @@ async function startServer() {
     }
   });
 
+  app.get("/api/typing-status/:id", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.json({ typing: [] });
+
+    const isGroup = req.query.isGroup === 'true';
+    const chatId = parseInt(req.params.id);
+    const typing: string[] = [];
+
+    if (isGroup) {
+      for (const key of pendingGroupChats) {
+        if (key.startsWith(`${chatId}:`)) {
+          const aiId = parseInt(key.split(':')[1]);
+          const ai = db.prepare("SELECT display_name FROM users WHERE id = ?").get(aiId) as any;
+          if (ai) typing.push(ai.display_name);
+        }
+      }
+    } else {
+      const dmKey = `${chatId}:${user.id}`;
+      if (pendingDMs.has(dmKey)) {
+        const ai = db.prepare("SELECT display_name FROM users WHERE id = ?").get(chatId) as any;
+        if (ai) typing.push(ai.display_name);
+      }
+    }
+
+    res.json({ typing });
+  });
+
   // --- Recap Endpoints ---
   app.get("/api/recaps", (req, res) => {
     try {

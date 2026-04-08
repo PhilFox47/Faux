@@ -106,6 +106,11 @@ export default function App() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [activeChat, setActiveChat] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [displayedMessages, setDisplayedMessages] = useState<any[]>([]);
+  const [lastProcessedMsgId, setLastProcessedMsgId] = useState<number | null>(null);
+  const [typingUser, setTypingUser] = useState<string | null>(null);
+  const [serverTypingUsers, setServerTypingUsers] = useState<string[]>([]);
+  const processingQueue = useRef<boolean>(false);
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostImage, setNewPostImage] = useState('');
   const [newPostType, setNewPostType] = useState('life_update');
@@ -1130,6 +1135,99 @@ export default function App() {
     }, 10000); // Poll every 10s
     return () => clearInterval(interval);
   }, [activeChat, isGroupChat, loggedInUser]);
+
+  useEffect(() => {
+    if (!activeChat) {
+      setDisplayedMessages([]);
+      setLastProcessedMsgId(null);
+      setTypingUser(null);
+      return;
+    }
+
+    if (chatMessages.length === 0) {
+      setDisplayedMessages([]);
+      setLastProcessedMsgId(null);
+      return;
+    }
+
+    const lastMsg = chatMessages[chatMessages.length - 1];
+    const isLastMsgProcessed = chatMessages.some(m => m.id === lastProcessedMsgId);
+
+    // If we switched chat or the last processed message is gone, sync immediately
+    if (lastProcessedMsgId === null || !isLastMsgProcessed) {
+      setDisplayedMessages(chatMessages);
+      setLastProcessedMsgId(lastMsg.id);
+      return;
+    }
+
+    // If we loaded older messages (length increased but last message is the same)
+    // We only sync if we are not currently processing a new message sequence
+    if (chatMessages.length > displayedMessages.length && lastMsg.id === lastProcessedMsgId && !processingQueue.current) {
+      // We need to be careful not to overwrite virtual messages if they exist
+      // But if lastMsg.id === lastProcessedMsgId, it means the latest message is fully processed.
+      setDisplayedMessages(chatMessages);
+      return;
+    }
+
+    // If there are new messages
+    if (lastMsg.id !== lastProcessedMsgId && !processingQueue.current) {
+      const newMessages = chatMessages.filter(m => m.id > lastProcessedMsgId);
+      
+      const process = async () => {
+        processingQueue.current = true;
+        for (const msg of newMessages) {
+          const sender = users.find(u => u.id === msg.sender_id);
+          if (sender?.is_ai && msg.content.includes('\n\n')) {
+            const parts = msg.content.split('\n\n').filter(p => p.trim());
+            setTypingUser(sender.display_name);
+            for (let i = 0; i < parts.length; i++) {
+              const partMsg = { ...msg, content: parts[i], id: `${msg.id}_part_${i}` };
+              setDisplayedMessages(prev => {
+                if (prev.some(m => m.id === partMsg.id)) return prev;
+                return [...prev, partMsg];
+              });
+              if (i < parts.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1500));
+              }
+            }
+            setTypingUser(null);
+          } else {
+            setDisplayedMessages(prev => {
+              if (prev.some(m => m.id === msg.id)) return prev;
+              return [...prev, msg];
+            });
+          }
+        }
+        setLastProcessedMsgId(lastMsg.id);
+        processingQueue.current = false;
+      };
+      
+      process();
+    }
+  }, [chatMessages, activeChat, users, lastProcessedMsgId, displayedMessages.length]);
+
+  useEffect(() => {
+    if (!activeChat || !loggedInUser) {
+      setServerTypingUsers([]);
+      return;
+    }
+
+    const fetchTypingStatus = async () => {
+      try {
+        const res = await apiFetch(`/api/typing-status/${activeChat.id}?isGroup=${isGroupChat}`);
+        const data = await res.json();
+        if (data && data.typing) {
+          setServerTypingUsers(data.typing);
+        }
+      } catch (e) {
+        console.error("Error fetching typing status:", e);
+      }
+    };
+
+    fetchTypingStatus();
+    const interval = setInterval(fetchTypingStatus, 3000);
+    return () => clearInterval(interval);
+  }, [activeChat, isGroupChat, loggedInUser, apiFetch]);
 
   const handleCreateGroupChat = async () => {
     if (!newGroupName.trim() || selectedGroupMembers.length === 0 || isCreatingGroupChat) return;
@@ -2432,7 +2530,7 @@ export default function App() {
                         </button>
                       </div>
                     )}
-                    {chatMessages.map((msg, i) => {
+                    {displayedMessages.map((msg, i) => {
                       const currentUser = loggedInUser;
                       const isMe = msg.sender_id === currentUser?.id;
                       const sender = users.find(u => u.id === msg.sender_id);
@@ -2487,6 +2585,22 @@ export default function App() {
                         </div>
                       );
                     })}
+                    {(typingUser || serverTypingUsers.length > 0) && (
+                      <div className="flex flex-col gap-2 mb-4">
+                        {serverTypingUsers.filter(u => u !== typingUser).map(u => (
+                          <div key={u} className="flex items-center gap-2 text-gray-400 text-xs italic ml-9">
+                            <Loader2 size={12} className="animate-spin" />
+                            {u} is typing...
+                          </div>
+                        ))}
+                        {typingUser && (
+                          <div className="flex items-center gap-2 text-gray-400 text-xs italic ml-9">
+                            <Loader2 size={12} className="animate-spin" />
+                            {typingUser} is typing...
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="p-4 border-t border-gray-800">
                     {dmImage && (
