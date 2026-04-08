@@ -71,7 +71,7 @@ export async function generateMonthlyRecap(monthYear: string) {
   `).all(monthYear) as any[];
 
   // 3. Arcs
-  const characterArcs = db.prepare("SELECT title, completion_summary FROM character_arcs WHERE status = 'completed' AND strftime('%Y-%m', last_update_date) = ? LIMIT 5").all(monthYear) as any[];
+  const characterArcs = db.prepare("SELECT title, completion_summary FROM character_arcs WHERE status = 'completed' AND strftime('%Y-%m', target_end_date) = ? LIMIT 5").all(monthYear) as any[];
   const universeArcs = db.prepare("SELECT title, completion_summary FROM universe_arcs WHERE status = 'completed' AND strftime('%Y-%m', last_update_date) = ? LIMIT 5").all(monthYear) as any[];
   
   const arcs = [...characterArcs, ...universeArcs].slice(0, 10);
