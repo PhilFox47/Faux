@@ -71,17 +71,44 @@ export async function generateMonthlyRecap(monthYear: string) {
   `).all(monthYear) as any[];
 
   // 3. Arcs
-  const characterArcs = db.prepare("SELECT title, completion_summary FROM character_arcs WHERE status = 'completed' AND strftime('%Y-%m', target_end_date) = ? LIMIT 5").all(monthYear) as any[];
-  const universeArcs = db.prepare("SELECT title, completion_summary FROM universe_arcs WHERE status = 'completed' AND strftime('%Y-%m', last_update_date) = ? LIMIT 5").all(monthYear) as any[];
+  let characterArcs: any[] = [];
+  try {
+    characterArcs = db.prepare("SELECT title, completion_summary FROM character_arcs WHERE status = 'completed' AND strftime('%Y-%m', target_end_date) = ? LIMIT 5").all(monthYear) as any[];
+  } catch (e) {
+    console.error("Error fetching character arcs for recap:", e);
+  }
+
+  let universeArcs: any[] = [];
+  try {
+    universeArcs = db.prepare("SELECT title, completion_summary FROM universe_arcs WHERE status = 'completed' AND strftime('%Y-%m', last_update_date) = ? LIMIT 5").all(monthYear) as any[];
+  } catch (e) {
+    console.error("Error fetching universe arcs for recap:", e);
+  }
   
   const arcs = [...characterArcs, ...universeArcs].slice(0, 10);
 
   // 4. Images
-  const images = db.prepare("SELECT image_url FROM posts WHERE image_url IS NOT NULL AND strftime('%Y-%m', created_at) = ? LIMIT 50").all(monthYear).map((r: any) => r.image_url) as string[];
+  let images: string[] = [];
+  try {
+    images = db.prepare("SELECT image_url FROM posts WHERE image_url IS NOT NULL AND strftime('%Y-%m', created_at) = ? LIMIT 50").all(monthYear).map((r: any) => r.image_url) as string[];
+  } catch (e) {
+    console.error("Error fetching images for recap:", e);
+  }
 
   // 5. Introduced Universes and Characters
-  const introducedUniverses = db.prepare("SELECT id, name, description, image_url FROM universes WHERE strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
-  const introducedCharacters = db.prepare("SELECT id, username, display_name, avatar_url, bio FROM users WHERE is_ai = 1 AND strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+  let introducedUniverses: any[] = [];
+  try {
+    introducedUniverses = db.prepare("SELECT id, name, description, image_url FROM universes WHERE strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+  } catch (e) {
+    console.error("Error fetching introduced universes for recap:", e);
+  }
+
+  let introducedCharacters: any[] = [];
+  try {
+    introducedCharacters = db.prepare("SELECT id, username, display_name, avatar_url, bio FROM users WHERE is_ai = 1 AND strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+  } catch (e) {
+    console.error("Error fetching introduced characters for recap:", e);
+  }
 
   // 6. Generate Title
   const prompt = `You are generating a witty, slightly funny title for a monthly recap of a social media platform called Faux.

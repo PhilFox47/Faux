@@ -396,9 +396,46 @@ export function initDb() {
 
   // Add created_at column to universes if it doesn't exist
   try {
-    db.exec("ALTER TABLE universes ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+    const info = db.prepare("PRAGMA table_info(universes)").all() as any[];
+    if (!info.find(c => c.name === 'created_at')) {
+      db.exec("ALTER TABLE universes ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      console.log("Added created_at to universes");
+    }
   } catch (e) {
-    // Column might already exist
+    console.error("Error adding created_at to universes:", e);
+  }
+
+  // Add created_at column to users if it doesn't exist
+  try {
+    const info = db.prepare("PRAGMA table_info(users)").all() as any[];
+    if (!info.find(c => c.name === 'created_at')) {
+      db.exec("ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      console.log("Added created_at to users");
+    }
+  } catch (e) {
+    console.error("Error adding created_at to users:", e);
+  }
+
+  // Add created_at column to character_arcs if it doesn't exist
+  try {
+    const info = db.prepare("PRAGMA table_info(character_arcs)").all() as any[];
+    if (!info.find(c => c.name === 'created_at')) {
+      db.exec("ALTER TABLE character_arcs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      console.log("Added created_at to character_arcs");
+    }
+  } catch (e) {
+    console.error("Error adding created_at to character_arcs:", e);
+  }
+
+  // Add created_at column to universe_arcs if it doesn't exist
+  try {
+    const info = db.prepare("PRAGMA table_info(universe_arcs)").all() as any[];
+    if (!info.find(c => c.name === 'created_at')) {
+      db.exec("ALTER TABLE universe_arcs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      console.log("Added created_at to universe_arcs");
+    }
+  } catch (e) {
+    console.error("Error adding created_at to universe_arcs:", e);
   }
 
   // Add last_read_at column if it doesn't exist
