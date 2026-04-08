@@ -128,39 +128,47 @@ export default function App() {
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const skipNextScroll = useRef(false);
+  const wasAtBottom = useRef(true);
   const prevChatIdRef = useRef<string | null>(null);
-  const prevLastMsgIdRef = useRef<number | string | null>(null);
 
   const scrollToBottom = useCallback(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+      wasAtBottom.current = true;
+    }
+  }, []);
+
+  const handleChatScroll = useCallback(() => {
+    if (chatScrollRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = chatScrollRef.current;
+      // Use a threshold of 50px to determine if we are "at the bottom"
+      wasAtBottom.current = scrollHeight - scrollTop - clientHeight < 50;
     }
   }, []);
 
   useEffect(() => {
     if (activeTab === 'messages' && activeChat) {
       const currentChatId = `${isGroupChat ? 'group' : 'dm'}-${activeChat.id}`;
-      const currentLastMsg = chatMessages[chatMessages.length - 1];
-      const currentLastMsgIdentifier = currentLastMsg ? (currentLastMsg.id || currentLastMsg.created_at) : null;
 
       if (skipNextScroll.current) {
         skipNextScroll.current = false;
         prevChatIdRef.current = currentChatId;
-        prevLastMsgIdRef.current = currentLastMsgIdentifier;
         return;
       }
 
-      if (
-        prevChatIdRef.current !== currentChatId ||
-        prevLastMsgIdRef.current !== currentLastMsgIdentifier
-      ) {
+      // If we switched chat, always scroll to bottom
+      if (prevChatIdRef.current !== currentChatId) {
         scrollToBottom();
+        prevChatIdRef.current = currentChatId;
+        return;
       }
 
-      prevChatIdRef.current = currentChatId;
-      prevLastMsgIdRef.current = currentLastMsgIdentifier;
+      // If we were at the bottom before the update, scroll to the new bottom
+      if (wasAtBottom.current) {
+        scrollToBottom();
+      }
     }
-  }, [chatMessages, activeTab, activeChat, isGroupChat, scrollToBottom]);
+  }, [displayedMessages, serverTypingUsers, typingUser, activeTab, activeChat, isGroupChat, scrollToBottom]);
 
   // Add Character Form
   const [charName, setCharName] = useState('');
@@ -1136,6 +1144,22 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeChat, isGroupChat, loggedInUser]);
 
+  const expandMessages = useCallback((messages: any[]) => {
+    const expanded: any[] = [];
+    for (const msg of messages) {
+      const sender = users.find(u => u.id === msg.sender_id);
+      if (sender?.is_ai && msg.content.includes('\n\n')) {
+        const parts = msg.content.split('\n\n').filter(p => p.trim());
+        for (let i = 0; i < parts.length; i++) {
+          expanded.push({ ...msg, content: parts[i], id: `${msg.id}_part_${i}` });
+        }
+      } else {
+        expanded.push(msg);
+      }
+    }
+    return expanded;
+  }, [users]);
+
   useEffect(() => {
     if (!activeChat) {
       setDisplayedMessages([]);
@@ -1155,7 +1179,7 @@ export default function App() {
 
     // If we switched chat or the last processed message is gone, sync immediately
     if (lastProcessedMsgId === null || !isLastMsgProcessed) {
-      setDisplayedMessages(chatMessages);
+      setDisplayedMessages(expandMessages(chatMessages));
       setLastProcessedMsgId(lastMsg.id);
       return;
     }
@@ -1163,9 +1187,7 @@ export default function App() {
     // If we loaded older messages (length increased but last message is the same)
     // We only sync if we are not currently processing a new message sequence
     if (chatMessages.length > displayedMessages.length && lastMsg.id === lastProcessedMsgId && !processingQueue.current) {
-      // We need to be careful not to overwrite virtual messages if they exist
-      // But if lastMsg.id === lastProcessedMsgId, it means the latest message is fully processed.
-      setDisplayedMessages(chatMessages);
+      setDisplayedMessages(expandMessages(chatMessages));
       return;
     }
 
@@ -1204,7 +1226,7 @@ export default function App() {
       
       process();
     }
-  }, [chatMessages, activeChat, users, lastProcessedMsgId, displayedMessages.length]);
+  }, [chatMessages, activeChat, users, lastProcessedMsgId, displayedMessages.length, expandMessages]);
 
   useEffect(() => {
     if (!activeChat || !loggedInUser) {
@@ -2518,7 +2540,7 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                  <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div ref={chatScrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto p-4 space-y-4">
                     {hasMoreMessages && (
                       <div className="flex justify-center py-2">
                         <button 
