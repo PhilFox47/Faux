@@ -98,14 +98,24 @@ export async function generateMonthlyRecap(monthYear: string) {
   // 5. Introduced Universes and Characters
   let introducedUniverses: any[] = [];
   try {
-    introducedUniverses = db.prepare("SELECT id, name, description, image_url FROM universes WHERE strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+    const info = db.prepare("PRAGMA table_info(universes)").all() as any[];
+    if (info.find(c => c.name === 'created_at')) {
+      introducedUniverses = db.prepare("SELECT id, name, description, image_url FROM universes WHERE strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+    } else {
+      console.warn("Skipping introduced universes recap: created_at column missing");
+    }
   } catch (e) {
     console.error("Error fetching introduced universes for recap:", e);
   }
 
   let introducedCharacters: any[] = [];
   try {
-    introducedCharacters = db.prepare("SELECT id, username, display_name, avatar_url, bio FROM users WHERE is_ai = 1 AND strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+    const info = db.prepare("PRAGMA table_info(users)").all() as any[];
+    if (info.find(c => c.name === 'created_at')) {
+      introducedCharacters = db.prepare("SELECT id, username, display_name, avatar_url, bio FROM users WHERE is_ai = 1 AND strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+    } else {
+      console.warn("Skipping introduced characters recap: created_at column missing");
+    }
   } catch (e) {
     console.error("Error fetching introduced characters for recap:", e);
   }

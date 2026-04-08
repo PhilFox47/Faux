@@ -624,7 +624,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
     if (!activeUniverseArc && arcArchetypes.includes(archetype.id)) {
       const newUniverseArcData = await generateNewUniverseArc(universe);
       if (newUniverseArcData && newUniverseArcData.title && newUniverseArcData.description && newUniverseArcData.duration_days) {
-        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'))").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
+        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
         activeUniverseArc = db.prepare("SELECT * FROM universe_arcs WHERE id = ?").get(info.lastInsertRowid);
       }
     } else if (activeUniverseArc) {
@@ -679,7 +679,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       logApi('DEBUG_ARC_LOGIC_NEW_DATA', { characterId: aiUser.id }, { newArcData }, aiUser.id);
       if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
         try {
-          const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
+          const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
           activeArc = db.prepare("SELECT * FROM character_arcs WHERE id = ?").get(info.lastInsertRowid);
           arcInstruction = 'START_ARC';
           console.log(`[DEBUG] Successfully created arc ${activeArc.id} for ${aiUser.display_name}: ${activeArc.title}`);
@@ -925,7 +925,7 @@ async function startServer() {
     }
 
     try {
-      const stmt = db.prepare("INSERT INTO users (username, display_name, pin, is_ai, role) VALUES (?, ?, ?, 0, 'user')");
+      const stmt = db.prepare("INSERT INTO users (username, display_name, pin, is_ai, role, created_at) VALUES (?, ?, ?, 0, 'user', CURRENT_TIMESTAMP)");
       const info = stmt.run(username, display_name || username, pin || null);
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (e: any) {
@@ -1263,7 +1263,7 @@ async function startServer() {
   app.post("/api/universes", (req, res) => {
     const { name, description, image_url } = req.body;
     try {
-      const info = db.prepare("INSERT INTO universes (name, description, image_url) VALUES (?, ?, ?)").run(name, description || '', image_url || '');
+      const info = db.prepare("INSERT INTO universes (name, description, image_url, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)").run(name, description || '', image_url || '');
       res.json({ id: info.lastInsertRowid, name, description, image_url });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
@@ -1287,8 +1287,8 @@ async function startServer() {
     const { title, description, current_status_text, duration_days } = req.body;
     try {
       const info = db.prepare(`
-        INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date)
-        VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'))
+        INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at)
+        VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)
       `).run(req.params.id, title, description, current_status_text, duration_days || 42);
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (e: any) {
@@ -1306,7 +1306,7 @@ async function startServer() {
     try {
       const newUniverseArcData = await generateNewUniverseArc(universe);
       if (newUniverseArcData && newUniverseArcData.title && newUniverseArcData.description && newUniverseArcData.duration_days) {
-        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'))").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
+        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
         res.json({ success: true, id: info.lastInsertRowid });
       } else {
         res.status(500).json({ error: "Failed to generate arc data" });
@@ -1323,8 +1323,8 @@ async function startServer() {
     const { title, description, duration_days } = req.body;
     try {
       const info = db.prepare(`
-        INSERT INTO character_arcs (user_id, title, description, target_end_date)
-        VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))
+        INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at)
+        VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)
       `).run(req.params.id, title, description, duration_days || 21);
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (e: any) {
@@ -1342,7 +1342,7 @@ async function startServer() {
     try {
       const newArcData = await generateNewArc(aiUser);
       if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
-        const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'))").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
+        const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
         res.json({ success: true, id: info.lastInsertRowid });
       } else {
         res.status(500).json({ error: "Failed to generate arc data" });
@@ -1506,8 +1506,8 @@ async function startServer() {
       }
 
       const stmt = db.prepare(`
-        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, created_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       `);
       const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, reference_images ? JSON.stringify(reference_images) : '[]', account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
       const userId = info.lastInsertRowid;

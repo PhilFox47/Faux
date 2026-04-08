@@ -394,11 +394,13 @@ export function initDb() {
     }
   }
 
+  console.log("Initializing Database - Version 2 (Fixed Migrations)");
   // Add created_at column to universes if it doesn't exist
   try {
     const info = db.prepare("PRAGMA table_info(universes)").all() as any[];
     if (!info.find(c => c.name === 'created_at')) {
-      db.exec("ALTER TABLE universes ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      db.exec("ALTER TABLE universes ADD COLUMN created_at DATETIME");
+      db.exec("UPDATE universes SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL");
       console.log("Added created_at to universes");
     }
   } catch (e) {
@@ -409,7 +411,8 @@ export function initDb() {
   try {
     const info = db.prepare("PRAGMA table_info(users)").all() as any[];
     if (!info.find(c => c.name === 'created_at')) {
-      db.exec("ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      db.exec("ALTER TABLE users ADD COLUMN created_at DATETIME");
+      db.exec("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL");
       console.log("Added created_at to users");
     }
   } catch (e) {
@@ -420,7 +423,8 @@ export function initDb() {
   try {
     const info = db.prepare("PRAGMA table_info(character_arcs)").all() as any[];
     if (!info.find(c => c.name === 'created_at')) {
-      db.exec("ALTER TABLE character_arcs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      db.exec("ALTER TABLE character_arcs ADD COLUMN created_at DATETIME");
+      db.exec("UPDATE character_arcs SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL");
       console.log("Added created_at to character_arcs");
     }
   } catch (e) {
@@ -431,7 +435,8 @@ export function initDb() {
   try {
     const info = db.prepare("PRAGMA table_info(universe_arcs)").all() as any[];
     if (!info.find(c => c.name === 'created_at')) {
-      db.exec("ALTER TABLE universe_arcs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      db.exec("ALTER TABLE universe_arcs ADD COLUMN created_at DATETIME");
+      db.exec("UPDATE universe_arcs SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL");
       console.log("Added created_at to universe_arcs");
     }
   } catch (e) {
@@ -665,8 +670,8 @@ export function initDb() {
   const user = stmt.get();
   if (!user) {
     db.prepare(`
-      INSERT INTO users (username, display_name, bio, is_ai, ai_persona, role)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO users (username, display_name, bio, is_ai, ai_persona, role, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run('admin', 'Admin', 'This is the admin account.', 0, null, 'admin');
   }
 
