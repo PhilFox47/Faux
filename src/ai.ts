@@ -963,6 +963,7 @@ IMAGE GENERATION:
 You can send images in this DM if the user explicitly asks for one (e.g., "show me a picture", "send me a photo", "I'd love to see that").
 To send an image, include the following tag at the END of your message: [GENERATE_IMAGE: a detailed description of the image you want to send].
 The description should be what IS in the image, not instructions for the AI.
+${character.artstyle ? `CRITICAL ARTSTYLE INSTRUCTION: The image MUST be generated in the following artstyle: "${character.artstyle}". You MUST include keywords related to this artstyle in your description to ensure the generator follows it.` : ''}
 Only send an image if it makes sense in the context of the conversation and the user's request.
 ` : 'IMPORTANT: You CANNOT send images in this DM. Do not offer to send images.'}
 
@@ -1112,6 +1113,86 @@ You can address specific people by name if you want.`;
       character.id
     );
     return null;
+  }
+}
+
+export async function enrichDMImagePrompt(character: any, dmDescription: string) {
+  const prompt = `You are an expert at writing highly detailed prompts for the Chroma AI image generator.
+You need to write a comprehensive image generation prompt for an image being sent in a direct message by ${character.display_name}.
+The user's description of the image they want to send is: "${dmDescription}"
+
+Chroma is sensitive to prompting and understands plain English. A structured, descriptive prompt is essential.
+
+Character details:
+Name: ${character.display_name}
+Appearance: ${character.physical_appearance || character.bio || 'average looking'}
+Clothing style: ${character.clothing_style || 'casual everyday clothes'}
+Artstyle: ${character.artstyle || 'Realistic'}
+
+Guidelines for Seedream 4.0:
+- If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Smartphone photo", "Lighting: Natural light", "Style: Candid amateur photograph"). Mention camera type (e.g., "Shot on iPhone 15 Pro").
+- If the Artstyle is Stylized (Anime, Pixel Art, Oil Painting, etc.): Clearly describe the Art Direction (Genre, Medium, Texture, specific artist influences if applicable).
+- If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
+- Be very descriptive about the environment, lighting, mood, and composition.
+- Use descriptive adjectives and specific details to ensure a high-quality, accurate depiction.
+
+IMPORTANT: You must output a JSON object with exactly two fields:
+1. "character_visible": boolean (true if the character is visible in the shot, false otherwise)
+2. "prompt": string (the highly detailed image generation prompt)
+
+If the character IS visible:
+- Describe the character's appearance and clothing in detail in the prompt.
+- An image of the character will be provided as an Image Input to the model, so the prompt should reference their appearance accurately.
+
+If the character is NOT visible:
+- DO NOT describe the character's physical appearance in the prompt.
+
+Output ONLY the JSON object, nothing else.`;
+
+  try {
+    let content = "";
+    let reasoning = "";
+    let rawContent = "";
+    let finishReason = "";
+
+    for (let i = 0; i < 3; i++) {
+      const response = await getOpenAI().chat.completions.create({
+        model: getModel(),
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 10000,
+        temperature: 0.7,
+      });
+
+      rawContent = response.choices[0].message.content || "";
+      reasoning = (response.choices[0].message as any).reasoning || "";
+      content = stripReasoning(rawContent);
+      finishReason = response.choices[0].finish_reason;
+
+      if (content || !reasoning) break;
+      console.log(`enrichDMImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
+    }
+    
+    logApi(
+      "enrichDMImagePrompt",
+      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason },
+      { content, reasoning, raw: rawContent },
+      character.id
+    );
+
+    const parsed = extractJSON(content);
+    const finalPrompt = parsed.prompt || content;
+    const characterVisible = parsed.character_visible === true;
+
+    return { prompt: finalPrompt, characterVisible };
+  } catch (error: any) {
+    console.error('Error enriching DM image prompt:', error);
+    logApi(
+      "enrichDMImagePrompt",
+      { model: getModel(), prompt, error: "Catch Block" },
+      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
+      character.id
+    );
+    return { prompt: dmDescription, characterVisible: false };
   }
 }
 

@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi } from "./src/ai";
 
 const pendingComments = new Set<string>();
 const pendingDMs = new Set<string>();
@@ -2176,10 +2176,15 @@ async function startServer() {
                 const { content: replyContent, imagePrompt } = replyData;
                 
                 let imageUrl: string | null = null;
+                let finalImagePrompt = imagePrompt;
                 if (imagePrompt && allowImageGen) {
+                  const enriched = await enrichDMImagePrompt(receiver, imagePrompt);
+                  finalImagePrompt = enriched.prompt;
+                  const negativePrompt = await generateNegativeImagePrompt(finalImagePrompt);
+
                   let refImages: string[] = [];
-                  if (receiver.avatar_url) refImages.push(receiver.avatar_url);
-                  if (receiver.reference_images) {
+                  if (receiver.avatar_url && enriched.characterVisible) refImages.push(receiver.avatar_url);
+                  if (receiver.reference_images && enriched.characterVisible) {
                     try {
                       const parsed = JSON.parse(receiver.reference_images);
                       if (Array.isArray(parsed)) {
@@ -2187,11 +2192,11 @@ async function startServer() {
                       }
                     } catch(e) {}
                   }
-                  imageUrl = await generateImage(imagePrompt, undefined, refImages.length > 0 ? refImages : undefined) || null;
+                  imageUrl = await generateImage(finalImagePrompt, negativePrompt, refImages.length > 0 ? refImages : undefined) || null;
                 }
 
                 db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt) VALUES (?, ?, ?, ?, ?)")
-                  .run(receiverId, user.id, replyContent.trim(), imageUrl, imagePrompt || null);
+                  .run(receiverId, user.id, replyContent.trim(), imageUrl, finalImagePrompt || null);
 
                 checkDynamicRelationship(receiver.id, user.id).catch(console.error);
               }
@@ -2553,10 +2558,15 @@ async function startServer() {
                 const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true, allowImageGen);
                 if (reply && reply.content) {
                   let imageUrl: string | null = null;
+                  let finalImagePrompt = reply.imagePrompt;
                   if (reply.imagePrompt && allowImageGen) {
+                    const enriched = await enrichDMImagePrompt(aiUser, reply.imagePrompt);
+                    finalImagePrompt = enriched.prompt;
+                    const negativePrompt = await generateNegativeImagePrompt(finalImagePrompt);
+
                     let refImages: string[] = [];
-                    if (aiUser.avatar_url) refImages.push(aiUser.avatar_url);
-                    if (aiUser.reference_images) {
+                    if (aiUser.avatar_url && enriched.characterVisible) refImages.push(aiUser.avatar_url);
+                    if (aiUser.reference_images && enriched.characterVisible) {
                       try {
                         const parsed = JSON.parse(aiUser.reference_images);
                         if (Array.isArray(parsed)) {
@@ -2564,11 +2574,11 @@ async function startServer() {
                         }
                       } catch(e) {}
                     }
-                    imageUrl = await generateImage(reply.imagePrompt, undefined, refImages.length > 0 ? refImages : undefined) || null;
+                    imageUrl = await generateImage(finalImagePrompt, negativePrompt, refImages.length > 0 ? refImages : undefined) || null;
                   }
 
                   db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt) VALUES (?, ?, ?, ?, ?)")
-                    .run(aiUser.id, realUser.id, reply.content.trim(), imageUrl, reply.imagePrompt || null);
+                    .run(aiUser.id, realUser.id, reply.content.trim(), imageUrl, finalImagePrompt || null);
                   checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
                   console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
                 }
