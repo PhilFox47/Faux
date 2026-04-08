@@ -255,6 +255,24 @@ export function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS dm_summaries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id_1 INTEGER NOT NULL,
+      user_id_2 INTEGER NOT NULL,
+      summary TEXT NOT NULL,
+      last_message_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id_1, user_id_2)
+    );
+
+    CREATE TABLE IF NOT EXISTS monthly_recaps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      month_year TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      data TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_is_visible ON posts(is_visible);

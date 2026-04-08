@@ -5,7 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { FAUX_GROUND_RULES } from './groundRules';
 
-function getOpenAI() {
+export function getOpenAI() {
   let apiKey = process.env.NANO_GPT_API_KEY || '';
   try {
     const settings = db.prepare("SELECT api_key FROM settings WHERE id = 1").get() as any;
@@ -61,7 +61,7 @@ function extractJSON(text: string): any {
   }
 }
 
-function getModel() {
+export function getModel() {
   try {
     const settings = db.prepare("SELECT model_name FROM settings WHERE id = 1").get() as any;
     return settings?.model_name || 'zai-org/glm-5';
@@ -871,7 +871,7 @@ export async function generateDM(character: any, userDisplayName: string, relati
   }
 
   const historyStr = messageHistory.length > 0 
-    ? `\nPrevious conversation history (with timestamps):\n${messageHistory.map(m => `[${m.created_at}] ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n')}\n`
+    ? `\nPrevious conversation history:\n${messageHistory.map(m => m.role === 'system' ? m.content : `[${m.created_at}] ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n')}\n`
     : '';
 
   const prompt = `${buildCharacterPrompt(character)}
@@ -937,6 +937,29 @@ IMPORTANT: This is a text-only message. DO NOT include any image descriptions, p
   }
 }
 
+export async function summarizeDMHistory(currentSummary: string | null, newMessages: {role: string, content: string, created_at: string}[], character1: any, character2: any) {
+  const prompt = `You are an AI summarizing a direct message conversation between ${character1.display_name} and ${character2.display_name}.
+${currentSummary ? `Here is the summary of the conversation so far:\n${currentSummary}\n\n` : ''}Here are the latest messages:
+${newMessages.map(m => `[${m.created_at}] ${m.role === 'user' ? character2.display_name : character1.display_name}: ${m.content}`).join('\n')}
+
+Please provide a concise, updated summary of the entire conversation history, capturing the main topics, relationship dynamics, and any important events. Keep it under 200 words.`;
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 500,
+      temperature: 0.5,
+    });
+    
+    let content = response.choices[0].message.content || "";
+    return stripReasoning(content).trim();
+  } catch (error: any) {
+    console.error('Error summarizing DM history:', error);
+    return currentSummary || "";
+  }
+}
+
 export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string, created_at: string}[], relationshipContext: string = '', otherUserId?: number, isDelayed: boolean = false, allowImageGen: boolean = false) {
   let otherUserInfo = '';
   if (otherUserId) {
@@ -950,7 +973,7 @@ export async function replyToDM(character: any, userDisplayName: string, message
     }
   }
 
-  const historyStr = messageHistory.map(m => `[${m.created_at}] ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n');
+  const historyStr = messageHistory.map(m => m.role === 'system' ? m.content : `[${m.created_at}] ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n');
 
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are having a private direct message conversation with ${userDisplayName}.
@@ -967,7 +990,7 @@ ${character.artstyle ? `CRITICAL ARTSTYLE INSTRUCTION: The image MUST be generat
 Only send an image if it makes sense in the context of the conversation and the user's request.
 ` : 'IMPORTANT: You CANNOT send images in this DM. Do not offer to send images.'}
 
-Conversation history (with timestamps):
+Conversation history:
 ${historyStr}
 
 Reply in character to their latest message. 
@@ -984,7 +1007,10 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
 
   const messages: any[] = [
     { role: 'system', content: systemPrompt },
-    ...messageHistory
+    ...messageHistory.map(m => ({
+      role: m.role === 'system' ? 'system' : m.role,
+      content: m.role === 'system' ? m.content : `[${m.created_at}] ${m.content}`
+    }))
   ];
 
   try {

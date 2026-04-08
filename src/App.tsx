@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
+
+import { FauxPast } from './components/FauxPast';
 
 export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<any>(null);
@@ -1791,6 +1793,7 @@ export default function App() {
               {loggedInUser?.role === 'admin' && (
                 <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(true); }} />
               )}
+              <NavItem icon={<Calendar />} label="FauxPast" active={activeTab === 'fauxpast'} onClick={() => setActiveTab('fauxpast')} />
               <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); }} />
             </nav>
             <button 
@@ -2980,6 +2983,10 @@ export default function App() {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === 'fauxpast' && (
+            <FauxPast />
           )}
 
           {activeTab === 'settings' && (

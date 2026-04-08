@@ -2,7 +2,78 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi } from "./src/ai";
+import { checkAndGenerateMissingRecaps } from "./src/recap";
+
+async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId: number) {
+  const minId = Math.min(user1Id, user2Id);
+  const maxId = Math.max(user1Id, user2Id);
+
+  const summaryRow = db.prepare("SELECT * FROM dm_summaries WHERE user_id_1 = ? AND user_id_2 = ?").get(minId, maxId) as any;
+  let currentSummary = summaryRow ? summaryRow.summary : null;
+  let lastMessageId = summaryRow ? summaryRow.last_message_id : 0;
+
+  const newMessages = db.prepare(`
+    SELECT id, sender_id, content, image_description, created_at 
+    FROM direct_messages
+    WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
+      AND id > ?
+    ORDER BY id ASC
+  `).all(user1Id, user2Id, user2Id, user1Id, lastMessageId) as any[];
+
+  let messagesToSummarize: any[] = [];
+  let recentMessages: any[] = [];
+
+  if (newMessages.length >= 30) {
+    const splitIndex = newMessages.length - 10;
+    messagesToSummarize = newMessages.slice(0, splitIndex);
+    recentMessages = newMessages.slice(splitIndex);
+
+    const char1 = db.prepare("SELECT display_name FROM users WHERE id = ?").get(minId);
+    const char2 = db.prepare("SELECT display_name FROM users WHERE id = ?").get(maxId);
+
+    const formattedForSummary = messagesToSummarize.map(msg => ({
+      role: msg.sender_id === maxId ? 'user' : 'assistant',
+      content: msg.content,
+      created_at: msg.created_at
+    }));
+
+    currentSummary = await summarizeDMHistory(currentSummary, formattedForSummary, char1, char2);
+    lastMessageId = messagesToSummarize[messagesToSummarize.length - 1].id;
+
+    db.prepare(`
+      INSERT INTO dm_summaries (user_id_1, user_id_2, summary, last_message_id) 
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id_1, user_id_2) DO UPDATE SET 
+        summary = excluded.summary, 
+        last_message_id = excluded.last_message_id
+    `).run(minId, maxId, currentSummary, lastMessageId);
+  } else {
+    recentMessages = newMessages;
+  }
+
+  const formattedHistory: any[] = [];
+  if (currentSummary) {
+    formattedHistory.push({
+      role: 'system',
+      content: `[Summary of previous conversation]:\n${currentSummary}`
+    });
+  }
+
+  for (const msg of recentMessages) {
+    let msgContent = msg.content;
+    if (msg.image_description) {
+      msgContent += `\n\n[User sent an image. Description: ${msg.image_description}]`;
+    }
+    formattedHistory.push({
+      role: msg.sender_id === aiUserId ? 'assistant' : 'user',
+      content: msgContent,
+      created_at: msg.created_at
+    });
+  }
+
+  return formattedHistory;
+}
 
 const pendingComments = new Set<string>();
 const pendingDMs = new Set<string>();
@@ -2110,7 +2181,7 @@ async function startServer() {
       const user = getRealUser(req);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      const receiverId = req.params.userId;
+      const receiverId = parseInt(req.params.userId);
       
       let finalContent = content?.trim() || "";
 
@@ -2134,7 +2205,7 @@ async function startServer() {
             }
           }
 
-          checkDynamicRelationship(user.id, parseInt(receiverId)).catch(console.error);
+          checkDynamicRelationship(user.id, receiverId).catch(console.error);
 
           // AI Reply logic
           const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
@@ -2149,24 +2220,7 @@ async function startServer() {
               const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(user.id, receiverId) as any;
               const allowImageGen = dmSettings?.allow_image_gen === 1;
 
-              // Get recent history
-              const history = db.prepare(`
-                SELECT sender_id, content, image_description, created_at FROM direct_messages
-                WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                ORDER BY created_at DESC LIMIT 10
-              `).all(user.id, receiverId, receiverId, user.id).reverse();
-
-              const formattedHistory = history.map((msg: any) => {
-                let msgContent = msg.content;
-                if (msg.image_description) {
-                  msgContent += `\n\n[User sent an image. Description: ${msg.image_description}]`;
-                }
-                return {
-                  role: msg.sender_id === receiverId ? 'assistant' : 'user',
-                  content: msgContent,
-                  created_at: msg.created_at
-                };
-              });
+              const formattedHistory = await getDMSummaryAndHistory(user.id, receiverId, receiverId);
 
               const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
               const relContext = rel ? rel.description : '';
@@ -2215,6 +2269,35 @@ async function startServer() {
       }
     }
   });
+
+  // --- Recap Endpoints ---
+  app.get("/api/recaps", (req, res) => {
+    try {
+      const recaps = db.prepare("SELECT id, month_year, title, created_at FROM monthly_recaps ORDER BY month_year DESC").all();
+      res.json(recaps);
+    } catch (error) {
+      console.error("Error fetching recaps:", error);
+      res.status(500).json({ error: "Failed to fetch recaps" });
+    }
+  });
+
+  app.get("/api/recaps/:monthYear", (req, res) => {
+    try {
+      const recap = db.prepare("SELECT * FROM monthly_recaps WHERE month_year = ?").get(req.params.monthYear) as any;
+      if (!recap) {
+        return res.status(404).json({ error: "Recap not found" });
+      }
+      res.json({
+        ...recap,
+        data: JSON.parse(recap.data)
+      });
+    } catch (error) {
+      console.error("Error fetching recap:", error);
+      res.status(500).json({ error: "Failed to fetch recap" });
+    }
+  });
+
+  // --- End Recap Endpoints ---
 
   // Background Worker for AI Activity
   setInterval(async () => {
@@ -2408,16 +2491,7 @@ async function startServer() {
                         const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
                         const relContext = rel ? rel.description : '';
                         
-                        const messageHistory = db.prepare(`
-                          SELECT sender_id, content, created_at 
-                          FROM direct_messages 
-                          WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                          ORDER BY created_at ASC
-                        `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
-                          role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                          content: m.content,
-                          created_at: m.created_at
-                        }));
+                        const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
 
                         const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
                         if (dmContent) {
@@ -2443,16 +2517,7 @@ async function startServer() {
                     const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
                     const relContext = rel ? rel.description : '';
                     
-                    const messageHistory = db.prepare(`
-                      SELECT sender_id, content, created_at 
-                      FROM direct_messages 
-                      WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                      ORDER BY created_at ASC
-                    `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
-                      role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                      content: m.content,
-                      created_at: m.created_at
-                    }));
+                    const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
 
                     const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
                     if (dmContent) {
@@ -2477,16 +2542,7 @@ async function startServer() {
                   const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
                   const relContext = rel ? rel.description : '';
                   
-                  const messageHistory = db.prepare(`
-                    SELECT sender_id, content, created_at 
-                    FROM direct_messages 
-                    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                    ORDER BY created_at ASC
-                  `).all(randomAi.id, realUser.id, realUser.id, randomAi.id).map((m: any) => ({
-                    role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                    content: m.content,
-                    created_at: m.created_at
-                  }));
+                  const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
 
                   const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
                   if (dmContent) {
@@ -2531,23 +2587,7 @@ async function startServer() {
               pendingDMs.add(dmKey);
 
               try {
-                const history = db.prepare(`
-                  SELECT sender_id, content, image_description, created_at FROM direct_messages
-                  WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                  ORDER BY created_at DESC LIMIT 10
-                `).all(realUser.id, aiUser.id, aiUser.id, realUser.id).reverse();
-
-                const formattedHistory = history.map((msg: any) => {
-                  let msgContent = msg.content;
-                  if (msg.image_description) {
-                    msgContent += `\n\n[User sent an image. Description: ${msg.image_description}]`;
-                  }
-                  return {
-                    role: msg.sender_id === aiUser.id ? 'assistant' : 'user',
-                    content: msgContent,
-                    created_at: msg.created_at
-                  };
-                });
+                const formattedHistory = await getDMSummaryAndHistory(realUser.id, aiUser.id, aiUser.id);
 
                 const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(aiUser.id, realUser.id) as any;
                 const relContext = rel ? rel.description : '';
@@ -2974,16 +3014,7 @@ async function startServer() {
                 const dmContext = `You saw their post: "${choice.data.content}" and decided to DM them about it.`;
                 
                 // Fetch message history
-                const messageHistory = db.prepare(`
-                  SELECT sender_id, content, created_at 
-                  FROM direct_messages 
-                  WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                  ORDER BY created_at ASC
-                `).all(randomAi.id, author.id, author.id, randomAi.id).map((m: any) => ({
-                  role: m.sender_id === randomAi.id ? 'assistant' : 'user',
-                  content: m.content,
-                  created_at: m.created_at
-                }));
+                const messageHistory = await getDMSummaryAndHistory(randomAi.id, author.id, randomAi.id);
 
                 const dmContent = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext, messageHistory);
                 if (dmContent) {
@@ -3130,6 +3161,11 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    
+    // Check for missing recaps on startup
+    setTimeout(() => {
+      checkAndGenerateMissingRecaps().catch(console.error);
+    }, 5000);
   }).on('error', (err) => {
     console.error("CRITICAL: Server listen error:", err);
   });
