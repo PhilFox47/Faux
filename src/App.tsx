@@ -13,6 +13,10 @@ export default function App() {
   const [loginPin, setLoginPin] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<any>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [stayLoggedIn, setStayLoggedIn] = useState(false);
+
+  const SESSION_KEY = 'faux_session';
+  const SESSION_DURATION = 14 * 24 * 60 * 60 * 1000; // 14 days
 
   const apiFetch = useCallback(async (resource: RequestInfo | URL, config?: RequestInit) => {
     const headers = new Headers(config?.headers);
@@ -31,6 +35,35 @@ export default function App() {
     }
   }, [loggedInUser, apiFetch]);
 
+  useEffect(() => {
+    const sessionStr = localStorage.getItem(SESSION_KEY);
+    if (sessionStr && !loggedInUser) {
+      try {
+        const session = JSON.parse(sessionStr);
+        const now = Date.now();
+        if (now - session.timestamp < SESSION_DURATION) {
+          // Valid session, try to auto-login
+          window.fetch('/api/me', {
+            headers: { 'x-user-id': session.userId.toString() }
+          })
+            .then(res => res.json())
+            .then(user => {
+              if (user && !user.error) {
+                setLoggedInUser(user);
+              } else {
+                localStorage.removeItem(SESSION_KEY);
+              }
+            })
+            .catch(() => localStorage.removeItem(SESSION_KEY));
+        } else {
+          localStorage.removeItem(SESSION_KEY);
+        }
+      } catch (e) {
+        localStorage.removeItem(SESSION_KEY);
+      }
+    }
+  }, [loggedInUser]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLoginUser || isLoggingIn) return;
@@ -44,6 +77,14 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setLoggedInUser(data.user);
+        if (stayLoggedIn) {
+          localStorage.setItem(SESSION_KEY, JSON.stringify({
+            userId: data.user.id,
+            timestamp: Date.now()
+          }));
+        } else {
+          localStorage.removeItem(SESSION_KEY);
+        }
         setLoginPin('');
         setSelectedLoginUser(null);
       } else {
@@ -1579,6 +1620,18 @@ export default function App() {
                   />
                 </div>
               )}
+              <div className="flex items-center gap-2 px-1">
+                <input 
+                  type="checkbox" 
+                  id="stayLoggedIn"
+                  checked={stayLoggedIn}
+                  onChange={e => setStayLoggedIn(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-orange-500 focus:ring-orange-500"
+                />
+                <label htmlFor="stayLoggedIn" className="text-sm text-gray-400 cursor-pointer select-none">
+                  Stay logged in for 14 days
+                </label>
+              </div>
               <button 
                 type="submit"
                 className="w-full bg-white text-black font-bold text-lg py-3 rounded-xl hover:bg-gray-200 transition"
@@ -1825,7 +1878,10 @@ export default function App() {
                 </div>
               </div>
               <button 
-                onClick={() => setLoggedInUser(null)}
+                onClick={() => {
+                  setLoggedInUser(null);
+                  localStorage.removeItem(SESSION_KEY);
+                }}
                 className="text-xs text-gray-500 hover:text-white transition text-center py-2"
               >
                 Log out

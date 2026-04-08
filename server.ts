@@ -902,6 +902,14 @@ async function startServer() {
     res.json(users);
   });
 
+  app.get("/api/me", (req, res) => {
+    const userId = req.headers['x-user-id'];
+    if (!userId) return res.status(401).json({ error: "Not logged in" });
+    const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json(user);
+  });
+
   app.post("/api/login", (req, res) => {
     const { userId, pin } = req.body;
     const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
