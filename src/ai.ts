@@ -39,6 +39,22 @@ function stripReasoning(text: string): string {
   return cleaned.trim();
 }
 
+function cleanAiResponse(text: string): string {
+  if (!text) return "";
+  // Remove timestamps like [2026-04-08 22:04:15] or [22:04:15] or (2026-04-08 22:04:15)
+  let cleaned = text.replace(/\[\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\]\s*/g, '');
+  cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\)\s*/g, '');
+  cleaned = cleaned.replace(/\[\d{2}:\d{2}:\d{2}\]\s*/g, '');
+  cleaned = cleaned.replace(/\(\d{2}:\d{2}:\d{2}\)\s*/g, '');
+  cleaned = cleaned.replace(/\[\d{4}-\d{2}-\d{2}\]\s*/g, '');
+  cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\)\s*/g, '');
+  
+  // Also remove potential "Assistant:" or "CharacterName:" prefixes if the AI hallucinated them
+  cleaned = cleaned.replace(/^(Assistant|System|User|AI|Bot):\s*/i, '');
+  
+  return cleaned.trim();
+}
+
 function extractJSON(text: string): any {
   if (!text) return {};
   try {
@@ -434,7 +450,7 @@ export async function generateImagePostData(character: any, context: string = ''
       character.id
     );
     
-    return content.trim();
+    return cleanAiResponse(content.trim());
   };
 
   try {
@@ -749,7 +765,7 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
       character.id
     );
     
-    return content;
+    return cleanAiResponse(content);
   } catch (error: any) {
     console.error('Error generating post:', error);
     logApi(
@@ -780,7 +796,8 @@ ${isReply ? `You are participating in a comment thread. Here is the context of t
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
 ${isReply ? `Write a reply that fits your character perfectly and continues the conversation naturally. Notice the timestamps to understand the flow of time.` : `Write a comment that fits your character perfectly. Notice the timestamp of the post to understand how recent it is.`}
-IMPORTANT: This is a text-only comment. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your comment must rely entirely on text and emojis.
+IMPORTANT: This is a text-only comment. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). 
+CRITICAL: DO NOT include any timestamps in your comment (e.g., no "[2026-04-08 22:04:15]"). Your comment must rely entirely on text and emojis.
 ${character.account_type === 'company' ? 'Your comment should reflect your brand identity, promote your products/services if relevant, or engage with your target audience in a corporate or brand-appropriate way.' : ''}
 Keep it short, natural, and in character. Focus on the topic being discussed. Do not wrap in quotes. Keep it under 150 characters.`;
 
@@ -813,7 +830,7 @@ Keep it short, natural, and in character. Focus on the topic being discussed. Do
       character.id
     );
     
-    return content;
+    return cleanAiResponse(content);
   } catch (error: any) {
     console.error('Error generating comment:', error);
     logApi(
@@ -871,7 +888,7 @@ export async function generateDM(character: any, userDisplayName: string, relati
   }
 
   const historyStr = messageHistory.length > 0 
-    ? `\nPrevious conversation history:\n${messageHistory.map(m => m.role === 'system' ? m.content : `[${m.created_at}] ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n')}\n`
+    ? `\nPrevious conversation history:\n${messageHistory.map(m => m.role === 'system' ? m.content : `(Sent at ${m.created_at}) ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n')}\n`
     : '';
 
   const prompt = `${buildCharacterPrompt(character)}
@@ -884,6 +901,7 @@ ${historyStr}
 Write a short, in-character message. 
 ${character.account_type === 'company' ? 'Your message should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be a promotional message, customer support, or a brand partnership inquiry.' : ''}
 CRITICAL: Make it feel like a REALISTIC text message/DM. 
+- Do NOT include any timestamps in your message (e.g., no "[2026-04-08 22:04:15]").
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
@@ -924,7 +942,7 @@ IMPORTANT: This is a text-only message. DO NOT include any image descriptions, p
       character.id
     );
     
-    return content;
+    return cleanAiResponse(content);
   } catch (error: any) {
     console.error('Error generating DM:', error);
     logApi(
@@ -940,7 +958,7 @@ IMPORTANT: This is a text-only message. DO NOT include any image descriptions, p
 export async function summarizeDMHistory(currentSummary: string | null, newMessages: {role: string, content: string, created_at: string}[], character1: any, character2: any) {
   const prompt = `You are an AI summarizing a direct message conversation between ${character1.display_name} and ${character2.display_name}.
 ${currentSummary ? `Here is the summary of the conversation so far:\n${currentSummary}\n\n` : ''}Here are the latest messages:
-${newMessages.map(m => `[${m.created_at}] ${m.role === 'user' ? character2.display_name : character1.display_name}: ${m.content}`).join('\n')}
+${newMessages.map(m => `(Sent at ${m.created_at}) ${m.role === 'user' ? character2.display_name : character1.display_name}: ${m.content}`).join('\n')}
 
 Please provide a concise, updated summary of the entire conversation history, capturing the main topics, relationship dynamics, and any important events. Keep it under 200 words.`;
 
@@ -953,7 +971,7 @@ Please provide a concise, updated summary of the entire conversation history, ca
     });
     
     let content = response.choices[0].message.content || "";
-    return stripReasoning(content).trim();
+    return cleanAiResponse(stripReasoning(content).trim());
   } catch (error: any) {
     console.error('Error summarizing DM history:', error);
     return currentSummary || "";
@@ -973,7 +991,7 @@ export async function replyToDM(character: any, userDisplayName: string, message
     }
   }
 
-  const historyStr = messageHistory.map(m => m.role === 'system' ? m.content : `[${m.created_at}] ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n');
+  const historyStr = messageHistory.map(m => m.role === 'system' ? m.content : `(Sent at ${m.created_at}) ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n');
 
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are having a private direct message conversation with ${userDisplayName}.
@@ -997,6 +1015,7 @@ Reply in character to their latest message.
 Notice the timestamps to understand the flow of time between messages.
 ${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be customer support, answering inquiries, or maintaining brand voice.' : ''}
 CRITICAL: Make it feel like a REALISTIC text message/DM. 
+- Do NOT include any timestamps in your reply (e.g., no "[2026-04-08 22:04:15]").
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
@@ -1009,7 +1028,7 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
     { role: 'system', content: systemPrompt },
     ...messageHistory.map(m => ({
       role: m.role === 'system' ? 'system' : m.role,
-      content: m.role === 'system' ? m.content : `[${m.created_at}] ${m.content}`
+      content: m.role === 'system' ? m.content : `(Sent at ${m.created_at})\n${m.content}`
     }))
   ];
 
@@ -1043,10 +1062,13 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
     );
     
     let imagePrompt: string | undefined = undefined;
-    const imageMatch = content.match(/\[GENERATE_IMAGE:\s*(.*?)\]/i);
+    const cleanedContent = cleanAiResponse(content);
+    const imageMatch = cleanedContent.match(/\[GENERATE_IMAGE:\s*(.*?)\]/i);
     if (imageMatch) {
       imagePrompt = imageMatch[1].trim();
-      content = content.replace(/\[GENERATE_IMAGE:\s*.*?\]/gi, '').trim();
+      content = cleanedContent.replace(/\[GENERATE_IMAGE:\s*.*?\]/gi, '').trim();
+    } else {
+      content = cleanedContent;
     }
 
     return { content, imagePrompt };
@@ -1073,7 +1095,7 @@ export async function generateGroupChatReply(character: any, groupName: string, 
     return bioStr;
   }).join('\n\n');
   
-  const historyStr = messageHistory.map(m => m.content).join('\n');
+  const historyStr = messageHistory.map(m => `(Sent at ${m.created_at}) ${m.content}`).join('\n');
 
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are in a group chat named "${groupName}" with ${otherMembersStr}.
@@ -1087,6 +1109,7 @@ Reply in character to the latest messages.
 Notice the timestamps to understand the flow of time between messages.
 ${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the group in a corporate or brand-appropriate way. You are representing the company in this group chat.' : ''}
 CRITICAL: Make it feel like a REALISTIC group chat message. 
+- Do NOT include any timestamps in your reply (e.g., no "[2026-04-08 22:04:15]").
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
@@ -1129,7 +1152,7 @@ You can address specific people by name if you want.`;
       character.id
     );
     
-    return content;
+    return cleanAiResponse(content);
   } catch (error: any) {
     console.error('Error replying to Group Chat:', error);
     logApi(
