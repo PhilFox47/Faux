@@ -1148,10 +1148,13 @@ export default function App() {
     const expanded: any[] = [];
     for (const msg of messages) {
       const sender = users.find(u => u.id === msg.sender_id);
-      if (sender?.is_ai && msg.content.includes('\n\n')) {
+      if (sender?.is_ai && (msg.content.includes('\n\n') || msg.image_url)) {
         const parts = msg.content.split('\n\n').filter(p => p.trim());
         for (let i = 0; i < parts.length; i++) {
-          expanded.push({ ...msg, content: parts[i], id: `${msg.id}_part_${i}` });
+          expanded.push({ ...msg, content: parts[i], id: `${msg.id}_part_${i}`, image_url: null });
+        }
+        if (msg.image_url) {
+          expanded.push({ ...msg, content: "", id: `${msg.id}_image`, image_url: msg.image_url });
         }
       } else {
         expanded.push(msg);
@@ -1199,18 +1202,25 @@ export default function App() {
         processingQueue.current = true;
         for (const msg of newMessages) {
           const sender = users.find(u => u.id === msg.sender_id);
-          if (sender?.is_ai && msg.content.includes('\n\n')) {
+          if (sender?.is_ai && (msg.content.includes('\n\n') || msg.image_url)) {
             const parts = msg.content.split('\n\n').filter(p => p.trim());
             setTypingUser(sender.display_name);
             for (let i = 0; i < parts.length; i++) {
-              const partMsg = { ...msg, content: parts[i], id: `${msg.id}_part_${i}` };
+              const partMsg = { ...msg, content: parts[i], id: `${msg.id}_part_${i}`, image_url: null };
               setDisplayedMessages(prev => {
                 if (prev.some(m => m.id === partMsg.id)) return prev;
                 return [...prev, partMsg];
               });
-              if (i < parts.length - 1) {
+              if (i < parts.length - 1 || msg.image_url) {
                 await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1500));
               }
+            }
+            if (msg.image_url) {
+              const imagePart = { ...msg, content: "", id: `${msg.id}_image`, image_url: msg.image_url };
+              setDisplayedMessages(prev => {
+                if (prev.some(m => m.id === imagePart.id)) return prev;
+                return [...prev, imagePart];
+              });
             }
             setTypingUser(null);
           } else {
