@@ -233,10 +233,18 @@ function AutoScrollingCarousel({ items, renderItem }: { items: any[], renderItem
   if (!shuffledItems.length) return null;
 
   const displayItems = [...shuffledItems, ...shuffledItems, ...shuffledItems, ...shuffledItems];
+  
+  // Constant speed: duration proportional to number of items
+  // We want a slow, steady crawl. 
+  // 10 items -> 80s (8s per item)
+  const duration = Math.max(30, shuffledItems.length * 8);
 
   return (
     <div className="overflow-hidden w-full relative">
-      <div className="flex gap-4 animate-scroll w-max hover:[animation-play-state:paused]">
+      <div 
+        className="flex gap-4 animate-scroll w-max hover:[animation-play-state:paused]"
+        style={{ animationDuration: `${duration}s` }}
+      >
         {displayItems.map((item, i) => (
           <div key={i} className="shrink-0">
             {renderItem(item, i)}

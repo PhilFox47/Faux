@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import db, { initDb } from "./src/db";
 import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
@@ -2287,9 +2288,28 @@ async function startServer() {
       if (!recap) {
         return res.status(404).json({ error: "Recap not found" });
       }
+      
+      const data = JSON.parse(recap.data);
+      
+      // Filter images that don't exist on disk
+      if (data.images && Array.isArray(data.images)) {
+        data.images = data.images.filter((url: string) => {
+          if (url.startsWith('/uploads/')) {
+            // Remove leading slash for path.join if needed, but path.join handles it if it's absolute from cwd
+            const filePath = path.join(process.cwd(), url.startsWith('/') ? url.substring(1) : url);
+            try {
+              return fs.existsSync(filePath);
+            } catch (e) {
+              return false;
+            }
+          }
+          return true; // Keep external URLs
+        });
+      }
+
       res.json({
         ...recap,
-        data: JSON.parse(recap.data)
+        data
       });
     } catch (error) {
       console.error("Error fetching recap:", error);
