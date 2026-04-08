@@ -68,6 +68,47 @@ export function FauxPast() {
           <StatCard icon={<Heart />} label="New Relationships" value={data.stats.totalRelationships} color="text-pink-400" />
         </div>
 
+        {/* Introduced Universes */}
+        {data.introduced?.universes && data.introduced.universes.length > 0 && (
+          <div className="mb-12">
+            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <BookOpen className="text-orange-500" /> Introduced Universes
+            </h2>
+            <AutoScrollingCarousel 
+              items={data.introduced.universes} 
+              renderItem={(universe) => (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 w-64 h-32 flex flex-col justify-center items-center text-center">
+                  {universe.image_url && (
+                    <img src={universe.image_url} alt="" className="w-12 h-12 rounded-full mb-2 object-cover" />
+                  )}
+                  <h3 className="font-bold text-lg text-orange-400 truncate w-full">{universe.name}</h3>
+                </div>
+              )} 
+            />
+          </div>
+        )}
+
+        {/* Introduced Characters */}
+        {data.introduced?.characters && data.introduced.characters.length > 0 && (
+          <div className="mb-12">
+            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <Users className="text-orange-500" /> Introduced Characters
+            </h2>
+            <AutoScrollingCarousel 
+              items={data.introduced.characters} 
+              renderItem={(character) => (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 w-48 h-48 flex flex-col items-center text-center">
+                  <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-zinc-700 mb-3">
+                    <img src={character.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${character.display_name}`} alt="" className="w-full h-full object-cover bg-zinc-800" />
+                  </div>
+                  <h3 className="font-bold text-md text-white truncate w-full">{character.display_name}</h3>
+                  <p className="text-xs text-gray-400 truncate w-full">@{character.username}</p>
+                </div>
+              )} 
+            />
+          </div>
+        )}
+
         {/* Graphs */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 mb-12">
           <h2 className="text-2xl font-bold mb-6">Activity Over Time</h2>
@@ -117,13 +158,14 @@ export function FauxPast() {
             <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
               <ImageIcon className="text-orange-500" /> Memories
             </h2>
-            <div className="flex overflow-x-auto gap-4 pb-4 custom-scrollbar snap-x">
-              {data.images.map((url: string, i: number) => (
-                <div key={i} className="flex-shrink-0 w-64 h-64 rounded-xl overflow-hidden snap-center border border-zinc-800">
+            <AutoScrollingCarousel 
+              items={data.images} 
+              renderItem={(url) => (
+                <div className="w-64 h-64 rounded-xl overflow-hidden border border-zinc-800">
                   <img src={url} alt="" className="w-full h-full object-cover" />
                 </div>
-              ))}
-            </div>
+              )} 
+            />
           </div>
         )}
       </div>
@@ -172,6 +214,35 @@ function StatCard({ icon, label, value, color }: { icon: React.ReactNode, label:
       <div className={`mb-2 ${color}`}>{icon}</div>
       <div className="text-3xl font-black mb-1">{value.toLocaleString()}</div>
       <div className="text-xs text-gray-400 uppercase tracking-wider font-bold">{label}</div>
+    </div>
+  );
+}
+
+function AutoScrollingCarousel({ items, renderItem }: { items: any[], renderItem: (item: any, index: number) => React.ReactNode }) {
+  const [shuffledItems, setShuffledItems] = useState<any[]>([]);
+
+  useEffect(() => {
+    const newArr = [...items];
+    for (let i = newArr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+    }
+    setShuffledItems(newArr);
+  }, [items]);
+
+  if (!shuffledItems.length) return null;
+
+  const displayItems = [...shuffledItems, ...shuffledItems, ...shuffledItems, ...shuffledItems];
+
+  return (
+    <div className="overflow-hidden w-full relative">
+      <div className="flex gap-4 animate-scroll w-max hover:[animation-play-state:paused]">
+        {displayItems.map((item, i) => (
+          <div key={i} className="shrink-0">
+            {renderItem(item, i)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

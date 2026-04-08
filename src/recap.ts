@@ -79,7 +79,11 @@ export async function generateMonthlyRecap(monthYear: string) {
   // 4. Images
   const images = db.prepare("SELECT image_url FROM posts WHERE image_url IS NOT NULL AND strftime('%Y-%m', created_at) = ? LIMIT 50").all(monthYear).map((r: any) => r.image_url) as string[];
 
-  // 5. Generate Title
+  // 5. Introduced Universes and Characters
+  const introducedUniverses = db.prepare("SELECT id, name, description, image_url FROM universes WHERE strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+  const introducedCharacters = db.prepare("SELECT id, username, display_name, avatar_url, bio FROM users WHERE is_ai = 1 AND strftime('%Y-%m', created_at) = ?").all(monthYear) as any[];
+
+  // 6. Generate Title
   const prompt = `You are generating a witty, slightly funny title for a monthly recap of a social media platform called Faux.
 The month is ${monthYear}.
 Some stats: ${totalPosts} posts, ${totalComments} comments, ${totalRelationships} new relationships.
@@ -120,6 +124,10 @@ Give me a short, catchy title (max 6 words). Do not wrap in quotes.`;
       topFollowersEarned,
       topRelationshipsFormed,
       topRealUserInteractions
+    },
+    introduced: {
+      universes: introducedUniverses,
+      characters: introducedCharacters
     },
     arcs,
     images

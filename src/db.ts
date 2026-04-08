@@ -140,7 +140,8 @@ export function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL,
       description TEXT DEFAULT '',
-      image_url TEXT DEFAULT ''
+      image_url TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS relationships (
@@ -391,6 +392,13 @@ export function initDb() {
         insertArchetype.run(arch.id, arch.name, arch.description, arch.probability, arch.account_type);
       }
     }
+  }
+
+  // Add created_at column to universes if it doesn't exist
+  try {
+    db.exec("ALTER TABLE universes ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+  } catch (e) {
+    // Column might already exist
   }
 
   // Add last_read_at column if it doesn't exist
