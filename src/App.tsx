@@ -286,7 +286,7 @@ export default function App() {
   const [isSendingReply, setIsSendingReply] = useState(false);
 
   // DM Editing
-  const [editingDmId, setEditingDmId] = useState<number | null>(null);
+  const [editingDmId, setEditingDmId] = useState<number | string | null>(null);
   const [editingDmContent, setEditingDmContent] = useState('');
   const [expandedImageUrl, setExpandedImageUrl] = useState<string | null>(null);
   const [showGallery, setShowGallery] = useState(false);
@@ -1187,11 +1187,19 @@ export default function App() {
       return;
     }
 
-    // If we loaded older messages (length increased but last message is the same)
+    // If messages were deleted or edited (length changed or content changed)
     // We only sync if we are not currently processing a new message sequence
-    if (chatMessages.length > displayedMessages.length && lastMsg.id === lastProcessedMsgId && !processingQueue.current) {
-      setDisplayedMessages(expandMessages(chatMessages));
-      return;
+    if (lastMsg.id === lastProcessedMsgId && !processingQueue.current) {
+      const expanded = expandMessages(chatMessages);
+      if (expanded.length !== displayedMessages.length) {
+        setDisplayedMessages(expanded);
+        return;
+      }
+      const hasContentChanged = expanded.some((m, i) => m.content !== displayedMessages[i]?.content || m.image_url !== displayedMessages[i]?.image_url);
+      if (hasContentChanged) {
+        setDisplayedMessages(expanded);
+        return;
+      }
     }
 
     // If there are new messages
@@ -1535,10 +1543,12 @@ export default function App() {
     }
   };
 
-  const handleEditDm = async (msgId: number) => {
+  const handleEditDm = async (msgId: number | string) => {
     if (!editingDmContent.trim() || !activeChat) return;
     
-    const endpoint = isGroupChat ? `/api/group-chats/messages/${msgId}` : `/api/dms/messages/${msgId}`;
+    const originalId = typeof msgId === 'string' ? parseInt(msgId.split('_')[0]) : msgId;
+    
+    const endpoint = isGroupChat ? `/api/group-chats/messages/${originalId}` : `/api/dms/messages/${originalId}`;
     await apiFetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1550,10 +1560,12 @@ export default function App() {
     fetchChatMessages(activeChat.id, isGroupChat);
   };
 
-  const handleDeleteDm = async (msgId: number) => {
+  const handleDeleteDm = async (msgId: number | string) => {
     if (!activeChat) return;
     
-    const endpoint = isGroupChat ? `/api/group-chats/messages/${msgId}` : `/api/dms/messages/${msgId}`;
+    const originalId = typeof msgId === 'string' ? parseInt(msgId.split('_')[0]) : msgId;
+    
+    const endpoint = isGroupChat ? `/api/group-chats/messages/${originalId}` : `/api/dms/messages/${originalId}`;
     await apiFetch(endpoint, {
       method: 'DELETE'
     });
@@ -2606,7 +2618,12 @@ export default function App() {
                                 )}
                               </div>
                               <div className={`flex gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                <button onClick={() => { setEditingDmId(msg.id); setEditingDmContent(msg.content); }} className="text-xs text-gray-500 hover:text-white"><Edit2 size={12} /></button>
+                                <button onClick={() => { 
+                                  const originalId = typeof msg.id === 'string' ? parseInt(msg.id.split('_')[0]) : msg.id;
+                                  const originalMsg = chatMessages.find(m => m.id === originalId);
+                                  setEditingDmId(msg.id); 
+                                  setEditingDmContent(originalMsg ? originalMsg.content : msg.content); 
+                                }} className="text-xs text-gray-500 hover:text-white"><Edit2 size={12} /></button>
                                 <button onClick={() => handleDeleteDm(msg.id)} className="text-xs text-gray-500 hover:text-red-500"><Trash2 size={12} /></button>
                               </div>
                             </div>
