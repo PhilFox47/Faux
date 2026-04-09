@@ -570,6 +570,66 @@ Ensure duration_days is an integer between 7 and 42.`;
   }
 }
 
+export async function generateNewsPost(newsAccount: any, recentPosts: any[], activeArc: any, otherNewsPosts: any[]) {
+  let prompt = `You are managing the news account: ${newsAccount.display_name}. `;
+  if (newsAccount.bio) prompt += `\nBio: ${newsAccount.bio}`;
+  if (newsAccount.description) prompt += `\nBackground: ${newsAccount.description}`;
+  if (newsAccount.writing_style) prompt += `\nWriting Style: ${newsAccount.writing_style}`;
+
+  try {
+    const universe = db.prepare("SELECT name, description FROM universes WHERE id = ?").get(newsAccount.universe_id) as any;
+    if (universe) {
+      prompt += `\nYou are reporting on the universe/franchise: "${universe.name}".`;
+      if (universe.description) {
+        prompt += `\nGeneral information about this universe: ${universe.description}`;
+      }
+    }
+  } catch (e) {}
+
+  prompt += `\n\nYour task is to write a daily news summary post about the events of the last 24 hours in your universe. You can make it longer than a typical social media post to provide a good update.`;
+
+  if (activeArc) {
+    prompt += `\n\nCurrently Active Universe Arc: "${activeArc.title}"\nDescription: ${activeArc.description}\nCurrent Status: ${activeArc.current_status_text}`;
+  }
+
+  if (recentPosts.length > 0) {
+    prompt += `\n\nRecent Posts from characters in your universe (last 24 hours):\n`;
+    recentPosts.forEach(post => {
+      prompt += `[${post.created_at}] ${post.display_name}: ${post.content}\n`;
+    });
+  } else {
+    prompt += `\n\nThere have been no new posts from characters in your universe in the last 24 hours. You can report on the general state of the universe or the active arc.`;
+  }
+
+  if (otherNewsPosts.length > 0) {
+    prompt += `\n\nOther News Accounts in your universe have already reported today:\n`;
+    otherNewsPosts.forEach(post => {
+      prompt += `[${post.created_at}] ${post.display_name}: ${post.content}\n`;
+    });
+    prompt += `\nTry to cover different topics or provide a different perspective than the other news accounts, unless something really big happened that everyone must cover.`;
+  }
+
+  prompt += `\n\nWrite your news post now. Return ONLY the text of the post.`;
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 2000,
+    });
+    
+    let content = stripReasoning(response.choices[0].message.content || "");
+    content = cleanAiResponse(content);
+    
+    logApi('generateNewsPost', { newsAccountId: newsAccount.id, prompt }, { response: response.choices[0].message.content, content }, newsAccount.id);
+    return content;
+  } catch (e) {
+    console.error("Error generating news post:", e);
+    logApi('generateNewsPost_error', { newsAccountId: newsAccount.id, prompt }, { error: String(e) }, newsAccount.id);
+    return null;
+  }
+}
+
 export async function concludeArc(character: any, arc: any, recentPosts: string, recentComments: string) {
   const prompt = `${buildCharacterPrompt(character)}
 This character's narrative arc has reached its end date. 
@@ -696,7 +756,7 @@ Return ONLY a JSON object with the following structure:
   }
 }
 
-export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false, activeArc: any = null, pastArcs: any[] = [], arcInstruction: string = '', arcComments: string = '', activeUniverseArc: any = null, pastUniverseArcs: any[] = []) {
+export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false, activeArc: any = null, pastArcs: any[] = [], arcInstruction: string = '', arcComments: string = '', activeUniverseArc: any = null, pastUniverseArcs: any[] = [], recentNewsPosts: any[] = []) {
   let prompt = `${buildCharacterPrompt(character)}
 ${isIntroduction ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.` : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
 ${character.account_type === 'company' ? 'Your post should reflect your brand identity, promote your products/services, or engage with your target audience in a corporate or brand-appropriate way.' : 'Your post should be independent and reflect your current thoughts, feelings, or activities.'}
@@ -705,6 +765,8 @@ Instructions for this archetype: ${postTypeObj.description}
 Avoid referencing other people's posts directly unless it's a very general observation or the archetype requires it.
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
 ${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
+
+${recentNewsPosts.length > 0 ? `RECENT UNIVERSE NEWS (Events that happened in your world recently):\n${recentNewsPosts.map(p => `[${p.created_at}] ${p.display_name}: ${p.content}`).join('\n')}\nNOTE: You are aware of these news events. You can react to them, mention them, or completely ignore them if they don't concern you.\n` : ''}
 
 ${pastUniverseArcs.length > 0 ? `PAST UNIVERSE ARCS (Historical events in your world):\n${pastUniverseArcs.map(a => `- ${a.title}: ${a.completion_summary}`).join('\n')}\n` : ''}
 

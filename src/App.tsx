@@ -6,6 +6,10 @@ import { WELCOME_TEXTS } from './welcomeTexts';
 
 import { FauxPast } from './components/FauxPast';
 
+const getAvatarShape = (accountType?: string) => {
+  return accountType === 'company' || accountType === 'news' ? 'rounded-xl' : 'rounded-full';
+};
+
 export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<any>(null);
   const [welcomeText] = useState(() => WELCOME_TEXTS[Math.floor(Math.random() * WELCOME_TEXTS.length)]);
@@ -186,7 +190,7 @@ export default function App() {
   const [charOnlineTimes, setCharOnlineTimes] = useState<string[]>([]);
   const [charActivityLevel, setCharActivityLevel] = useState<number>(5);
   const [charNewUniverseName, setCharNewUniverseName] = useState('');
-  const [charAccountType, setCharAccountType] = useState<'character' | 'company'>('character');
+  const [charAccountType, setCharAccountType] = useState<'character' | 'company' | 'news'>('character');
   const [charCompanyName, setCharCompanyName] = useState('');
   const [charBrandIdentity, setCharBrandIdentity] = useState('');
   const [charProductsServices, setCharProductsServices] = useState('');
@@ -318,7 +322,7 @@ export default function App() {
   const [profileOnlineTimes, setProfileOnlineTimes] = useState<string[]>([]);
   const [profileActivityLevel, setProfileActivityLevel] = useState<number>(5);
   const [profileNewUniverseName, setProfileNewUniverseName] = useState('');
-  const [profileAccountType, setProfileAccountType] = useState<'character' | 'company'>('character');
+  const [profileAccountType, setProfileAccountType] = useState<'character' | 'company' | 'news'>('character');
   const [profileCompanyName, setProfileCompanyName] = useState('');
   const [profileBrandIdentity, setProfileBrandIdentity] = useState('');
   const [profileProductsServices, setProfileProductsServices] = useState('');
@@ -1730,7 +1734,7 @@ export default function App() {
               className="flex flex-col items-center gap-4 cursor-pointer group"
               onClick={() => setSelectedLoginUser(user)}
             >
-              <div className={`w-32 h-32 rounded-xl overflow-hidden border-4 transition-all duration-200 ${selectedLoginUser?.id === user.id ? 'border-white scale-110' : 'border-transparent group-hover:border-gray-400 group-hover:scale-105'}`}>
+              <div className={`w-32 h-32 ${getAvatarShape(user.account_type)} overflow-hidden border-4 transition-all duration-200 ${selectedLoginUser?.id === user.id ? 'border-white scale-110' : 'border-transparent group-hover:border-gray-400 group-hover:scale-105'}`}>
                 {user.avatar_url ? (
                   <img src={user.avatar_url} alt={user.display_name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 ) : (
@@ -2007,7 +2011,7 @@ export default function App() {
                 onClick={() => handleEditProfile(loggedInUser)}
                 className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
               >
-                <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
+                <div className={`w-10 h-10 bg-blue-900 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden`}>
                   {loggedInUser?.avatar_url ? (
                     <img src={loggedInUser.avatar_url} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -2042,7 +2046,7 @@ export default function App() {
             <>
               {/* Compose Post */}
               <div className="border-b border-gray-800 p-4 flex gap-4">
-                <div className="w-10 h-10 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold overflow-hidden">
+                <div className={`w-10 h-10 bg-blue-900 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden`}>
                   {loggedInUser?.avatar_url ? (
                     <img src={loggedInUser?.avatar_url} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -2207,6 +2211,13 @@ export default function App() {
                     >
                       Company Account
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setCharAccountType('news')}
+                      className={`flex-1 py-3 rounded-lg font-bold transition-colors ${charAccountType === 'news' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                    >
+                      News Account
+                    </button>
                   </div>
 
                   {charAccountType === 'character' ? (
@@ -2220,7 +2231,7 @@ export default function App() {
                         <textarea value={charPersona} onChange={e => setCharPersona(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. From The Witcher 3, currently looking for Ciri..."></textarea>
                       </div>
                     </>
-                  ) : (
+                  ) : charAccountType === 'company' ? (
                     <>
                       <div>
                         <label className="block text-sm font-medium text-gray-400 mb-1">Company / Brand Name</label>
@@ -2252,7 +2263,18 @@ export default function App() {
                         </select>
                       </div>
                     </>
-                  )}
+                  ) : charAccountType === 'news' ? (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">News Account Name</label>
+                        <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Daily Planet" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-1">Background / Focus</label>
+                        <textarea value={charDescription} onChange={e => setCharDescription(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. The premier news source for Metropolis..."></textarea>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-400 mb-1">Username</label>
@@ -2319,10 +2341,12 @@ export default function App() {
                     <label className="block text-sm font-medium text-gray-400 mb-1">Public Bio</label>
                     <textarea value={charBio} onChange={e => setCharBio(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Short public bio..."></textarea>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">General Description (Private)</label>
-                    <textarea value={charDescription} onChange={e => setCharDescription(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Detailed personality and background..."></textarea>
-                  </div>
+                  {charAccountType !== 'news' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">General Description (Private)</label>
+                      <textarea value={charDescription} onChange={e => setCharDescription(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Detailed personality and background..."></textarea>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-1">Writing Style (Private)</label>
                     <textarea value={charWritingStyle} onChange={e => setCharWritingStyle(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Tone of voice, catchphrases, interaction style..."></textarea>
@@ -2339,10 +2363,12 @@ export default function App() {
                       </div>
                     </>
                   )}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle (Private)</label>
-                    <textarea value={charArtstyle} onChange={e => setCharArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Anime, Realistic, Pixel Art, Oil Painting..."></textarea>
-                  </div>
+                  {charAccountType !== 'news' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle (Private)</label>
+                      <textarea value={charArtstyle} onChange={e => setCharArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Anime, Realistic, Pixel Art, Oil Painting..."></textarea>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">Online Time (Optional - Default: Always Online)</label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
@@ -2366,20 +2392,22 @@ export default function App() {
                     </div>
                     <p className="text-xs text-gray-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
-                    <div className="flex items-center gap-4">
-                      <input 
-                        type="range" 
-                        min="1" max="10" 
-                        value={charActivityLevel} 
-                        onChange={e => setCharActivityLevel(parseInt(e.target.value))}
-                        className="w-full accent-orange-500"
-                      />
-                      <span className="text-white font-bold w-6 text-center">{charActivityLevel}</span>
+                  {charAccountType !== 'news' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
+                      <div className="flex items-center gap-4">
+                        <input 
+                          type="range" 
+                          min="1" max="10" 
+                          value={charActivityLevel} 
+                          onChange={e => setCharActivityLevel(parseInt(e.target.value))}
+                          className="w-full accent-orange-500"
+                        />
+                        <span className="text-white font-bold w-6 text-center">{charActivityLevel}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
-                  </div>
+                  )}
                   <button type="submit" className="w-full bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold py-3 rounded-full hover:from-orange-600 hover:to-yellow-600 transition shadow-lg">
                     Add Character
                   </button>
@@ -2434,7 +2462,7 @@ export default function App() {
                     {groupChats.map(group => (
                       <div 
                         key={`group-${group.id}`} 
-                        onClick={() => { setActiveChat({ id: group.id, name: group.name, isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true); }}
+                        onClick={() => { setActiveChat({ id: group.id, name: group.name, account_type: 'group', isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true); }}
                         className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-gray-900' : ''}`}
                       >
                         <div className="flex items-center gap-3">
@@ -2465,12 +2493,12 @@ export default function App() {
                     {conversations.map(conv => (
                       <div 
                         key={`dm-${conv.other_user_id}`} 
-                        onClick={() => { setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false); }}
+                        onClick={() => { setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, account_type: conv.account_type, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false); }}
                         className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-gray-900' : ''}`}
                       >
                         <div className="flex items-center gap-3">
                           <div className="relative w-12 h-12 flex-shrink-0 cursor-pointer">
-                            <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                            <div className={`w-full h-full bg-gray-700 ${getAvatarShape(conv.account_type)} flex items-center justify-center overflow-hidden`}>
                               {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
                             </div>
                             {conv.is_ai === 1 && (
@@ -2509,7 +2537,7 @@ export default function App() {
                         <ArrowLeft size={20} />
                       </button>
                       <div className="relative w-8 h-8 flex-shrink-0">
-                        <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                        <div className={`w-full h-full bg-gray-700 ${getAvatarShape(activeChat.account_type)} flex items-center justify-center overflow-hidden`}>
                           {activeChat.avatar_url ? <img src={activeChat.avatar_url} alt="" className="w-full h-full object-cover" /> : (isGroupChat ? <Users size={16} /> : <User size={16} />)}
                         </div>
                         {(() => {
@@ -2586,7 +2614,7 @@ export default function App() {
                           <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
                             {!isMe && (
                               <div className="relative">
-                                <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0 mb-1" />
+                                <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className={`w-6 h-6 ${getAvatarShape(sender?.account_type || activeChat.account_type)} object-cover flex-shrink-0 mb-1`} />
                                 {sender?.is_ai === 1 && (
                                   <div className={`absolute bottom-1 -right-0.5 w-2 h-2 rounded-full border border-gray-900 ${isUserOnline(sender) ? 'bg-green-500' : 'bg-gray-500'}`} title={isUserOnline(sender) ? 'Online' : 'Offline'}></div>
                                 )}
@@ -2724,7 +2752,7 @@ export default function App() {
                         <img 
                           src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
                           alt={char.display_name} 
-                          className="w-8 h-8 rounded-full border-2 border-gray-900 object-cover bg-gray-800" 
+                          className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-gray-900 object-cover bg-gray-800`} 
                           referrerPolicy="no-referrer" 
                         />
                         {char.is_active && isUserOnline(char) && (
@@ -2764,7 +2792,7 @@ export default function App() {
                           <img 
                             src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
                             alt={char.display_name} 
-                            className="w-8 h-8 rounded-full border-2 border-gray-900 object-cover bg-gray-800" 
+                            className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-gray-900 object-cover bg-gray-800`} 
                             referrerPolicy="no-referrer" 
                           />
                           {char.is_active && isUserOnline(char) && (
@@ -2902,7 +2930,7 @@ export default function App() {
                   {viewingUniverseCharacters.map(char => (
                     <div key={char.id} onClick={() => handleViewProfile(char.id)} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                       <div className="relative">
-                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
+                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className={`w-12 h-12 ${getAvatarShape(char.account_type)} object-cover`} referrerPolicy="no-referrer" />
                         {char.is_active && isUserOnline(char) && (
                           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
                         )}
@@ -3015,7 +3043,7 @@ export default function App() {
                   <div key={char.id} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-3 hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                     <div className="flex items-center gap-3 cursor-pointer overflow-hidden flex-1" onClick={() => handleViewProfile(char.id)}>
                       <div className="relative flex-shrink-0">
-                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
+                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className={`w-12 h-12 ${getAvatarShape(char.account_type)} object-cover`} referrerPolicy="no-referrer" />
                         {char.is_active && isUserOnline(char) && (
                           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
                         )}
@@ -3087,7 +3115,7 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           {arc.entity_image ? (
-                            <img src={arc.entity_image} alt={arc.entity_name} className="w-10 h-10 rounded-full object-cover bg-gray-800" referrerPolicy="no-referrer" />
+                            <img src={arc.entity_image} alt={arc.entity_name} className={`w-10 h-10 ${getAvatarShape(arc.entity_account_type)} object-cover bg-gray-800`} referrerPolicy="no-referrer" />
                           ) : (
                             <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-gray-500">
                               {arc.arc_type === 'universe' ? <Globe size={20} /> : <User size={20} />}
@@ -3164,8 +3192,8 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className="flex -space-x-4">
-                            <img src={check.user1_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user1_name}`} alt={check.user1_name} className="w-12 h-12 rounded-full border-2 border-gray-900 object-cover bg-gray-800" referrerPolicy="no-referrer" />
-                            <img src={check.user2_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user2_name}`} alt={check.user2_name} className="w-12 h-12 rounded-full border-2 border-gray-900 object-cover bg-gray-800" referrerPolicy="no-referrer" />
+                            <img src={check.user1_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user1_name}`} alt={check.user1_name} className={`w-12 h-12 ${getAvatarShape(check.user1_account_type)} border-2 border-gray-900 object-cover bg-gray-800`} referrerPolicy="no-referrer" />
+                            <img src={check.user2_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user2_name}`} alt={check.user2_name} className={`w-12 h-12 ${getAvatarShape(check.user2_account_type)} border-2 border-gray-900 object-cover bg-gray-800`} referrerPolicy="no-referrer" />
                           </div>
                           <div>
                             <h3 className="font-bold text-lg">{check.user1_name} & {check.user2_name}</h3>
@@ -3757,6 +3785,13 @@ export default function App() {
                         >
                           Company Account
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setProfileAccountType('news')}
+                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'news' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                        >
+                          News Account
+                        </button>
                       </div>
 
                       {profileAccountType === 'company' && (
@@ -3794,10 +3829,25 @@ export default function App() {
                         </div>
                       )}
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">General Description</label>
-                        <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
-                      </div>
+                      {profileAccountType === 'news' && (
+                        <div className="space-y-4 bg-gray-900/50 p-4 rounded-xl border border-gray-800 mb-6">
+                          <h4 className="font-bold text-orange-400 mb-2 flex items-center gap-2"><Globe size={16} /> News Account Details</h4>
+                          <p className="text-sm text-gray-400">News accounts post daily summaries of events in their universe. They do not form relationships or comment on posts.</p>
+                        </div>
+                      )}
+
+                      {profileAccountType !== 'news' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">General Description</label>
+                          <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                        </div>
+                      )}
+                      {profileAccountType === 'news' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Background / Focus</label>
+                          <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-400 mb-1">Writing Style</label>
                         <textarea value={profileWritingStyle} onChange={e => setProfileWritingStyle(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
@@ -3814,10 +3864,12 @@ export default function App() {
                           </div>
                         </>
                       )}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle</label>
-                        <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
-                      </div>
+                      {profileAccountType !== 'news' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle</label>
+                          <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-400 mb-1">Universe</label>
                         <SearchableDropdown
@@ -3861,20 +3913,22 @@ export default function App() {
                         </div>
                         <p className="text-xs text-gray-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
-                        <div className="flex items-center gap-4">
-                          <input 
-                            type="range" 
-                            min="1" max="10" 
-                            value={profileActivityLevel} 
-                            onChange={e => setProfileActivityLevel(parseInt(e.target.value))}
-                            className="w-full accent-orange-500"
-                          />
-                          <span className="text-white font-bold w-6 text-center">{profileActivityLevel}</span>
+                      {profileAccountType !== 'news' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
+                          <div className="flex items-center gap-4">
+                            <input 
+                              type="range" 
+                              min="1" max="10" 
+                              value={profileActivityLevel} 
+                              onChange={e => setProfileActivityLevel(parseInt(e.target.value))}
+                              className="w-full accent-orange-500"
+                            />
+                            <span className="text-white font-bold w-6 text-center">{profileActivityLevel}</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -3885,7 +3939,7 @@ export default function App() {
                     {profileRelationships.map(rel => (
                       <div key={rel.id} className="bg-gray-900 p-3 rounded-lg border border-gray-800 flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <img src={rel.other_avatar} alt="" className="w-8 h-8 rounded-full object-cover" />
+                          <img src={rel.other_avatar} alt="" className={`w-8 h-8 ${getAvatarShape(rel.other_account_type)} object-cover`} />
                           <div>
                             <p className="font-bold text-sm">{rel.other_name}</p>
                             <p className="text-xs text-gray-400">{rel.description}</p>
@@ -4001,7 +4055,7 @@ export default function App() {
                     onClick={() => handleViewProfile(u.id)}
                     className="relative w-10 h-10 flex-shrink-0 cursor-pointer"
                   >
-                    <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                    <div className={`w-full h-full bg-gray-700 ${getAvatarShape(u.account_type)} flex items-center justify-center overflow-hidden`}>
                       {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
                     </div>
                     {u.is_ai === 1 && (
@@ -4024,7 +4078,7 @@ export default function App() {
                     </button>
                     <div className="flex gap-1">
                       <button 
-                        onClick={() => { setActiveTab('messages'); setActiveChat({ id: u.id, name: u.display_name, avatar_url: u.avatar_url }); fetchChatMessages(u.id); }}
+                        onClick={() => { setActiveTab('messages'); setActiveChat({ id: u.id, name: u.display_name, avatar_url: u.avatar_url, account_type: u.account_type }); fetchChatMessages(u.id); }}
                         className="flex-1 bg-transparent text-gray-400 hover:text-white text-xs font-bold px-2 py-1 rounded-full transition"
                       >
                         Chat
@@ -4092,7 +4146,7 @@ export default function App() {
               <div className="h-32 bg-gradient-to-r from-orange-500 to-yellow-500"></div>
               <div className="px-6 pb-6">
                 <div className="relative -mt-12 mb-4">
-                  <div className="relative w-24 h-24 rounded-full border-4 border-gray-900 bg-gray-800 overflow-hidden">
+                  <div className={`relative w-24 h-24 ${getAvatarShape(viewingProfile.account_type)} border-4 border-gray-900 bg-gray-800 overflow-hidden`}>
                     {viewingProfile.avatar_url ? <img src={viewingProfile.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={48} className="m-auto mt-4" />}
                   </div>
                   {viewingProfile.is_ai === 1 && (
@@ -4192,6 +4246,15 @@ export default function App() {
                         </span>
                       </p>
                     )}
+                  </div>
+                )}
+                
+                {viewingProfile.account_type === 'news' && (
+                  <div className="mb-4 space-y-2 text-sm bg-gray-950 p-4 rounded-xl border border-gray-800">
+                    <div className="flex items-center gap-2 text-orange-400 font-bold mb-2">
+                      <Globe size={16} /> News Account
+                    </div>
+                    <p className="text-gray-400">This account provides daily news updates for its universe.</p>
                   </div>
                 )}
                 
@@ -4374,7 +4437,7 @@ export default function App() {
               <div className="flex-1 overflow-y-auto p-2">
                 {likersModal.users.map(u => (
                   <div key={u.id} className="flex items-center gap-3 p-3 hover:bg-gray-800 rounded-xl cursor-pointer" onClick={() => { handleViewProfile(u.id); setLikersModal(null); }}>
-                    <div className="w-10 h-10 bg-gray-700 rounded-full overflow-hidden">
+                    <div className={`w-10 h-10 bg-gray-700 ${getAvatarShape(u.account_type)} overflow-hidden`}>
                       {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="m-auto mt-2" />}
                     </div>
                     <div>
@@ -4400,7 +4463,7 @@ export default function App() {
               <div className="flex-1 overflow-y-auto p-2">
                 {followersModal.users.map(u => (
                   <div key={u.id} className="flex items-center gap-3 p-3 hover:bg-gray-800 rounded-xl cursor-pointer" onClick={() => { handleViewProfile(u.id); setFollowersModal(null); }}>
-                    <div className="w-10 h-10 bg-gray-700 rounded-full overflow-hidden">
+                    <div className={`w-10 h-10 bg-gray-700 ${getAvatarShape(u.account_type)} overflow-hidden`}>
                       {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="m-auto mt-2" />}
                     </div>
                     <div>
@@ -4496,7 +4559,7 @@ export default function App() {
                       >
                         <div className="flex items-center gap-3">
                           {log.user_profile_picture ? (
-                            <img src={log.user_profile_picture} alt={log.user_display_name} className="w-8 h-8 rounded-full object-cover" />
+                            <img src={log.user_profile_picture} alt={log.user_display_name} className={`w-8 h-8 ${getAvatarShape(log.user_account_type)} object-cover`} />
                           ) : (
                             <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-gray-400">
                               <User size={16} />
@@ -4611,7 +4674,7 @@ export default function App() {
                           }}
                           className="w-5 h-5 rounded border-gray-700 text-orange-500 focus:ring-orange-500 bg-gray-900"
                         />
-                        <div className="relative w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden">
+                        <div className={`relative w-8 h-8 bg-gray-700 ${getAvatarShape(user.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden`}>
                           {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
                           {user.is_ai === 1 ? (
                             <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-gray-900 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>
@@ -4791,7 +4854,7 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
       <div className="p-4 flex items-center gap-3 cursor-pointer" onClick={() => onViewProfile(post.user_id)}>
-        <img src={post.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+        <img src={post.avatar_url} alt="" className={`w-8 h-8 ${getAvatarShape(post.account_type)} object-cover`} />
         <span className="font-bold text-sm hover:underline">{post.display_name}</span>
       </div>
       <div className="bg-black flex items-center justify-center min-h-[300px]">
@@ -5027,7 +5090,7 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
       <div className="flex gap-4">
         <div 
           onClick={() => onViewProfile(post.user_id)}
-          className="w-10 h-10 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
+          className={`w-10 h-10 bg-gray-700 ${getAvatarShape(post.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer`}
         >
           {post.avatar_url ? <img src={post.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
         </div>
@@ -5217,7 +5280,7 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
       <div className={`flex gap-3 group p-2 -m-2 rounded-xl transition ${highlightedCommentId === comment.id ? 'bg-orange-900/20 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}`}>
         <div 
           onClick={() => onViewProfile(comment.user_id)}
-          className="w-8 h-8 bg-gray-700 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
+          className={`w-8 h-8 bg-gray-700 ${getAvatarShape(comment.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer`}
         >
           {comment.avatar_url ? <img src={comment.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
         </div>

@@ -27,6 +27,7 @@ export function initDb() {
       current_online_status INTEGER DEFAULT 0,
       status_expires_at INTEGER DEFAULT 0,
       dm_frequency TEXT DEFAULT 'medium',
+      next_scheduled_post TEXT, -- ISO string for scheduled news posts
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -515,6 +516,12 @@ export function initDb() {
   } catch (e) {
     db.exec("ALTER TABLE users ADD COLUMN description TEXT");
     db.exec("ALTER TABLE users ADD COLUMN writing_style TEXT");
+  }
+
+  try {
+    db.prepare('SELECT next_scheduled_post FROM users').get();
+  } catch (e) {
+    db.exec("ALTER TABLE users ADD COLUMN next_scheduled_post TEXT");
   }
 
   try {

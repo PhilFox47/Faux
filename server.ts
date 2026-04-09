@@ -3,7 +3,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
 
 async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId: number) {
@@ -92,6 +92,67 @@ function getFormatter(timezone: string) {
     }));
   }
   return timeFormatters.get(timezone)!;
+}
+
+function scheduleNextNewsPost(user: any, timezone: string) {
+  let onlineTimes: string[] = [];
+  try {
+    onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : user.online_times;
+  } catch (e) {}
+
+  if (!onlineTimes || onlineTimes.length === 0) {
+    onlineTimes = ["08:00-20:00"]; // Default fallback
+  }
+
+  // Pick a random window
+  const window = onlineTimes[Math.floor(Math.random() * onlineTimes.length)];
+  const parts = window.split('-');
+  if (parts.length !== 2) return;
+  const [start, end] = parts;
+  const [startH, startM] = start.trim().split(':').map(Number);
+  const [endH, endM] = end.trim().split(':').map(Number);
+
+  const startTotal = startH * 60 + startM;
+  let endTotal = endH * 60 + endM;
+  if (endTotal <= startTotal) endTotal += 24 * 60; // Handle overnight windows
+
+  const randomMinute = Math.floor(Math.random() * (endTotal - startTotal)) + startTotal;
+  const targetHour = Math.floor(randomMinute / 60) % 24;
+  const targetMinute = randomMinute % 60;
+
+  // Calculate the next occurrence of this time in the given timezone
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+    hour12: false
+  });
+  
+  const parts2 = formatter.formatToParts(now);
+  const tzDate = new Date(
+    parseInt(parts2.find(p => p.type === 'year')!.value),
+    parseInt(parts2.find(p => p.type === 'month')!.value) - 1,
+    parseInt(parts2.find(p => p.type === 'day')!.value),
+    parseInt(parts2.find(p => p.type === 'hour')!.value),
+    parseInt(parts2.find(p => p.type === 'minute')!.value),
+    parseInt(parts2.find(p => p.type === 'second')!.value)
+  );
+
+  let scheduledDate = new Date(tzDate);
+  scheduledDate.setHours(targetHour, targetMinute, 0, 0);
+
+  // If the scheduled time for today has already passed, schedule for tomorrow
+  if (scheduledDate.getTime() <= tzDate.getTime()) {
+    scheduledDate.setDate(scheduledDate.getDate() + 1);
+  }
+
+  // Convert back to UTC for storage
+  const offset = tzDate.getTime() - now.getTime();
+  const utcScheduledDate = new Date(scheduledDate.getTime() - offset);
+
+  db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ?").run(utcScheduledDate.toISOString(), user.id);
+  user.next_scheduled_post = utcScheduledDate.toISOString();
 }
 
 function isUserOnline(user: any, timezone: string) {
@@ -221,10 +282,13 @@ function pickWeightedRandomUser(users: any[]) {
 async function checkDynamicRelationship(user1Id: number, user2Id: number) {
   if (user1Id === user2Id) return;
   
-  const user1 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user1Id) as any;
-  const user2 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user2Id) as any;
+  const user1 = db.prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?").get(user1Id) as any;
+  const user2 = db.prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?").get(user2Id) as any;
 
   if (!user1 || !user2) return;
+
+  // News accounts cannot form relationships
+  if (user1.account_type === 'news' || user2.account_type === 'news') return;
 
   const isUser1Company = user1.account_type === 'company';
   const isUser2Company = user2.account_type === 'company';
@@ -667,6 +731,18 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   let arcInstruction = '';
   let arcComments = '';
 
+  // NEWS LOGIC
+  let recentNewsPosts: any[] = [];
+  if (universe) {
+    recentNewsPosts = db.prepare(`
+      SELECT p.content, p.created_at, u.display_name 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.id 
+      WHERE u.universe_id = ? AND u.account_type = 'news' AND p.created_at >= datetime('now', '-24 hours')
+      ORDER BY p.created_at DESC LIMIT 3
+    `).all(universe.id) as any[];
+  }
+
   console.log(`[DEBUG] Entering ARC LOGIC for ${aiUser.display_name}. Archetype: ${archetype.id}`);
   console.log(`[DEBUG] arcArchetypes: ${JSON.stringify(arcArchetypes)}`);
   
@@ -741,7 +817,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       characterVisible = imageData.characterVisible;
     }
   } else {
-    postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost, activeArc, pastArcs, arcInstruction, arcComments, activeUniverseArc, pastUniverseArcs)) || "";
+    postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost, activeArc, pastArcs, arcInstruction, arcComments, activeUniverseArc, pastUniverseArcs, recentNewsPosts)) || "";
   }
 
   if (postContent) {
@@ -857,7 +933,7 @@ async function startServer() {
     const errorOnly = req.query.error === 'true';
     
     let queryStr = `
-      SELECT l.*, u.display_name as user_display_name, u.avatar_url as user_profile_picture 
+      SELECT l.*, u.display_name as user_display_name, u.avatar_url as user_profile_picture, u.account_type as user_account_type 
       FROM api_logs l 
       LEFT JOIN users u ON l.user_id = u.id 
       WHERE 1=1
@@ -1080,7 +1156,7 @@ async function startServer() {
     const user = getRealUser(req);
     const userId = user ? user.id : 0;
     const posts = db.prepare(`
-      SELECT p.*, u.username, u.display_name, u.avatar_url,
+      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
@@ -1094,7 +1170,7 @@ async function startServer() {
 
   app.get("/api/users/:id/followers", (req, res) => {
     const followers = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
       FROM follows f
       JOIN users u ON f.follower_id = u.id
       WHERE f.followed_id = ?
@@ -1104,7 +1180,7 @@ async function startServer() {
 
   app.get("/api/users/:id/following", (req, res) => {
     const following = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
       FROM follows f
       JOIN users u ON f.followed_id = u.id
       WHERE f.follower_id = ?
@@ -1143,7 +1219,7 @@ async function startServer() {
     const loggedInUser = getRealUser(req);
     
     const relationships = db.prepare(`
-      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar, u.role as other_role, u1.role as user1_role
+      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar, u.account_type as other_account_type, u.role as other_role, u1.role as user1_role
       FROM relationships r
       JOIN users u ON r.user_id_2 = u.id
       JOIN users u1 ON r.user_id_1 = u1.id
@@ -1552,7 +1628,7 @@ async function startServer() {
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const notifications = db.prepare(`
-      SELECT n.*, u.display_name as actor_name, u.avatar_url as actor_avatar
+      SELECT n.*, u.display_name as actor_name, u.avatar_url as actor_avatar, u.account_type as actor_account_type
       FROM notifications n
       JOIN users u ON n.actor_id = u.id
       WHERE n.user_id = ?
@@ -1595,7 +1671,7 @@ async function startServer() {
     const type = req.query.type as string;
     
     let query = `
-      SELECT p.*, u.username, u.display_name, u.avatar_url,
+      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
@@ -1676,7 +1752,7 @@ async function startServer() {
     const userId = user ? user.id : 0;
 
     const comments = db.prepare(`
-      SELECT c.*, u.username, u.display_name, u.avatar_url,
+      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type,
       (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) as like_count,
       (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
       FROM comments c
@@ -1711,7 +1787,7 @@ async function startServer() {
 
   app.get("/api/posts/:id/likers", (req, res) => {
     const likers = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
       FROM likes l
       JOIN users u ON l.user_id = u.id
       WHERE l.post_id = ?
@@ -1721,7 +1797,7 @@ async function startServer() {
 
   app.get("/api/comments/:id/likers", (req, res) => {
     const likers = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
       FROM comment_likes cl
       JOIN users u ON cl.user_id = u.id
       WHERE cl.comment_id = ?
@@ -1776,7 +1852,7 @@ async function startServer() {
   // Delete and Edit Comments
   app.get("/api/comments/:id", (req, res) => {
     const comment = db.prepare(`
-      SELECT c.*, u.username, u.display_name, u.avatar_url
+      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type
       FROM comments c
       JOIN users u ON c.user_id = u.id
       WHERE c.id = ?
@@ -1859,7 +1935,7 @@ async function startServer() {
 
     for (const group of groups as any[]) {
       group.members = db.prepare(`
-        SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at
+        SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at
         FROM users u
         JOIN group_chat_members gcm ON u.id = gcm.user_id
         WHERE gcm.group_chat_id = ?
@@ -1901,7 +1977,7 @@ async function startServer() {
     const beforeId = req.query.before_id ? parseInt(req.query.before_id as string) : null;
 
     let query = `
-      SELECT m.*, u.display_name, u.username, u.avatar_url
+      SELECT m.*, u.display_name, u.username, u.avatar_url, u.account_type
       FROM group_chat_messages m
       JOIN users u ON m.sender_id = u.id
       WHERE m.group_chat_id = ?
@@ -2080,7 +2156,7 @@ async function startServer() {
         GROUP BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
       )
       SELECT 
-        u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at,
+        u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at,
         dm.content as last_message, dm.created_at, dm.is_read,
         dm.sender_id,
         (SELECT COUNT(*) FROM direct_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread_count
@@ -2367,9 +2443,66 @@ async function startServer() {
       const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
       const allAiUsers = allUsers.filter(u => u.is_ai === 1);
-      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1);
+      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1 && u.account_type !== 'news');
       const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
       if (allAiUsers.length === 0) return;
+
+      // --- News Accounts Logic ---
+      const newsAccounts = allAiUsers.filter(u => u.account_type === 'news');
+      for (const newsAccount of newsAccounts) {
+        let shouldPost = false;
+        const nowMs = Date.now();
+        
+        if (!newsAccount.next_scheduled_post) {
+          // Schedule it for today or tomorrow if missed
+          scheduleNextNewsPost(newsAccount, settings.timezone || 'UTC');
+        } else {
+          const scheduledTime = new Date(newsAccount.next_scheduled_post).getTime();
+          if (nowMs >= scheduledTime) {
+            shouldPost = true;
+          }
+        }
+
+        if (shouldPost) {
+          try {
+            // Get recent posts from this universe (last 24 hours), excluding comments
+            const recentPosts = db.prepare(`
+              SELECT p.content, p.created_at, u.display_name
+              FROM posts p
+              JOIN users u ON p.user_id = u.id
+              WHERE u.universe_id = ? AND p.created_at >= datetime('now', '-24 hours') AND u.account_type != 'news'
+              ORDER BY p.created_at ASC
+            `).all(newsAccount.universe_id) as any[];
+
+            // Get active universe arc
+            const activeArc = db.prepare(`
+              SELECT * FROM universe_arcs
+              WHERE universe_id = ? AND status = 'active'
+              ORDER BY created_at DESC LIMIT 1
+            `).get(newsAccount.universe_id) as any;
+
+            // Get other news posts from today in this universe
+            const otherNewsPosts = db.prepare(`
+              SELECT p.content, p.created_at, u.display_name
+              FROM posts p
+              JOIN users u ON p.user_id = u.id
+              WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
+              ORDER BY p.created_at ASC
+            `).all(newsAccount.universe_id, newsAccount.id) as any[];
+
+            const newsContent = await generateNewsPost(newsAccount, recentPosts, activeArc, otherNewsPosts);
+            if (newsContent) {
+              db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(newsAccount.id, newsContent);
+              console.log(`News Account ${newsAccount.display_name} posted their daily news.`);
+            }
+          } catch (e) {
+            console.error(`Error generating news post for ${newsAccount.display_name}:`, e);
+          } finally {
+            scheduleNextNewsPost(newsAccount, settings.timezone || 'UTC');
+          }
+        }
+      }
+      // --- End News Accounts Logic ---
 
       const probPost = ((settings.prob_post ?? 100) / 1440) * onlineRatio;
       const probComment = ((settings.prob_comment ?? 1000) / 1440) * onlineRatio;
