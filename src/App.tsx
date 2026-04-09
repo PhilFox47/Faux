@@ -10,6 +10,31 @@ const getAvatarShape = (accountType?: string) => {
   return accountType === 'company' || accountType === 'news' ? 'rounded-xl' : 'rounded-full';
 };
 
+const splitMessageContent = (content: string) => {
+  if (!content.includes('\n\n')) return [content];
+  const parts = content.split('\n\n').filter(p => p.trim());
+  const finalParts: string[] = [];
+  let buffer = "";
+
+  for (const p of parts) {
+    if (!buffer) {
+      buffer = p;
+    } else {
+      const bufferLines = buffer.split('\n').length;
+      const partLines = p.split('\n').length;
+      // Only split if both the current buffer and the next part are at least 3 lines long
+      if (bufferLines < 3 || partLines < 3) {
+        buffer += '\n\n' + p;
+      } else {
+        finalParts.push(buffer);
+        buffer = p;
+      }
+    }
+  }
+  if (buffer) finalParts.push(buffer);
+  return finalParts;
+};
+
 export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<any>(null);
   const [welcomeText] = useState(() => WELCOME_TEXTS[Math.floor(Math.random() * WELCOME_TEXTS.length)]);
@@ -1153,7 +1178,7 @@ export default function App() {
     for (const msg of messages) {
       const sender = users.find(u => u.id === msg.sender_id);
       if (sender?.is_ai && (msg.content.includes('\n\n') || msg.image_url)) {
-        const parts = msg.content.split('\n\n').filter(p => p.trim());
+        const parts = splitMessageContent(msg.content);
         for (let i = 0; i < parts.length; i++) {
           expanded.push({ ...msg, content: parts[i], id: `${msg.id}_part_${i}`, image_url: null });
         }
@@ -1215,7 +1240,7 @@ export default function App() {
         for (const msg of newMessages) {
           const sender = users.find(u => u.id === msg.sender_id);
           if (sender?.is_ai && (msg.content.includes('\n\n') || msg.image_url)) {
-            const parts = msg.content.split('\n\n').filter(p => p.trim());
+            const parts = splitMessageContent(msg.content);
             setTypingUser(sender.display_name);
             for (let i = 0; i < parts.length; i++) {
               const partMsg = { ...msg, content: parts[i], id: `${msg.id}_part_${i}`, image_url: null };

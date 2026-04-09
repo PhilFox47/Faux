@@ -388,15 +388,24 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
   }
 }
 
-function filterAvailableUsersForComment(opId: number, availableAiUsers: any[]) {
+function filterAvailableUsersForComment(opId: number, availableAiUsers: any[], postId?: number) {
   if (!availableAiUsers || availableAiUsers.length === 0) return [];
 
   const settings = db.prepare("SELECT cross_universe_prob FROM settings WHERE id = 1").get() as any;
   const crossUniverseProb = (settings?.cross_universe_prob ?? 50.0) / 100;
 
   const opUser = db.prepare("SELECT universe_id, account_type FROM users WHERE id = ?").get(opId) as any;
-  const opUniverseId = opUser?.universe_id;
-  const opAccountType = opUser?.account_type || 'character';
+  let opUniverseId = opUser?.universe_id;
+  let opAccountType = opUser?.account_type || 'character';
+
+  let isNewsPost = false;
+  if (postId) {
+    const post = db.prepare("SELECT u.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
+    if (post?.account_type === 'news' || post?.post_type === 'news') {
+      isNewsPost = true;
+      opUniverseId = post.universe_id;
+    }
+  }
 
   const filteredAiUsers = availableAiUsers.filter(u => {
     // Company commenting logic
@@ -406,8 +415,8 @@ function filterAvailableUsersForComment(opId: number, availableAiUsers: any[]) {
     }
 
     if (u.universe_id === opUniverseId) return true;
-    // News posts are strictly universe-locked for comments
-    if (opAccountType === 'news') return false;
+    // News posts are strictly universe-locked for comments and replies
+    if (opAccountType === 'news' || isNewsPost) return false;
     return Math.random() < crossUniverseProb;
   });
 
@@ -499,12 +508,12 @@ async function triggerPostComments(postId: number, postType: string, isForced: b
     const aiUsers = db.prepare(aiUsersQuery).all(...aiUsersParams) as any[];
     const existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(postId).map((r: any) => r.user_id);
     const availableAiUsers = aiUsers.filter(u => {
-      const isOnline = isUserOnline(u, settings.timezone || 'UTC');
+      const isOnline = isForced ? true : isUserOnline(u, settings.timezone || 'UTC');
       return isOnline && !commentedUserIds.has(u.id) && !existingRepliers.includes(u.id) && !pendingComments.has(`${u.id}:post:${postId}`);
     });
     if (availableAiUsers.length === 0) continue;
 
-    const candidateUsers = filterAvailableUsersForComment(post.user_id, availableAiUsers);
+    const candidateUsers = filterAvailableUsersForComment(post.user_id, availableAiUsers, postId);
     if (candidateUsers.length === 0) continue;
 
     const chosenAiId = await pickBestCommenter(post, candidateUsers);
@@ -616,6 +625,22 @@ async function handleOPReplies() {
       if (!opUser) continue;
 
       if (!isUserOnline(opUser, settings.timezone || 'UTC')) continue;
+
+      // News posts are strictly universe-locked
+      const post = db.prepare("SELECT u.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(comment.post_id) as any;
+      if (post?.account_type === 'news' || post?.post_type === 'news') {
+        // The AI replying must be from the same universe as the news post
+        if (opUser.universe_id !== post.universe_id) {
+          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+          continue;
+        }
+        // The person they are replying to must also be from the same universe (or it's a real user, but we still lock AI replies to the universe)
+        const commenter = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.user_id) as any;
+        if (commenter && commenter.universe_id !== post.universe_id) {
+          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+          continue;
+        }
+      }
 
       if (pendingComments.has(`${opUser.id}:comment:${comment.id}`)) continue;
       pendingComments.add(`${opUser.id}:comment:${comment.id}`);
@@ -3125,9 +3150,20 @@ async function startServer() {
         const mention = onlineMentions[Math.floor(Math.random() * onlineMentions.length)];
         const randomAi = activeAiUsers.find(u => u.id === mention.ai_user_id);
         if (randomAi && mention.author_id !== randomAi.id) {
-          handledMention = true;
-          
-          if (mention.comment_id) {
+          // Check if this is a news post and if the AI is from the same universe
+          const postAuthor = db.prepare("SELECT u.universe_id, u.account_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(mention.post_id) as any;
+          if (postAuthor?.account_type === 'news' && postAuthor.universe_id !== randomAi.universe_id) {
+            // Ignore mention on news post from different universe
+            if (mention.comment_id) {
+              db.prepare("UPDATE comments SET mention_ignored = 1 WHERE id = ?").run(mention.comment_id);
+            } else {
+              db.prepare("UPDATE posts SET mention_ignored = 1 WHERE id = ?").run(mention.post_id);
+            }
+            handledMention = false;
+          } else {
+            handledMention = true;
+            
+            if (mention.comment_id) {
             // Reply to comment
             const commentData = db.prepare(`
               SELECT c.*, u.display_name as author_name, p.content as post_content
@@ -3225,6 +3261,7 @@ async function startServer() {
           }
         }
       }
+    }
 
       if (!handledMention && Math.random() < probComment && activeAiUsers.length > 0) {
         // Pick a recent post or comment to reply to
@@ -3364,7 +3401,8 @@ async function startServer() {
 
         if (choice && availableAis.length > 0) {
           // Now pick the best commenter
-          const candidateUsers = filterAvailableUsersForComment(choice.data.user_id, availableAis);
+          const postId = choice.type === 'post' ? choice.data.id : choice.data.post_id;
+          const candidateUsers = filterAvailableUsersForComment(choice.data.user_id, availableAis, postId);
           if (candidateUsers.length > 0) {
             const chosenAiId = await pickBestCommenter(choice.data, candidateUsers);
             const randomAi = candidateUsers.find(u => u.id === chosenAiId) || candidateUsers[0];
