@@ -965,6 +965,62 @@ async function startServer() {
   // Initialize Database
   initDb();
 
+  function syncNewsFollowers(userId: number | bigint) {
+    const user = db.prepare("SELECT id, universe_id, account_type, is_ai FROM users WHERE id = ?").get(userId) as any;
+    if (!user) return;
+
+    if (user.account_type === 'news') {
+      if (user.universe_id) {
+        // AI characters from the same universe follow this news account
+        const universeCharacters = db.prepare("SELECT id FROM users WHERE universe_id = ? AND is_ai = 1 AND id != ?").all(user.universe_id, user.id) as any[];
+        const followStmt = db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)");
+        for (const char of universeCharacters) {
+          followStmt.run(char.id, user.id);
+        }
+        // AI characters NOT from this universe must NOT follow this news account
+        db.prepare(`
+          DELETE FROM follows 
+          WHERE followed_id = ? 
+          AND follower_id IN (SELECT id FROM users WHERE (universe_id != ? OR universe_id IS NULL) AND is_ai = 1)
+        `).run(user.id, user.universe_id);
+      } else {
+        // If news account has no universe, no AI characters should follow it automatically
+        db.prepare("DELETE FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)").run(user.id);
+      }
+    } else if (user.is_ai === 1) {
+      if (user.universe_id) {
+        // This character follows all news accounts in its universe
+        const newsAccounts = db.prepare("SELECT id FROM users WHERE account_type = 'news' AND universe_id = ?").all(user.universe_id) as any[];
+        const followStmt = db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)");
+        for (const news of newsAccounts) {
+          followStmt.run(user.id, news.id);
+        }
+        // This character must NOT follow news accounts from other universes
+        db.prepare(`
+          DELETE FROM follows 
+          WHERE follower_id = ? 
+          AND followed_id IN (SELECT id FROM users WHERE account_type = 'news' AND (universe_id != ? OR universe_id IS NULL))
+        `).run(user.id, user.universe_id);
+      } else {
+        // If character has no universe, it shouldn't follow any news accounts
+        db.prepare(`
+          DELETE FROM follows 
+          WHERE follower_id = ? 
+          AND followed_id IN (SELECT id FROM users WHERE account_type = 'news')
+        `).run(user.id);
+      }
+    }
+  }
+
+  function globalSyncNewsFollowers() {
+    const allUsers = db.prepare("SELECT id FROM users").all() as any[];
+    for (const u of allUsers) {
+      syncNewsFollowers(u.id);
+    }
+  }
+
+  globalSyncNewsFollowers();
+
   const getRealUser = (req: any) => {
     const userId = req.headers['x-user-id'];
     if (userId) {
@@ -1600,6 +1656,8 @@ async function startServer() {
         WHERE id = ?
       `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, reference_images ? JSON.stringify(reference_images) : '[]', account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id || null, req.params.id);
 
+      syncNewsFollowers(parseInt(req.params.id));
+
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
@@ -1649,6 +1707,8 @@ async function startServer() {
       if (user) {
         db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(userId, user.id);
       }
+
+      syncNewsFollowers(userId);
 
       res.json({ id: userId });
     } catch (e: any) {

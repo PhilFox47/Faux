@@ -2606,17 +2606,29 @@ export default function App() {
                       const currentUser = loggedInUser;
                       const isMe = msg.sender_id === currentUser?.id;
                       const sender = users.find(u => u.id === msg.sender_id);
+                      
+                      const nextMsg = displayedMessages[i + 1];
+                      const isLastInSequence = !nextMsg || nextMsg.sender_id !== msg.sender_id;
+                      const prevMsg = i > 0 ? displayedMessages[i - 1] : null;
+                      const isFirstInSequence = !prevMsg || prevMsg.sender_id !== msg.sender_id;
+
                       return (
-                        <div key={i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} gap-1 w-full`}>
-                          {!isMe && isGroupChat && sender && (
-                            <span className="text-xs text-gray-400 ml-9">{sender.display_name}</span>
+                        <div key={i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isLastInSequence ? 'mb-2' : 'mb-0.5'} w-full`}>
+                          {!isMe && isGroupChat && sender && isFirstInSequence && (
+                            <span className="text-xs text-gray-400 ml-9 mb-1">{sender.display_name}</span>
                           )}
                           <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
                             {!isMe && (
-                              <div className="relative">
-                                <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className={`w-6 h-6 ${getAvatarShape(sender?.account_type || activeChat.account_type)} object-cover flex-shrink-0 mb-1`} />
-                                {sender?.is_ai === 1 && (
-                                  <div className={`absolute bottom-1 -right-0.5 w-2 h-2 rounded-full border border-gray-900 ${isUserOnline(sender) ? 'bg-green-500' : 'bg-gray-500'}`} title={isUserOnline(sender) ? 'Online' : 'Offline'}></div>
+                              <div className="w-6 flex-shrink-0">
+                                {isLastInSequence ? (
+                                  <div className="relative">
+                                    <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className={`w-6 h-6 ${getAvatarShape(sender?.account_type || activeChat.account_type)} object-cover flex-shrink-0 mb-1`} />
+                                    {sender?.is_ai === 1 && (
+                                      <div className={`absolute bottom-1 -right-0.5 w-2 h-2 rounded-full border border-gray-900 ${isUserOnline(sender) ? 'bg-green-500' : 'bg-gray-500'}`} title={isUserOnline(sender) ? 'Online' : 'Offline'}></div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="w-6 h-6" />
                                 )}
                               </div>
                             )}
@@ -2656,9 +2668,11 @@ export default function App() {
                               </div>
                             </div>
                           </div>
-                          <span className="text-[10px] text-gray-500 px-2">
-                            {formatTimestamp(msg.created_at)}
-                          </span>
+                          {isLastInSequence && (
+                            <span className="text-[10px] text-gray-500 px-2">
+                              {formatTimestamp(msg.created_at)}
+                            </span>
+                          )}
                         </div>
                       );
                     })}
@@ -4960,6 +4974,7 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
 
 function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showComments, setShowComments] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
   const [isSendingComment, setIsSendingComment] = useState(false);
@@ -5129,7 +5144,25 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
               </div>
             </div>
           ) : (
-            <p className="mt-1 whitespace-pre-wrap">{renderContentWithTags(post.content, users, onViewProfile)}</p>
+            <div className="mt-1">
+              <p className="whitespace-pre-wrap">
+                {renderContentWithTags(
+                  post.content.length > 1500 && !isExpanded 
+                    ? post.content.substring(0, 1000) 
+                    : post.content, 
+                  users, 
+                  onViewProfile
+                )}
+                {post.content.length > 1500 && !isExpanded && (
+                  <button 
+                    onClick={() => setIsExpanded(true)}
+                    className="text-orange-500 hover:underline ml-1 font-bold text-sm"
+                  >
+                    ... Read more
+                  </button>
+                )}
+              </p>
+            </div>
           )}
           {post.image_url && (
             <>
