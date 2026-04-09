@@ -4293,16 +4293,18 @@ export default function App() {
                         className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-bold py-2 rounded-lg transition flex items-center justify-center gap-2"
                       >
                         {isForcingPost ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
-                        Force Text Post
+                        {viewingProfile.account_type === 'news' ? 'Force Recap' : 'Force Text Post'}
                       </button>
-                      <button 
-                        onClick={() => handleForcePost('image')}
-                        disabled={isForcingPost}
-                        className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-bold py-2 rounded-lg transition flex items-center justify-center gap-2"
-                      >
-                        {isForcingPost ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
-                        Force Image Post
-                      </button>
+                      {viewingProfile.account_type !== 'news' && (
+                        <button 
+                          onClick={() => handleForcePost('image')}
+                          disabled={isForcingPost}
+                          className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-bold py-2 rounded-lg transition flex items-center justify-center gap-2"
+                        >
+                          {isForcingPost ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+                          Force Image Post
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -4314,7 +4316,7 @@ export default function App() {
                   >
                     Posts
                   </button>
-                  {viewingProfile.is_ai === 1 && (
+                  {viewingProfile.is_ai === 1 && viewingProfile.account_type !== 'news' && (
                     <button 
                       onClick={() => setProfileActiveTab('arcs')}
                       className={`pb-2 font-bold transition-colors ${profileActiveTab === 'arcs' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}

@@ -646,6 +646,47 @@ async function handleOPReplies() {
 
 async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, forcedArchetypeId?: string) {
   const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+
+  // NEWS LOGIC (FORCED RECAP)
+  if (aiUser.account_type === 'news') {
+    try {
+      // Get recent posts from this universe (last 24 hours), excluding comments
+      const recentPosts = db.prepare(`
+        SELECT p.content, p.created_at, u.display_name
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        WHERE u.universe_id = ? AND p.created_at >= datetime('now', '-24 hours') AND u.account_type != 'news'
+        ORDER BY p.created_at ASC
+      `).all(aiUser.universe_id) as any[];
+
+      // Get active universe arc
+      const activeUniverseArc = db.prepare(`
+        SELECT * FROM universe_arcs
+        WHERE universe_id = ? AND status = 'active'
+        ORDER BY created_at DESC LIMIT 1
+      `).get(aiUser.universe_id) as any;
+
+      // Get other news posts from today in this universe
+      const otherNewsPosts = db.prepare(`
+        SELECT p.content, p.created_at, u.display_name
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
+        ORDER BY p.created_at ASC
+      `).all(aiUser.universe_id, aiUser.id) as any[];
+
+      const newsContent = await generateNewsPost(aiUser, recentPosts, activeUniverseArc, otherNewsPosts);
+      if (newsContent) {
+        db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(aiUser.id, newsContent);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error(`Error generating forced news post for ${aiUser.display_name}:`, e);
+      return false;
+    }
+  }
+
   const recentContext = db.prepare(`
     SELECT p.content, p.created_at, u.display_name 
     FROM posts p JOIN users u ON p.user_id = u.id 
@@ -726,22 +767,26 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   }
 
   // ARC LOGIC
-  let activeArc = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'active'").get(aiUser.id) as any;
-  const pastArcs = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(aiUser.id) as any[];
+  let activeArc = null;
+  let pastArcs: any[] = [];
   let arcInstruction = '';
   let arcComments = '';
-
-  // NEWS LOGIC
   let recentNewsPosts: any[] = [];
-  if (universe) {
-    recentNewsPosts = db.prepare(`
-      SELECT p.content, p.created_at, u.display_name 
-      FROM posts p 
-      JOIN users u ON p.user_id = u.id 
-      WHERE u.universe_id = ? AND u.account_type = 'news' AND p.created_at >= datetime('now', '-24 hours')
-      ORDER BY p.created_at DESC LIMIT 3
-    `).all(universe.id) as any[];
-  }
+
+  if (aiUser.account_type !== 'news') {
+    activeArc = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'active'").get(aiUser.id) as any;
+    pastArcs = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(aiUser.id) as any[];
+
+    // NEWS LOGIC
+    if (universe) {
+      recentNewsPosts = db.prepare(`
+        SELECT p.content, p.created_at, u.display_name 
+        FROM posts p 
+        JOIN users u ON p.user_id = u.id 
+        WHERE u.universe_id = ? AND u.account_type = 'news' AND p.created_at >= datetime('now', '-24 hours')
+        ORDER BY p.created_at DESC LIMIT 3
+      `).all(universe.id) as any[];
+    }
 
   console.log(`[DEBUG] Entering ARC LOGIC for ${aiUser.display_name}. Archetype: ${archetype.id}`);
   console.log(`[DEBUG] arcArchetypes: ${JSON.stringify(arcArchetypes)}`);
@@ -802,6 +847,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       }
     }
   }
+}
 
   let postContent = "";
   let positivePrompt = "";
@@ -1591,10 +1637,11 @@ async function startServer() {
       }
 
       const stmt = db.prepare(`
-        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, created_at)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, is_active, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, created_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       `);
-      const info = stmt.run(username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, reference_images ? JSON.stringify(reference_images) : '[]', account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
+      const isActive = account_type === 'news' ? 1 : 0;
+      const info = stmt.run(username, display_name, bio, avatar_url, isActive, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, reference_images ? JSON.stringify(reference_images) : '[]', account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
       const userId = info.lastInsertRowid;
       
       // AI character follows real user by default, but real user does NOT follow AI character by default
