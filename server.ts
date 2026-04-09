@@ -406,6 +406,8 @@ function filterAvailableUsersForComment(opId: number, availableAiUsers: any[]) {
     }
 
     if (u.universe_id === opUniverseId) return true;
+    // News posts are strictly universe-locked for comments
+    if (opAccountType === 'news') return false;
     return Math.random() < crossUniverseProb;
   });
 
@@ -453,7 +455,7 @@ function addLikesToPostOrComment(postId: number, commentId: number | null, count
   }
 }
 
-async function triggerPostComments(postId: number, postType: string) {
+async function triggerPostComments(postId: number, postType: string, isForced: boolean = false) {
   const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
   if (!settings || !settings.ai_enabled) return;
 
@@ -462,7 +464,12 @@ async function triggerPostComments(postId: number, postType: string) {
   const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
   const baseCount = (postType === 'question' || postType === 'discussion' || postType === 'seeking_advice') ? 5 : 3;
-  const count = Math.max(0, Math.round(baseCount * onlineRatio));
+  let count = Math.max(0, Math.round(baseCount * onlineRatio));
+  
+  if (isForced && count < 2) {
+    count = 2; // Ensure at least 2 comments for forced posts
+  }
+  
   if (count === 0) return;
 
   const commentedUserIds = new Set<number>();
@@ -501,7 +508,7 @@ async function triggerPostComments(postId: number, postType: string) {
     if (candidateUsers.length === 0) continue;
 
     const chosenAiId = await pickBestCommenter(post, candidateUsers);
-    const randomAi = availableAiUsers.find(u => u.id === chosenAiId) || availableAiUsers[0];
+    const randomAi = candidateUsers.find(u => u.id === chosenAiId) || candidateUsers[0];
     commentedUserIds.add(randomAi.id);
     pendingComments.add(`${randomAi.id}:post:${postId}`);
 
@@ -677,7 +684,9 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
 
       const newsContent = await generateNewsPost(aiUser, recentPosts, activeUniverseArc, otherNewsPosts);
       if (newsContent) {
-        db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(aiUser.id, newsContent);
+        const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(aiUser.id, newsContent);
+        const postId = info.lastInsertRowid as number;
+        triggerPostComments(postId, 'news', forceType !== null);
         return true;
       }
       return false;
@@ -885,7 +894,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       generateImage(positivePrompt, negativePrompt, referenceImageUrls).then(imageUrl => {
         if (imageUrl) {
           db.prepare("UPDATE posts SET image_url = ?, is_visible = 1, image_prompt = ? WHERE id = ?").run(imageUrl, positivePrompt, postId);
-          triggerPostComments(postId, archetype.id);
+          triggerPostComments(postId, archetype.id, forceType !== null);
         } else {
           db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
         }
@@ -894,7 +903,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
         db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
       });
     } else {
-      triggerPostComments(postId, archetype.id);
+      triggerPostComments(postId, archetype.id, forceType !== null);
     }
 
     if (isFirstPost) {
@@ -1840,7 +1849,7 @@ async function startServer() {
         const generatedImageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
         if (generatedImageUrl) {
           db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(generatedImageUrl, positivePrompt, postId);
-          triggerPostComments(postId, post_type || 'life_update');
+          triggerPostComments(postId as number, post_type || 'life_update', true);
         } else {
           db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
         }
@@ -1848,8 +1857,8 @@ async function startServer() {
         console.error("Failed to generate image for user post:", e);
         db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
       }
-    } else if (isVisible) {
-      triggerPostComments(postId, post_type || 'life_update');
+    } else {
+      triggerPostComments(postId as number, post_type || 'life_update', true);
     }
   });
 
@@ -2599,7 +2608,9 @@ async function startServer() {
 
             const newsContent = await generateNewsPost(newsAccount, recentPosts, activeArc, otherNewsPosts);
             if (newsContent) {
-              db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(newsAccount.id, newsContent);
+              const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(newsAccount.id, newsContent);
+              const postId = info.lastInsertRowid as number;
+              triggerPostComments(postId, 'news');
               console.log(`News Account ${newsAccount.display_name} posted their daily news.`);
             }
           } catch (e) {
@@ -3356,7 +3367,7 @@ async function startServer() {
           const candidateUsers = filterAvailableUsersForComment(choice.data.user_id, availableAis);
           if (candidateUsers.length > 0) {
             const chosenAiId = await pickBestCommenter(choice.data, candidateUsers);
-            const randomAi = availableAis.find(u => u.id === chosenAiId) || availableAis[0];
+            const randomAi = candidateUsers.find(u => u.id === chosenAiId) || candidateUsers[0];
 
             if (choice.type === 'post') {
               const randomPost = choice.data;
