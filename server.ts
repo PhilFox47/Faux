@@ -1006,11 +1006,11 @@ async function startServer() {
     if (user.account_type === 'news') {
       if (user.universe_id) {
         // AI characters from the same universe follow this news account
-        const universeCharacters = db.prepare("SELECT id FROM users WHERE universe_id = ? AND is_ai = 1 AND id != ?").all(user.universe_id, user.id) as any[];
-        const followStmt = db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)");
-        for (const char of universeCharacters) {
-          followStmt.run(char.id, user.id);
-        }
+        db.prepare(`
+          INSERT OR IGNORE INTO follows (follower_id, followed_id)
+          SELECT id, ? FROM users WHERE universe_id = ? AND is_ai = 1 AND id != ?
+        `).run(user.id, user.universe_id, user.id);
+        
         // AI characters NOT from this universe must NOT follow this news account
         db.prepare(`
           DELETE FROM follows 
@@ -1024,11 +1024,11 @@ async function startServer() {
     } else if (user.is_ai === 1) {
       if (user.universe_id) {
         // This character follows all news accounts in its universe
-        const newsAccounts = db.prepare("SELECT id FROM users WHERE account_type = 'news' AND universe_id = ?").all(user.universe_id) as any[];
-        const followStmt = db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)");
-        for (const news of newsAccounts) {
-          followStmt.run(user.id, news.id);
-        }
+        db.prepare(`
+          INSERT OR IGNORE INTO follows (follower_id, followed_id)
+          SELECT ?, id FROM users WHERE account_type = 'news' AND universe_id = ?
+        `).run(user.id, user.universe_id);
+        
         // This character must NOT follow news accounts from other universes
         db.prepare(`
           DELETE FROM follows 
@@ -1047,10 +1047,27 @@ async function startServer() {
   }
 
   function globalSyncNewsFollowers() {
-    const allUsers = db.prepare("SELECT id FROM users").all() as any[];
-    for (const u of allUsers) {
-      syncNewsFollowers(u.id);
-    }
+    // AI characters follow news accounts in their universe
+    db.prepare(`
+      INSERT OR IGNORE INTO follows (follower_id, followed_id)
+      SELECT c.id, n.id 
+      FROM users c
+      JOIN users n ON c.universe_id = n.universe_id
+      WHERE c.is_ai = 1 AND n.account_type = 'news' AND c.id != n.id
+    `).run();
+
+    // AI characters do NOT follow news accounts outside their universe
+    db.prepare(`
+      DELETE FROM follows
+      WHERE ROWID IN (
+        SELECT f.ROWID
+        FROM follows f
+        JOIN users c ON f.follower_id = c.id
+        JOIN users n ON f.followed_id = n.id
+        WHERE c.is_ai = 1 AND n.account_type = 'news'
+        AND (c.universe_id != n.universe_id OR c.universe_id IS NULL OR n.universe_id IS NULL)
+      )
+    `).run();
   }
 
   globalSyncNewsFollowers();
@@ -2572,7 +2589,10 @@ async function startServer() {
   // --- End Recap Endpoints ---
 
   // Background Worker for AI Activity
+  let isWorkerRunning = false;
   setInterval(async () => {
+    if (isWorkerRunning) return;
+    isWorkerRunning = true;
     try {
       await handleOPReplies();
       
@@ -3485,6 +3505,8 @@ async function startServer() {
       db.prepare("DELETE FROM api_logs WHERE created_at < datetime('now', '-1 day')").run();
     } catch (error) {
       console.error("Error in AI worker:", error);
+    } finally {
+      isWorkerRunning = false;
     }
   }, 60000); // Every 60 seconds
 

@@ -10,30 +10,117 @@ const getAvatarShape = (accountType?: string) => {
   return accountType === 'company' || accountType === 'news' ? 'rounded-xl' : 'rounded-full';
 };
 
+const estimateLines = (text: string) => {
+  const lines = text.split('\n');
+  let total = 0;
+  for (const line of lines) {
+    // Assume ~55 chars per line for wrapping (standard mobile width)
+    total += Math.max(1, Math.ceil(line.length / 55));
+  }
+  return total;
+};
+
 const splitMessageContent = (content: string) => {
   if (!content.includes('\n\n')) return [content];
-  const parts = content.split('\n\n').filter(p => p.trim());
-  const finalParts: string[] = [];
-  let buffer = "";
+  const paragraphs = content.split('\n\n').filter(p => p.trim());
+  const bubbles: string[] = [];
+  let currentBuffer: string[] = [];
 
-  for (const p of parts) {
-    if (!buffer) {
-      buffer = p;
-    } else {
-      const bufferLines = buffer.split('\n').length;
-      const partLines = p.split('\n').length;
-      // Only split if both the current buffer and the next part are at least 3 lines long
-      if (bufferLines < 3 || partLines < 3) {
-        buffer += '\n\n' + p;
-      } else {
-        finalParts.push(buffer);
-        buffer = p;
+  for (let i = 0; i < paragraphs.length; i++) {
+    currentBuffer.push(paragraphs[i]);
+    const currentText = currentBuffer.join('\n\n');
+    const currentLines = estimateLines(currentText);
+
+    if (currentLines >= 3) {
+      const remainingParagraphs = paragraphs.slice(i + 1);
+      if (remainingParagraphs.length > 0) {
+        const remainingText = remainingParagraphs.join('\n\n');
+        const remainingLines = estimateLines(remainingText);
+        
+        if (remainingLines >= 3) {
+          bubbles.push(currentText);
+          currentBuffer = [];
+        }
       }
     }
   }
-  if (buffer) finalParts.push(buffer);
-  return finalParts;
+
+  if (currentBuffer.length > 0) {
+    bubbles.push(currentBuffer.join('\n\n'));
+  }
+
+  return bubbles;
 };
+
+const ChatInputForm = React.memo(function ChatInputForm({ users, onSend, isSendingMsg }: { users: any[], onSend: (msg: string, image: string | null) => void, isSendingMsg: boolean }) {
+  const [msg, setMsg] = useState('');
+  const [image, setImage] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if ((!msg.trim() && !image) || isSendingMsg) return;
+    onSend(msg.trim(), image);
+    setMsg('');
+    setImage(null);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-2 items-end">
+      <input 
+        type="file" 
+        ref={imageInputRef} 
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => setImage(reader.result as string);
+            reader.readAsDataURL(file);
+          }
+        }} 
+        accept="image/*" 
+        className="hidden" 
+      />
+      {image && (
+        <div className="relative mb-2">
+          <img src={image} alt="Upload preview" className="h-20 rounded-lg object-cover" />
+          <button 
+            type="button"
+            onClick={() => setImage(null)}
+            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+      <button 
+        type="button"
+        onClick={() => imageInputRef.current?.click()}
+        className="p-3 text-gray-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition mb-1"
+        title="Upload Image"
+      >
+        <Image size={24} />
+      </button>
+      <TagTextarea 
+        users={users}
+        value={msg}
+        onValueChange={setMsg}
+        placeholder="Start a new message" 
+        className="flex-1 bg-gray-900 border border-gray-700 rounded-2xl px-4 py-3 outline-none focus:border-orange-500 resize-none min-h-[100px] max-h-[300px]"
+        rows={3}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSubmit();
+          }
+        }}
+      />
+      <button type="submit" disabled={isSendingMsg || (!msg.trim() && !image)} className="bg-orange-500 text-white p-3 rounded-full hover:bg-orange-600 flex-shrink-0 mb-1 disabled:opacity-50">
+        <Send size={24} />
+      </button>
+    </form>
+  );
+});
 
 export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<any>(null);
@@ -144,7 +231,6 @@ export default function App() {
   const [newPostImage, setNewPostImage] = useState('');
   const [newPostType, setNewPostType] = useState('life_update');
   const [isCreatingPost, setIsCreatingPost] = useState(false);
-  const [newChatMsg, setNewChatMsg] = useState('');
   const [isSendingMsg, setIsSendingMsg] = useState(false);
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
@@ -1478,13 +1564,42 @@ export default function App() {
   };
 
   const handleLike = async (postId: number) => {
-    await apiFetch(`/api/posts/${postId}/like`, { method: 'POST' });
-    fetchPosts();
+    // Optimistic update
+    setPosts(prev => prev.map(p => {
+      if (p.id === postId) {
+        const isLiked = p.is_liked;
+        return {
+          ...p,
+          is_liked: isLiked ? 0 : 1,
+          like_count: isLiked ? p.like_count - 1 : p.like_count + 1
+        };
+      }
+      return p;
+    }));
+    
+    try {
+      await apiFetch(`/api/posts/${postId}/like`, { method: 'POST' });
+    } catch (e) {
+      // Revert on failure
+      fetchPosts();
+    }
   };
 
   const handleFollow = async (userId: number) => {
-    await apiFetch(`/api/users/${userId}/follow`, { method: 'POST' });
-    fetchUsers();
+    // Optimistic update
+    setUsers(prev => prev.map(u => {
+      if (u.id === userId) {
+        return { ...u, is_followed: u.is_followed ? 0 : 1 };
+      }
+      return u;
+    }));
+    
+    try {
+      await apiFetch(`/api/users/${userId}/follow`, { method: 'POST' });
+    } catch (e) {
+      // Revert on failure
+      fetchUsers();
+    }
   };
 
   const handleFollowAllInUniverse = async (chars: any[]) => {
@@ -1502,8 +1617,6 @@ export default function App() {
   };
 
   const [dmSettings, setDmSettings] = useState<any>({ allow_image_gen: 0 });
-  const [dmImage, setDmImage] = useState<string | null>(null);
-  const dmImageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (activeChat) {
@@ -1531,27 +1644,11 @@ export default function App() {
     }
   };
 
-  const handleDmImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setDmImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleSendMsg = async (e: React.FormEvent | React.KeyboardEvent | any) => {
-    e.preventDefault();
-    if ((!newChatMsg.trim() && !dmImage) || !activeChat || isSendingMsg) return;
+  const handleSendMsg = async (msg: string, image_url: string | null) => {
+    if ((!msg.trim() && !image_url) || !activeChat || isSendingMsg) return;
     
     setIsSendingMsg(true);
     // Optimistic update
-    const msg = newChatMsg.trim();
-    const image_url = dmImage;
-    setNewChatMsg('');
-    setDmImage(null);
     const realUser = loggedInUser;
     setChatMessages(prev => [...prev, { sender_id: realUser?.id || 1, content: msg, image_url: image_url, created_at: new Date().toISOString() }]);
 
@@ -2719,51 +2816,11 @@ export default function App() {
                     )}
                   </div>
                   <div className="p-4 border-t border-gray-800">
-                    {dmImage && (
-                      <div className="mb-2 relative inline-block">
-                        <img src={dmImage} alt="Preview" className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
-                        <button 
-                          onClick={() => setDmImage(null)}
-                          className="absolute -top-2 -right-2 bg-gray-900 text-white rounded-full p-1 border border-gray-700 hover:bg-gray-800"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    )}
-                    <form onSubmit={handleSendMsg} className="flex gap-2 items-end">
-                      <input 
-                        type="file" 
-                        ref={dmImageInputRef} 
-                        onChange={handleDmImageUpload} 
-                        accept="image/*" 
-                        className="hidden" 
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => dmImageInputRef.current?.click()}
-                        className="p-3 text-gray-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition mb-1"
-                        title="Upload Image"
-                      >
-                        <Image size={24} />
-                      </button>
-                      <TagTextarea 
-                        users={users}
-                        value={newChatMsg}
-                        onValueChange={setNewChatMsg}
-                        placeholder="Start a new message" 
-                        className="flex-1 bg-gray-900 border border-gray-700 rounded-2xl px-4 py-3 outline-none focus:border-orange-500 resize-none min-h-[100px] max-h-[300px]"
-                        rows={3}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMsg(e);
-                          }
-                        }}
-                      />
-                      <button type="submit" className="bg-orange-500 text-white p-3 rounded-full hover:bg-orange-600 flex-shrink-0 mb-1">
-                        <Send size={24} />
-                      </button>
-                    </form>
+                    <ChatInputForm 
+                      users={users} 
+                      onSend={handleSendMsg} 
+                      isSendingMsg={isSendingMsg} 
+                    />
                   </div>
                 </div>
               )}
@@ -4868,8 +4925,25 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
   };
 
   const handleCommentLike = async (commentId: number) => {
-    await apiFetch(`/api/comments/${commentId}/like`, { method: 'POST' });
-    fetchComments();
+    // Optimistic update
+    setComments(prev => prev.map(c => {
+      if (c.id === commentId) {
+        const isLiked = c.is_liked;
+        return {
+          ...c,
+          is_liked: isLiked ? 0 : 1,
+          like_count: isLiked ? c.like_count - 1 : c.like_count + 1
+        };
+      }
+      return c;
+    }));
+    
+    try {
+      await apiFetch(`/api/comments/${commentId}/like`, { method: 'POST' });
+    } catch (e) {
+      // Revert on failure
+      fetchComments();
+    }
   };
 
   const handleAddReply = async (e: React.FormEvent) => {
@@ -4997,7 +5071,7 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
   );
 }
 
-function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
+const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showComments, setShowComments] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
@@ -5069,8 +5143,14 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
   }, [showComments, post.comment_count]);
 
   const handleDelete = async () => {
-    await apiFetch(`/api/posts/${post.id}`, { method: 'DELETE' });
-    onRefresh();
+    // Optimistic update
+    onRefresh(); // Assuming onRefresh handles removing the post from the list
+    try {
+      await apiFetch(`/api/posts/${post.id}`, { method: 'DELETE' });
+    } catch (e) {
+      // Revert on failure (might need to fetch again to restore)
+      onRefresh();
+    }
   };
 
   const handleEdit = async () => {
@@ -5089,27 +5169,67 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
     if (!content.trim() || isSendingComment) return;
     
     setIsSendingComment(true);
+    
+    // Optimistic update
+    const tempId = Date.now();
+    const newCommentObj = {
+      id: tempId,
+      post_id: post.id,
+      user_id: loggedInUser?.id || 1,
+      parent_id: parentId,
+      content: content,
+      created_at: new Date().toISOString(),
+      username: loggedInUser?.username || 'user',
+      display_name: loggedInUser?.display_name || 'User',
+      avatar_url: loggedInUser?.avatar_url,
+      account_type: loggedInUser?.account_type || 'character',
+      like_count: 0,
+      is_liked: 0
+    };
+    
+    setComments(prev => [...prev, newCommentObj]);
+    
+    if (parentId) {
+      setReplyingTo(null);
+    } else {
+      setNewComment('');
+    }
+    
     try {
       await apiFetch(`/api/posts/${post.id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content, parent_id: parentId })
       });
-      
-      if (parentId) {
-        setReplyingTo(null);
-      } else {
-        setNewComment('');
-      }
       fetchComments();
+    } catch (e) {
+      // Revert on failure
+      setComments(prev => prev.filter(c => c.id !== tempId));
     } finally {
       setIsSendingComment(false);
     }
   };
 
   const handleCommentLike = async (commentId: number) => {
-    await apiFetch(`/api/comments/${commentId}/like`, { method: 'POST' });
-    fetchComments();
+    // Optimistic update
+    setComments(prev => prev.map(c => {
+      if (c.id === commentId) {
+        const isLiked = c.is_liked;
+        return {
+          ...c,
+          is_liked: isLiked ? 0 : 1,
+          like_count: isLiked ? c.like_count - 1 : c.like_count + 1
+        };
+      }
+      return c;
+    }));
+    
+    try {
+      await apiFetch(`/api/comments/${commentId}/like`, { method: 'POST' });
+    } catch (e) {
+      // Revert on failure
+      fetchComments();
+    }
   };
 
   // Organize comments into threads
@@ -5309,9 +5429,9 @@ function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, 
       )}
     </div>
   );
-}
+});
 
-function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
+const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(comment.content);
@@ -5321,8 +5441,14 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
   }, [comment.content]);
 
   const handleDelete = async () => {
-    await apiFetch(`/api/comments/${comment.id}`, { method: 'DELETE' });
-    onRefresh();
+    // Optimistic update
+    onRefresh(); // Assuming onRefresh handles removing the comment from the list
+    try {
+      await apiFetch(`/api/comments/${comment.id}`, { method: 'DELETE' });
+    } catch (e) {
+      // Revert on failure
+      onRefresh();
+    }
   };
 
   const handleEdit = async () => {
@@ -5423,4 +5549,4 @@ function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, fo
       )}
     </div>
   );
-}
+});
