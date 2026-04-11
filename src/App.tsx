@@ -668,6 +668,21 @@ export default function App() {
     e.preventDefault();
     if (!newRelUserId || !newRelDesc || isAddingRelationship) return;
     setIsAddingRelationship(true);
+    
+    // Optimistic update
+    const otherUser = users.find(u => u.id === parseInt(newRelUserId));
+    const tempId = Date.now();
+    const newRelObj = {
+      id: tempId,
+      user_id_1: editingProfile.id,
+      user_id_2: parseInt(newRelUserId),
+      description: newRelDesc,
+      other_name: otherUser?.display_name || 'Unknown',
+      other_avatar: otherUser?.avatar_url,
+      other_account_type: otherUser?.account_type
+    };
+    setProfileRelationships(prev => [...prev, newRelObj]);
+    
     try {
       const res = await apiFetch(`/api/users/${editingProfile.id}/relationships`, {
         method: 'POST',
@@ -677,6 +692,7 @@ export default function App() {
       if (!res.ok) {
         const err = await res.json();
         showToast(err.error || 'Failed to add relationship');
+        setProfileRelationships(prev => prev.filter(r => r.id !== tempId));
         return;
       }
       setNewRelUserId('');
@@ -685,6 +701,7 @@ export default function App() {
       setProfileRelationships(await relsRes.json());
       showToast('Relationship added!');
     } catch (e) {
+      setProfileRelationships(prev => prev.filter(r => r.id !== tempId));
       console.error(e);
       showToast('An error occurred');
     } finally {
@@ -693,14 +710,17 @@ export default function App() {
   };
 
   const handleDeleteRelationship = async (otherId: number) => {
+    // Optimistic update
+    const previousRelationships = [...profileRelationships];
+    setProfileRelationships(prev => prev.filter(r => r.user_id_2 !== otherId));
+    
     try {
       await apiFetch(`/api/users/${editingProfile.id}/relationships/${otherId}`, {
         method: 'DELETE'
       });
-      const res = await apiFetch(`/api/users/${editingProfile.id}/relationships`);
-      setProfileRelationships(await res.json());
       showToast('Relationship deleted!');
     } catch (e) {
+      setProfileRelationships(previousRelationships);
       console.error(e);
     }
   };
@@ -1432,20 +1452,46 @@ export default function App() {
     if ((!newPostContent.trim() && !newPostImage) || isCreatingPost) return;
     setIsCreatingPost(true);
     const type = newPostType;
+    const content = newPostContent;
+    const image = newPostImage;
+    
+    // Optimistic update
+    const tempId = Date.now();
+    const newPostObj = {
+      id: tempId,
+      user_id: loggedInUser?.id || 1,
+      content: content,
+      post_type: type,
+      image_url: image,
+      created_at: new Date().toISOString(),
+      username: loggedInUser?.username || 'user',
+      display_name: loggedInUser?.display_name || 'User',
+      avatar_url: loggedInUser?.avatar_url,
+      account_type: loggedInUser?.account_type || 'character',
+      like_count: 0,
+      comment_count: 0,
+      is_liked: 0
+    };
+    
+    setPosts(prev => [newPostObj, ...prev]);
+    setNewPostContent('');
+    setNewPostImage('');
+    setNewPostType('life_update');
+    
     try {
       await apiFetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: newPostContent, post_type: type, image_url: newPostImage })
+        body: JSON.stringify({ content: content, post_type: type, image_url: image })
       });
-      setNewPostContent('');
-      setNewPostImage('');
-      setNewPostType('life_update');
-      if (type === 'image_post' && !newPostImage) {
+      if (type === 'image_post' && !image) {
         showToast("Image is generating in the background. It will appear shortly.");
-      } else if (newPostImage) {
+      } else if (image) {
         showToast("Post with image created.");
       }
+      fetchPosts();
+    } catch (e) {
+      // Revert on failure
       fetchPosts();
     } finally {
       setIsCreatingPost(false);
@@ -1565,7 +1611,7 @@ export default function App() {
 
   const handleLike = async (postId: number) => {
     // Optimistic update
-    setPosts(prev => prev.map(p => {
+    const updatePost = (p: any) => {
       if (p.id === postId) {
         const isLiked = p.is_liked;
         return {
@@ -1575,13 +1621,23 @@ export default function App() {
         };
       }
       return p;
-    }));
+    };
+
+    setPosts(prev => prev.map(updatePost));
+    setViewingProfilePosts(prev => prev.map(updatePost));
+    setFauxPicsPosts(prev => prev.map(updatePost));
+    if (viewingPostData?.id === postId) {
+      setViewingPostData(updatePost(viewingPostData));
+    }
     
     try {
       await apiFetch(`/api/posts/${postId}/like`, { method: 'POST' });
     } catch (e) {
       // Revert on failure
       fetchPosts();
+      if (viewingProfile) handleViewProfile(viewingProfile.id);
+      if (viewingPostData) handleViewPost(viewingPostData.id);
+      fetchFauxPics();
     }
   };
 
@@ -1605,15 +1661,31 @@ export default function App() {
   const handleFollowAllInUniverse = async (chars: any[]) => {
     const charsToFollow = chars.filter(c => !c.is_followed);
     if (charsToFollow.length === 0) return;
-    await Promise.all(charsToFollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
-    fetchUsers();
+    
+    // Optimistic update
+    const idsToFollow = new Set(charsToFollow.map(c => c.id));
+    setUsers(prev => prev.map(u => idsToFollow.has(u.id) ? { ...u, is_followed: 1 } : u));
+    
+    try {
+      await Promise.all(charsToFollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
+    } catch (e) {
+      fetchUsers();
+    }
   };
 
   const handleUnfollowAllInUniverse = async (chars: any[]) => {
     const charsToUnfollow = chars.filter(c => c.is_followed);
     if (charsToUnfollow.length === 0) return;
-    await Promise.all(charsToUnfollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
-    fetchUsers();
+    
+    // Optimistic update
+    const idsToUnfollow = new Set(charsToUnfollow.map(c => c.id));
+    setUsers(prev => prev.map(u => idsToUnfollow.has(u.id) ? { ...u, is_followed: 0 } : u));
+    
+    try {
+      await Promise.all(charsToUnfollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
+    } catch (e) {
+      fetchUsers();
+    }
   };
 
   const [dmSettings, setDmSettings] = useState<any>({ allow_image_gen: 0 });
@@ -1650,7 +1722,8 @@ export default function App() {
     setIsSendingMsg(true);
     // Optimistic update
     const realUser = loggedInUser;
-    setChatMessages(prev => [...prev, { sender_id: realUser?.id || 1, content: msg, image_url: image_url, created_at: new Date().toISOString() }]);
+    const tempId = Date.now();
+    setChatMessages(prev => [...prev, { id: tempId, sender_id: realUser?.id || 1, content: msg, image_url: image_url, created_at: new Date().toISOString() }]);
 
     const endpoint = isGroupChat ? `/api/group-chats/${activeChat.id}/messages` : `/api/dms/${activeChat.id}`;
     
@@ -1664,6 +1737,9 @@ export default function App() {
       if (isGroupChat) fetchGroupChats();
       else fetchConversations();
       fetchUsers();
+    } catch (e) {
+      setChatMessages(prev => prev.filter(m => m.id !== tempId));
+      fetchChatMessages(activeChat.id, isGroupChat);
     } finally {
       setIsSendingMsg(false);
     }
@@ -1674,16 +1750,24 @@ export default function App() {
     
     const originalId = typeof msgId === 'string' ? parseInt(msgId.split('_')[0]) : msgId;
     
-    const endpoint = isGroupChat ? `/api/group-chats/messages/${originalId}` : `/api/dms/messages/${originalId}`;
-    await apiFetch(endpoint, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: editingDmContent.trim() })
-    });
+    // Optimistic update
+    const previousMessages = [...chatMessages];
+    setChatMessages(prev => prev.map(m => m.id === msgId ? { ...m, content: editingDmContent.trim() } : m));
     
-    setEditingDmId(null);
-    setEditingDmContent('');
-    fetchChatMessages(activeChat.id, isGroupChat);
+    const endpoint = isGroupChat ? `/api/group-chats/messages/${originalId}` : `/api/dms/messages/${originalId}`;
+    try {
+      await apiFetch(endpoint, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: editingDmContent.trim() })
+      });
+      setEditingDmId(null);
+      setEditingDmContent('');
+      fetchChatMessages(activeChat.id, isGroupChat);
+    } catch (e) {
+      setChatMessages(previousMessages);
+      fetchChatMessages(activeChat.id, isGroupChat);
+    }
   };
 
   const handleDeleteDm = async (msgId: number | string) => {
@@ -1691,12 +1775,20 @@ export default function App() {
     
     const originalId = typeof msgId === 'string' ? parseInt(msgId.split('_')[0]) : msgId;
     
-    const endpoint = isGroupChat ? `/api/group-chats/messages/${originalId}` : `/api/dms/messages/${originalId}`;
-    await apiFetch(endpoint, {
-      method: 'DELETE'
-    });
+    // Optimistic update
+    const previousMessages = [...chatMessages];
+    setChatMessages(prev => prev.filter(m => m.id !== msgId));
     
-    fetchChatMessages(activeChat.id, isGroupChat);
+    const endpoint = isGroupChat ? `/api/group-chats/messages/${originalId}` : `/api/dms/messages/${originalId}`;
+    try {
+      await apiFetch(endpoint, {
+        method: 'DELETE'
+      });
+      fetchChatMessages(activeChat.id, isGroupChat);
+    } catch (e) {
+      setChatMessages(previousMessages);
+      fetchChatMessages(activeChat.id, isGroupChat);
+    }
   };
 
   const toggleAiEnabled = async () => {
@@ -2240,11 +2332,12 @@ export default function App() {
                     loggedInUser={loggedInUser}
                     key={post.id} 
                     post={post} 
-                    onLike={() => handleLike(post.id)} 
+                    onLike={handleLike} 
                     onViewProfile={handleViewProfile}
                     onShowLikers={handleShowLikers}
                     formatTimestamp={formatTimestamp}
                     onRefresh={fetchPosts}
+                    onDelete={(id) => setPosts(prev => prev.filter(p => p.id !== id))}
                     highlightedPostId={highlightedPostId}
                     highlightedCommentId={highlightedCommentId}
                     onHighlightClear={() => {
@@ -4218,11 +4311,12 @@ export default function App() {
                   apiFetch={apiFetch}
                   loggedInUser={loggedInUser}
                   post={viewingPostData} 
-                  onLike={() => handleLike(viewingPostData.id)} 
+                  onLike={handleLike} 
                   onViewProfile={(id) => { setViewingPostData(null); handleViewProfile(id); }}
                   onShowLikers={handleShowLikers}
                   formatTimestamp={formatTimestamp}
                   onRefresh={() => handleViewPost(viewingPostData.id)}
+                  onDelete={() => { setViewingPostData(null); fetchPosts(); }}
                   onViewApiLogs={handleViewApiLogs}
                   users={users}
                 />
@@ -4431,11 +4525,15 @@ export default function App() {
                           loggedInUser={loggedInUser}
                           key={post.id} 
                           post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
-                          onLike={() => handleLike(post.id)} 
+                          onLike={handleLike} 
                           onViewProfile={handleViewProfile}
                           onShowLikers={handleShowLikers}
                           formatTimestamp={formatTimestamp}
                           onRefresh={() => handleViewProfile(viewingProfile.id)}
+                          onDelete={(id) => {
+                            setViewingProfilePosts(prev => prev.filter(p => p.id !== id));
+                            fetchPosts();
+                          }}
                           onViewApiLogs={handleViewApiLogs}
                           users={users}
                         />
@@ -4885,7 +4983,7 @@ function renderContentWithTags(content: string, users: any[] | undefined, onView
   });
 }
 
-function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, users, loggedInUser, apiFetch }: { post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
+const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, users, loggedInUser, apiFetch }: { post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -4910,15 +5008,37 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
     e.preventDefault();
     if (!newComment.trim() || isSendingComment) return;
     setIsSendingComment(true);
+    
+    // Optimistic update
+    const tempId = Date.now();
+    const newCommentObj = {
+      id: tempId,
+      post_id: post.id,
+      user_id: loggedInUser?.id || 1,
+      content: newComment,
+      created_at: new Date().toISOString(),
+      username: loggedInUser?.username || 'user',
+      display_name: loggedInUser?.display_name || 'User',
+      avatar_url: loggedInUser?.avatar_url,
+      account_type: loggedInUser?.account_type || 'character',
+      like_count: 0,
+      is_liked: 0
+    };
+    
+    setComments(prev => [...prev, newCommentObj]);
+    setNewComment('');
+    
     try {
       await apiFetch(`/api/posts/${post.id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: newComment })
+        body: JSON.stringify({ content: newCommentObj.content })
       });
-      setNewComment('');
       fetchComments();
       onRefresh();
+    } catch (e) {
+      // Revert on failure
+      fetchComments();
     } finally {
       setIsSendingComment(false);
     }
@@ -4950,14 +5070,37 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
     e.preventDefault();
     if (!replyContent.trim() || isSendingReply || !replyingTo) return;
     setIsSendingReply(true);
+    
+    // Optimistic update
+    const tempId = Date.now();
+    const newReplyObj = {
+      id: tempId,
+      post_id: post.id,
+      user_id: loggedInUser?.id || 1,
+      parent_id: replyingTo.id,
+      content: replyContent,
+      created_at: new Date().toISOString(),
+      username: loggedInUser?.username || 'user',
+      display_name: loggedInUser?.display_name || 'User',
+      avatar_url: loggedInUser?.avatar_url,
+      account_type: loggedInUser?.account_type || 'character',
+      like_count: 0,
+      is_liked: 0
+    };
+    
+    setComments(prev => [...prev, newReplyObj]);
+    setReplyContent('');
+    setReplyingTo(null);
+    
     try {
       await apiFetch(`/api/posts/${post.id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: replyContent, parent_id: replyingTo.id })
+        body: JSON.stringify({ content: newReplyObj.content, parent_id: newReplyObj.parent_id })
       });
-      setReplyContent('');
-      setReplyingTo(null);
+      fetchComments();
+    } catch (e) {
+      // Revert on failure
       fetchComments();
     } finally {
       setIsSendingReply(false);
@@ -5026,6 +5169,7 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
                     onShowLikers={onShowLikers}
                     formatTimestamp={formatTimestamp}
                     onRefresh={fetchComments}
+                    onDelete={(id) => setComments(prev => prev.filter(c => c.id !== id && c.parent_id !== id))}
                     users={users}
                   />
                 ))
@@ -5069,9 +5213,9 @@ function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestam
       )}
     </div>
   );
-}
+});
 
-const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
+const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, onDelete, highlightedPostId, highlightedCommentId, onHighlightClear, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, post: any, onLike: (id: number) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, onDelete?: (id: number) => void, highlightedPostId?: number | null, highlightedCommentId?: number | null, onHighlightClear?: () => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showComments, setShowComments] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
@@ -5144,23 +5288,37 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
 
   const handleDelete = async () => {
     // Optimistic update
-    onRefresh(); // Assuming onRefresh handles removing the post from the list
+    if (onDelete) {
+      onDelete(post.id);
+    } else {
+      onRefresh();
+    }
     try {
       await apiFetch(`/api/posts/${post.id}`, { method: 'DELETE' });
     } catch (e) {
-      // Revert on failure (might need to fetch again to restore)
+      // Revert on failure
       onRefresh();
     }
   };
 
   const handleEdit = async () => {
-    await apiFetch(`/api/posts/${post.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: editContent })
-    });
+    // Optimistic update
+    const previousContent = post.content;
+    post.content = editContent;
     setIsEditing(false);
-    onRefresh();
+
+    try {
+      await apiFetch(`/api/posts/${post.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: editContent })
+      });
+      onRefresh();
+    } catch (e) {
+      // Revert on failure
+      post.content = previousContent;
+      onRefresh();
+    }
   };
 
   const handleAddComment = async (e: React.FormEvent, parentId: number | null = null) => {
@@ -5345,7 +5503,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
               <span className="text-sm">{post.comment_count}</span>
             </button>
             <div className="flex items-center gap-1">
-              <button onClick={onLike} className={`flex items-center gap-2 hover:text-pink-500 transition ${post.is_liked ? 'text-pink-500' : ''}`}>
+              <button onClick={() => onLike(post.id)} className={`flex items-center gap-2 hover:text-pink-500 transition ${post.is_liked ? 'text-pink-500' : ''}`}>
                 <Heart size={18} fill={post.is_liked ? "currentColor" : "none"} />
                 <span className="text-sm">{post.like_count}</span>
               </button>
@@ -5371,6 +5529,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
               onShowLikers={onShowLikers}
               formatTimestamp={formatTimestamp}
               onRefresh={fetchComments}
+              onDelete={(id) => setComments(prev => prev.filter(c => c.id !== id && c.parent_id !== id))}
               highlightedCommentId={highlightedCommentId}
               commentRef={(id, el) => { commentRefs.current[id] = el; }}
               users={users}
@@ -5431,7 +5590,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
   );
 });
 
-const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, highlightedCommentId, commentRef, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
+const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, onViewProfile, onShowLikers, formatTimestamp, onRefresh, onDelete, highlightedCommentId, commentRef, users, loggedInUser, apiFetch, onViewApiLogs }: { key?: any, comment: any, onLike: (id: number) => void, onReply: (c: any) => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, onDelete?: (id: number) => void, highlightedCommentId?: number | null, commentRef?: (id: number, el: HTMLDivElement | null) => void, users?: any[], loggedInUser?: any, apiFetch: any, onViewApiLogs?: (content: string) => void }) {
   const [showMenu, setShowMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(comment.content);
@@ -5442,7 +5601,11 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
 
   const handleDelete = async () => {
     // Optimistic update
-    onRefresh(); // Assuming onRefresh handles removing the comment from the list
+    if (onDelete) {
+      onDelete(comment.id);
+    } else {
+      onRefresh();
+    }
     try {
       await apiFetch(`/api/comments/${comment.id}`, { method: 'DELETE' });
     } catch (e) {
@@ -5452,13 +5615,23 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
   };
 
   const handleEdit = async () => {
-    await apiFetch(`/api/comments/${comment.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: editContent })
-    });
+    // Optimistic update
+    const previousContent = comment.content;
+    comment.content = editContent;
     setIsEditing(false);
-    onRefresh();
+
+    try {
+      await apiFetch(`/api/comments/${comment.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: editContent })
+      });
+      onRefresh();
+    } catch (e) {
+      // Revert on failure
+      comment.content = previousContent;
+      onRefresh();
+    }
   };
 
   return (
@@ -5539,6 +5712,7 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
               onShowLikers={onShowLikers}
               formatTimestamp={formatTimestamp}
               onRefresh={onRefresh}
+              onDelete={onDelete}
               highlightedCommentId={highlightedCommentId}
               commentRef={commentRef}
               users={users}

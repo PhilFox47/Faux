@@ -94,7 +94,7 @@ function getFormatter(timezone: string) {
   return timeFormatters.get(timezone)!;
 }
 
-function scheduleNextNewsPost(user: any, timezone: string) {
+function scheduleNextNewsPost(user: any, timezone: string, forceTomorrow: boolean = false) {
   let onlineTimes: string[] = [];
   try {
     onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : user.online_times;
@@ -142,8 +142,10 @@ function scheduleNextNewsPost(user: any, timezone: string) {
   let scheduledDate = new Date(tzDate);
   scheduledDate.setHours(targetHour, targetMinute, 0, 0);
 
-  // If the scheduled time for today has already passed, schedule for tomorrow
-  if (scheduledDate.getTime() <= tzDate.getTime()) {
+  if (forceTomorrow) {
+    scheduledDate.setDate(tzDate.getDate() + 1);
+  } else if (scheduledDate.getTime() <= tzDate.getTime()) {
+    // If the scheduled time for today has already passed, schedule for tomorrow
     scheduledDate.setDate(scheduledDate.getDate() + 1);
   }
 
@@ -2620,7 +2622,12 @@ async function startServer() {
         } else {
           const scheduledTime = new Date(newsAccount.next_scheduled_post).getTime();
           if (nowMs >= scheduledTime) {
-            shouldPost = true;
+            // Atomically lock the post by updating the scheduled time to a far future date
+            const lockDate = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
+            const result = db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ? AND next_scheduled_post = ?").run(lockDate, newsAccount.id, newsAccount.next_scheduled_post);
+            if (result.changes > 0) {
+              shouldPost = true;
+            }
           }
         }
 
@@ -2661,7 +2668,7 @@ async function startServer() {
           } catch (e) {
             console.error(`Error generating news post for ${newsAccount.display_name}:`, e);
           } finally {
-            scheduleNextNewsPost(newsAccount, settings.timezone || 'UTC');
+            scheduleNextNewsPost(newsAccount, settings.timezone || 'UTC', true);
           }
         }
       }
