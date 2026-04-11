@@ -225,6 +225,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [posts, setPosts] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [exploreUsers, setExploreUsers] = useState<any[]>([]);
+  const [exploreOffset, setExploreOffset] = useState(0);
+  const [hasMoreExplore, setHasMoreExplore] = useState(true);
+  const [isFetchingExplore, setIsFetchingExplore] = useState(false);
+  const [characterSearch, setCharacterSearch] = useState('');
   const [conversations, setConversations] = useState<any[]>([]);
   const [groupChats, setGroupChats] = useState<any[]>([]);
   const [dmFavorites, setDmFavorites] = useState<any[]>([]);
@@ -989,8 +994,30 @@ export default function App() {
   };
 
   const fetchUsers = useCallback(() => {
-    apiFetch('/api/users').then(r => r.json()).then(setUsers);
+    // Fetch all users (lightweight) for global state (mentions, counts, etc.)
+    apiFetch('/api/users?limit=1000').then(r => r.json()).then(setUsers);
   }, [apiFetch]);
+
+  const fetchExploreUsers = useCallback((offset = 0, append = false, search = '') => {
+    if (isFetchingExplore) return;
+    setIsFetchingExplore(true);
+    const limit = 20;
+    const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
+    apiFetch(`/api/users?limit=${limit}&offset=${offset}&is_ai=true${searchParam}`).then(r => r.json()).then(data => {
+      if (append) {
+        setExploreUsers(prev => {
+          const existingIds = new Set(prev.map(u => u.id));
+          const newUsers = data.filter((u: any) => !existingIds.has(u.id));
+          return [...prev, ...newUsers];
+        });
+      } else {
+        setExploreUsers(data);
+      }
+      setHasMoreExplore(data.length === limit);
+      setExploreOffset(offset);
+      setIsFetchingExplore(false);
+    }).catch(() => setIsFetchingExplore(false));
+  }, [apiFetch, isFetchingExplore]);
 
   const fetchUniverses = useCallback(() => {
     apiFetch('/api/universes').then(r => r.json()).then(setUniverses);
@@ -1116,11 +1143,25 @@ export default function App() {
   };
 
   const handleViewProfile = async (userId: number) => {
-    const user = users.find(u => u.id === userId);
-    if (!user) return;
-    setViewingProfile(user);
-    setVisibleProfilePosts(30);
+    // Find in existing lists for immediate feedback
+    const existingUser = users.find(u => u.id === userId) || exploreUsers.find(u => u.id === userId);
+    if (existingUser) {
+      setViewingProfile(existingUser);
+    }
+    
     setProfileActiveTab('posts');
+    setVisibleProfilePosts(30);
+
+    // Fetch full user data (with counts)
+    apiFetch(`/api/users/${userId}`).then(r => r.json()).then(data => {
+      if (data && !data.error) {
+        setViewingProfile(data);
+        // Update the user in the lists too if it's there
+        setUsers(prev => prev.map(u => u.id === data.id ? { ...u, ...data } : u));
+        setExploreUsers(prev => prev.map(u => u.id === data.id ? { ...u, ...data } : u));
+      }
+    });
+
     const res = await apiFetch(`/api/users/${userId}/posts`);
     const posts = await res.json();
     setViewingProfilePosts(posts);
@@ -1636,18 +1677,21 @@ export default function App() {
 
   const handleFollow = async (userId: number) => {
     // Optimistic update
-    setUsers(prev => prev.map(u => {
+    const updateFn = (prev: any[]) => prev.map(u => {
       if (u.id === userId) {
         return { ...u, is_followed: u.is_followed ? 0 : 1 };
       }
       return u;
-    }));
+    });
+    setUsers(updateFn);
+    setExploreUsers(updateFn);
     
     try {
       await apiFetch(`/api/users/${userId}/follow`, { method: 'POST' });
     } catch (e) {
       // Revert on failure
       fetchUsers();
+      fetchExploreUsers(0, false, characterSearch);
     }
   };
 
@@ -1657,12 +1701,15 @@ export default function App() {
     
     // Optimistic update
     const idsToFollow = new Set(charsToFollow.map(c => c.id));
-    setUsers(prev => prev.map(u => idsToFollow.has(u.id) ? { ...u, is_followed: 1 } : u));
+    const updateFn = (prev: any[]) => prev.map(u => idsToFollow.has(u.id) ? { ...u, is_followed: 1 } : u);
+    setUsers(updateFn);
+    setExploreUsers(updateFn);
     
     try {
       await Promise.all(charsToFollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
     } catch (e) {
       fetchUsers();
+      fetchExploreUsers(0, false, characterSearch);
     }
   };
 
@@ -1672,12 +1719,15 @@ export default function App() {
     
     // Optimistic update
     const idsToUnfollow = new Set(charsToUnfollow.map(c => c.id));
-    setUsers(prev => prev.map(u => idsToUnfollow.has(u.id) ? { ...u, is_followed: 0 } : u));
+    const updateFn = (prev: any[]) => prev.map(u => idsToUnfollow.has(u.id) ? { ...u, is_followed: 0 } : u);
+    setUsers(updateFn);
+    setExploreUsers(updateFn);
     
     try {
       await Promise.all(charsToUnfollow.map(c => apiFetch(`/api/users/${c.id}/follow`, { method: 'POST' })));
     } catch (e) {
       fetchUsers();
+      fetchExploreUsers(0, false, characterSearch);
     }
   };
 
@@ -1884,8 +1934,12 @@ export default function App() {
     }
   }, [timestampFormatter]);
 
-  const [characterSearch, setCharacterSearch] = useState('');
-  const [visibleCharacters, setVisibleCharacters] = useState(20);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchExploreUsers(0, false, characterSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [characterSearch, fetchExploreUsers]);
   const [visiblePosts, setVisiblePosts] = useState(30);
   const [fauxPicsPosts, setFauxPicsPosts] = useState<any[]>([]);
   const [visibleFauxPics, setVisibleFauxPics] = useState(20);
@@ -1933,6 +1987,7 @@ export default function App() {
       initialLoadDone.current = true;
       fetchPosts();
       fetchUsers();
+      fetchExploreUsers();
       fetchUniverses();
       fetchConversations();
       fetchGroupChats();
@@ -4267,15 +4322,12 @@ export default function App() {
                 value={characterSearch}
                 onChange={e => {
                   setCharacterSearch(e.target.value);
-                  setVisibleCharacters(20);
                 }}
                 className="w-full bg-gray-800 text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
             <div className="space-y-4 overflow-y-auto flex-1 pr-2 min-h-0">
-              {users
-                .filter(u => u.is_ai && (u.display_name.toLowerCase().includes(characterSearch.toLowerCase()) || u.username.toLowerCase().includes(characterSearch.toLowerCase())))
-                .slice(0, characterSearch ? undefined : visibleCharacters)
+              {exploreUsers
                 .map(u => (
                 <div key={u.id} className={`flex items-center gap-3 group ${!u.is_active ? 'opacity-50 grayscale' : ''}`}>
                   <div 
@@ -4320,16 +4372,17 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              {users.filter(u => u.is_ai && (u.display_name.toLowerCase().includes(characterSearch.toLowerCase()) || u.username.toLowerCase().includes(characterSearch.toLowerCase()))).length === 0 && (
+              {exploreUsers.length === 0 && (
                 <p className="text-gray-500 text-sm text-center py-4">No characters found.</p>
               )}
-              {!characterSearch && users.filter(u => u.is_ai).length > visibleCharacters && (
+              {hasMoreExplore && (
                 <div className="flex justify-center py-4">
                   <button 
-                    onClick={() => setVisibleCharacters(prev => prev + 20)}
-                    className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
+                    onClick={() => fetchExploreUsers(exploreOffset + 20, true, characterSearch)}
+                    disabled={isFetchingExplore}
+                    className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-xs font-bold py-2 px-4 rounded-full transition"
                   >
-                    Load More
+                    {isFetchingExplore ? 'Loading...' : 'Load More'}
                   </button>
                 </div>
               )}

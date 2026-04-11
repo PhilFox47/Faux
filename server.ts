@@ -1372,18 +1372,59 @@ async function startServer() {
     res.json(following);
   });
 
-  app.get("/api/users", (req, res) => {
-    const user = getRealUser(req);
-    const users = db.prepare(`
+  app.get("/api/users/:id", (req, res) => {
+    const loggedInUser = getRealUser(req);
+    const targetId = parseInt(req.params.id);
+
+    const user = db.prepare(`
       SELECT u.*, 
       (u.pin IS NOT NULL AND u.pin != '') as has_pin,
       EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
       (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
       (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
       FROM users u 
-      ORDER BY u.created_at DESC
-    `).all(user?.id || 0);
+      WHERE u.id = ?
+    `).get(loggedInUser?.id || 0, targetId) as any;
+
+    if (!user) return res.status(404).json({ error: "User not found" });
     
+    // Remove sensitive data
+    delete user.pin;
+    
+    res.json(user);
+  });
+
+  app.get("/api/users", (req, res) => {
+    const user = getRealUser(req);
+    const limit = parseInt(req.query.limit as string) || 1000;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const search = req.query.search as string;
+    const isAi = req.query.is_ai;
+
+    let query = `
+      SELECT id, username, display_name, avatar_url, is_ai, is_active, universe_id, account_type, 
+             current_online_status, status_expires_at, online_times, created_at,
+             (pin IS NOT NULL AND pin != '') as has_pin,
+             EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = users.id) as is_followed
+      FROM users
+      WHERE 1=1
+    `;
+    const params: any[] = [user?.id || 0];
+
+    if (search) {
+      query += ` AND (display_name LIKE ? OR username LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    if (isAi !== undefined) {
+      query += ` AND is_ai = ?`;
+      params.push(isAi === 'true' ? 1 : 0);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const users = db.prepare(query).all(...params);
     res.json(users);
   });
 
