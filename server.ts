@@ -181,24 +181,17 @@ function scheduleNextNewsPost(user: any, timezone: string, forceTomorrow: boolea
   user.next_scheduled_post = utcScheduledDate.toISOString();
 }
 
-function isUserOnline(user: any, timezone: string) {
-  // Determine the correct user ID based on the object structure
-  let userId = user.id;
-  if (user.ai_user_id) userId = user.ai_user_id; // From unrepliedMentions
-  else if (user.receiver_id && user.sender_id) userId = user.receiver_id; // From unrepliedDms
-
+function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserIds?: Set<number>) {
+  const userId = user.id;
   if (!userId) return true;
-
-  let dbUser = user;
-  if (user.current_online_status === undefined || user.status_expires_at === undefined || user.activity_level === undefined) {
-    dbUser = db.prepare("SELECT online_times, activity_level, current_online_status, status_expires_at FROM users WHERE id = ?").get(userId) as any;
-    if (!dbUser) return true;
-  }
+  if (user.is_ai === 0) return true;
 
   const now = Date.now();
-
-  // Check if they received a DM from a real user in the last 15 minutes
-  if (dbUser.is_ai === 1) {
+  
+  // 1. Check for recent DMs from real users (Read-only)
+  if (recentDmUserIds) {
+    if (recentDmUserIds.has(userId)) return true;
+  } else {
     const fifteenMinsAgo = new Date(now - 15 * 60 * 1000).toISOString();
     const recentDm = db.prepare(`
       SELECT 1 FROM direct_messages dm
@@ -206,36 +199,14 @@ function isUserOnline(user: any, timezone: string) {
       WHERE dm.receiver_id = ? AND u.is_ai = 0 AND dm.created_at >= ?
       LIMIT 1
     `).get(userId, fifteenMinsAgo);
-
-    if (recentDm) {
-      const expiresAt = now + (15 * 60 * 1000);
-      if (dbUser.current_online_status !== 1 || !dbUser.status_expires_at || dbUser.status_expires_at < expiresAt) {
-        try {
-          db.prepare("UPDATE users SET current_online_status = 1, status_expires_at = ? WHERE id = ?")
-            .run(expiresAt, userId);
-        } catch(e) {
-          console.error("Failed to update user online status", e);
-        }
-        user.current_online_status = 1;
-        user.status_expires_at = expiresAt;
-      }
-      return true;
-    }
+    if (recentDm) return true;
   }
 
-  if (dbUser.status_expires_at && now < dbUser.status_expires_at) {
-    return dbUser.current_online_status === 1;
-  }
-
+  // 2. Check timeframe
   let inOnlineTimeframe = true;
-  if (dbUser.online_times && dbUser.online_times !== '[]') {
+  if (user.online_times && user.online_times !== '[]') {
     try {
-      let onlineTimes = dbUser._parsed_online_times;
-      if (!onlineTimes) {
-        onlineTimes = typeof dbUser.online_times === 'string' ? JSON.parse(dbUser.online_times) : dbUser.online_times;
-        dbUser._parsed_online_times = onlineTimes;
-      }
-      
+      const onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : user.online_times;
       if (onlineTimes && onlineTimes.length > 0) {
         const localTime = getFormatter(timezone).format(new Date(now));
         let [currentHour, currentMinute] = localTime.split(':').map(Number);
@@ -248,48 +219,49 @@ function isUserOnline(user: any, timezone: string) {
           const [start, end] = parts;
           const [startH, startM] = start.trim().split(':').map(Number);
           const [endH, endM] = end.trim().split(':').map(Number);
-          
           const startTotal = startH * 60 + startM;
           const endTotal = endH * 60 + endM;
-          
-          if (startTotal < endTotal) {
-            return currentTimeInMinutes >= startTotal && currentTimeInMinutes < endTotal;
-          } else {
-            return currentTimeInMinutes >= startTotal || currentTimeInMinutes < endTotal;
-          }
+          return startTotal < endTotal 
+            ? (currentTimeInMinutes >= startTotal && currentTimeInMinutes < endTotal)
+            : (currentTimeInMinutes >= startTotal || currentTimeInMinutes < endTotal);
         });
       }
     } catch (e) {}
   }
 
-  const activityLevel = dbUser.activity_level ?? 5;
-  let chance = 0;
-  let minDuration = 5;
-  let maxDuration = 25;
+  // 3. Deterministic "Random" check
+  const activityLevel = user.activity_level ?? 5;
+  const chance = inOnlineTimeframe ? (50 + (5 * activityLevel)) : (2 * activityLevel);
+  
+  // Seed changes every 15 minutes to keep status stable but dynamic
+  const interval = Math.floor(now / (15 * 60 * 1000));
+  const seed = userId * 10000 + interval;
+  const x = Math.sin(seed) * 10000;
+  const randomValue = (x - Math.floor(x)) * 100;
+  
+  return randomValue < chance;
+}
 
-  if (inOnlineTimeframe) {
-    chance = 50 + (5 * activityLevel);
-    minDuration = 5;
-    maxDuration = 25;
-  } else {
-    chance = 0 + (2 * activityLevel);
-    minDuration = 2;
-    maxDuration = 25;
+function isUserOnline(user: any, timezone: string, recentDmUserIds?: Set<number>) {
+  // Determine the correct user ID based on the object structure
+  let userId = user.id;
+  if (user.ai_user_id) userId = user.ai_user_id; // From unrepliedMentions
+  else if (user.receiver_id && user.sender_id) userId = user.receiver_id; // From unrepliedDms
+
+  if (!userId) return true;
+
+  let dbUser = user;
+  if (user.is_ai === undefined || user.online_times === undefined || user.activity_level === undefined) {
+    dbUser = db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as any;
+    if (!dbUser) return true;
   }
 
-  const isOnline = (Math.random() * 100) < chance;
-  const durationMinutes = Math.floor(Math.random() * (maxDuration - minDuration + 1)) + minDuration;
-  const expiresAt = now + (durationMinutes * 60 * 1000);
-
-  try {
-    db.prepare("UPDATE users SET current_online_status = ?, status_expires_at = ? WHERE id = ?")
-      .run(isOnline ? 1 : 0, expiresAt, userId);
-  } catch(e) {
-    console.error("Failed to update user online status", e);
-  }
-
+  const isOnline = getDeterministicOnlineStatus(dbUser, timezone, recentDmUserIds);
+  
+  // Update the object in memory so subsequent checks in the same loop are consistent
   user.current_online_status = isOnline ? 1 : 0;
-  user.status_expires_at = expiresAt;
+  // Set a fake expiry so frontend/other logic thinks it's valid for a bit
+  user.status_expires_at = Date.now() + (15 * 60 * 1000); 
 
   return isOnline;
 }
@@ -963,7 +935,14 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
 
     if (archetype.id === 'event' || archetype.id === 'meetup') {
       const allUsers = db.prepare("SELECT * FROM users").all() as any[];
-      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const recentDmUserIds = new Set<number>(db.prepare(`
+        SELECT DISTINCT receiver_id FROM direct_messages dm
+        JOIN users u ON dm.sender_id = u.id
+        WHERE u.is_ai = 0 AND dm.created_at >= ?
+      `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
+
+      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC', recentDmUserIds));
       const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
       const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1);
       const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
@@ -1373,59 +1352,92 @@ async function startServer() {
   });
 
   app.get("/api/users/:id", (req, res) => {
-    const loggedInUser = getRealUser(req);
-    const targetId = parseInt(req.params.id);
+    try {
+      const loggedInUser = getRealUser(req);
+      const targetId = parseInt(req.params.id);
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
 
-    const user = db.prepare(`
-      SELECT u.*, 
-      (u.pin IS NOT NULL AND u.pin != '') as has_pin,
-      EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
-      (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
-      (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
-      FROM users u 
-      WHERE u.id = ?
-    `).get(loggedInUser?.id || 0, targetId) as any;
+      const user = db.prepare(`
+        SELECT u.*, 
+        (u.pin IS NOT NULL AND u.pin != '') as has_pin,
+        EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
+        (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
+        (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
+        FROM users u 
+        WHERE u.id = ?
+      `).get(loggedInUser?.id || 0, targetId) as any;
 
-    if (!user) return res.status(404).json({ error: "User not found" });
-    
-    // Remove sensitive data
-    delete user.pin;
-    
-    res.json(user);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      
+      // Calculate live online status
+      const isOnline = getDeterministicOnlineStatus(user, settings?.timezone || 'UTC');
+      user.current_online_status = isOnline ? 1 : 0;
+      user.status_expires_at = Date.now() + (15 * 60 * 1000);
+
+      // Remove sensitive data
+      delete user.pin;
+      
+      res.json(user);
+    } catch (e: any) {
+      console.error("Error in /api/users/:id:", e);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.get("/api/users", (req, res) => {
-    const user = getRealUser(req);
-    const limit = parseInt(req.query.limit as string) || 1000;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const search = req.query.search as string;
-    const isAi = req.query.is_ai;
+    try {
+      const user = getRealUser(req);
+      const limit = parseInt(req.query.limit as string) || 1000;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const search = req.query.search as string;
+      const isAi = req.query.is_ai;
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+      const timezone = settings?.timezone || 'UTC';
 
-    let query = `
-      SELECT id, username, display_name, avatar_url, is_ai, is_active, universe_id, account_type, 
-             current_online_status, status_expires_at, online_times, created_at,
-             (pin IS NOT NULL AND pin != '') as has_pin,
-             EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = users.id) as is_followed
-      FROM users
-      WHERE 1=1
-    `;
-    const params: any[] = [user?.id || 0];
+      let query = `
+        SELECT id, username, display_name, avatar_url, is_ai, is_active, universe_id, account_type, 
+               current_online_status, status_expires_at, online_times, activity_level, created_at,
+               (pin IS NOT NULL AND pin != '') as has_pin,
+               EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = users.id) as is_followed
+        FROM users
+        WHERE 1=1
+      `;
+      const params: any[] = [user?.id || 0];
 
-    if (search) {
-      query += ` AND (display_name LIKE ? OR username LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`);
+      if (search) {
+        query += ` AND (display_name LIKE ? OR username LIKE ?)`;
+        params.push(`%${search}%`, `%${search}%`);
+      }
+
+      if (isAi !== undefined) {
+        query += ` AND is_ai = ?`;
+        params.push(isAi === 'true' ? 1 : 0);
+      }
+
+      query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+      params.push(limit, offset);
+
+      const users = db.prepare(query).all(...params) as any[];
+      
+      // Batch check for recent DMs to optimize online status calculation
+      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const recentDmUserIds = new Set<number>(db.prepare(`
+        SELECT DISTINCT receiver_id FROM direct_messages dm
+        JOIN users u ON dm.sender_id = u.id
+        WHERE u.is_ai = 0 AND dm.created_at >= ?
+      `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
+
+      users.forEach(u => {
+        const isOnline = getDeterministicOnlineStatus(u, timezone, recentDmUserIds);
+        u.current_online_status = isOnline ? 1 : 0;
+        u.status_expires_at = Date.now() + (15 * 60 * 1000);
+      });
+
+      res.json(users);
+    } catch (e: any) {
+      console.error("Error in /api/users:", e);
+      res.status(500).json({ error: e.message });
     }
-
-    if (isAi !== undefined) {
-      query += ` AND is_ai = ?`;
-      params.push(isAi === 'true' ? 1 : 0);
-    }
-
-    query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
-
-    const users = db.prepare(query).all(...params);
-    res.json(users);
   });
 
   app.get("/api/users/:id/arcs", (req, res) => {
@@ -2687,7 +2699,14 @@ async function startServer() {
       if (!settings || !settings.ai_enabled) return;
 
       const allUsers = db.prepare("SELECT * FROM users").all() as any[];
-      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const recentDmUserIds = new Set<number>(db.prepare(`
+        SELECT DISTINCT receiver_id FROM direct_messages dm
+        JOIN users u ON dm.sender_id = u.id
+        WHERE u.is_ai = 0 AND dm.created_at >= ?
+      `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
+
+      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC', recentDmUserIds));
       const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
       const allAiUsers = allUsers.filter(u => u.is_ai === 1);
