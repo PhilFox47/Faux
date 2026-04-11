@@ -1257,32 +1257,16 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (!loggedInUser) return;
-    fetchPosts();
-    fetchUsers();
-    fetchUniverses();
-    fetchConversations();
-    fetchGroupChats();
-    fetchDmFavorites();
-    fetchNotifications();
-    fetchSettings();
-    fetchArchetypes();
-    fetchApiLogs();
-    const interval = setInterval(() => {
-      fetchPosts();
-      fetchConversations();
-      fetchGroupChats();
-      fetchNotifications();
-      if (activeChat) fetchChatMessages(activeChat.id, isGroupChat);
-    }, 10000); // Poll every 10s
-    return () => clearInterval(interval);
-  }, [activeChat, isGroupChat, loggedInUser]);
+  const userMap = useMemo(() => {
+    const map = new Map<number, any>();
+    users.forEach(u => map.set(u.id, u));
+    return map;
+  }, [users]);
 
   const expandMessages = useCallback((messages: any[]) => {
     const expanded: any[] = [];
     for (const msg of messages) {
-      const sender = users.find(u => u.id === msg.sender_id);
+      const sender = userMap.get(msg.sender_id);
       if (sender?.is_ai && (msg.content.includes('\n\n') || msg.image_url)) {
         const parts = splitMessageContent(msg.content);
         for (let i = 0; i < parts.length; i++) {
@@ -1296,7 +1280,7 @@ export default function App() {
       }
     }
     return expanded;
-  }, [users]);
+  }, [userMap]);
 
   useEffect(() => {
     if (!activeChat) {
@@ -1400,7 +1384,7 @@ export default function App() {
     };
 
     fetchTypingStatus();
-    const interval = setInterval(fetchTypingStatus, 3000);
+    const interval = setInterval(fetchTypingStatus, 10000); // 10s instead of 3s
     return () => clearInterval(interval);
   }, [activeChat, isGroupChat, loggedInUser, apiFetch]);
 
@@ -1928,6 +1912,43 @@ export default function App() {
   }, [loggedInUser, fetchFauxPics]);
 
   const [visibleProfilePosts, setVisibleProfilePosts] = useState(30);
+
+  useEffect(() => {
+    if (!loggedInUser) return;
+    fetchPosts();
+    fetchUsers();
+    fetchUniverses();
+    fetchConversations();
+    fetchGroupChats();
+    fetchDmFavorites();
+    fetchNotifications();
+    fetchSettings();
+    fetchArchetypes();
+    fetchApiLogs();
+  }, [loggedInUser, fetchPosts, fetchUsers, fetchUniverses, fetchConversations, fetchGroupChats, fetchDmFavorites, fetchNotifications, fetchSettings, fetchArchetypes, fetchApiLogs]);
+
+  useEffect(() => {
+    if (!loggedInUser) return;
+    
+    const interval = setInterval(() => {
+      // Global updates (less frequent)
+      fetchConversations();
+      fetchGroupChats();
+      fetchNotifications();
+      
+      // Tab-specific updates
+      if (activeTab === 'home' || activeTab === 'fauxpics') {
+        fetchPosts();
+        if (activeTab === 'fauxpics') fetchFauxPics();
+      }
+      
+      // Chat-specific updates
+      if (activeChat) {
+        fetchChatMessages(activeChat.id, isGroupChat);
+      }
+    }, 20000); // Poll every 20s instead of 10s
+    return () => clearInterval(interval);
+  }, [activeChat, isGroupChat, loggedInUser, activeTab, fetchPosts, fetchFauxPics, fetchConversations, fetchGroupChats, fetchNotifications, fetchChatMessages]);
 
   if (!loggedInUser) {
     return (
@@ -4999,7 +5020,7 @@ const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfil
   useEffect(() => {
     if (showComments) {
       fetchComments();
-      const interval = setInterval(fetchComments, 10000);
+      const interval = setInterval(fetchComments, 30000); // 30s instead of 10s
       return () => clearInterval(interval);
     }
   }, [showComments, fetchComments]);
@@ -5281,7 +5302,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
       fetchComments();
       const interval = setInterval(() => {
         fetchComments();
-      }, 10000); // Poll every 10s
+      }, 30000); // 30s instead of 10s
       return () => clearInterval(interval);
     }
   }, [showComments, post.comment_count]);

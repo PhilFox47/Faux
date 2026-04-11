@@ -1372,13 +1372,10 @@ async function startServer() {
     const users = db.prepare(`
       SELECT u.*, 
       (u.pin IS NOT NULL AND u.pin != '') as has_pin,
-      (f1.follower_id IS NOT NULL) as is_followed,
-      COALESCE(f2.following_count, 0) as following_count,
-      COALESCE(f3.follower_count, 0) as follower_count
+      EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
+      (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
+      (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
       FROM users u 
-      LEFT JOIN follows f1 ON f1.follower_id = ? AND f1.followed_id = u.id
-      LEFT JOIN (SELECT follower_id, COUNT(*) as following_count FROM follows GROUP BY follower_id) f2 ON f2.follower_id = u.id
-      LEFT JOIN (SELECT followed_id, COUNT(*) as follower_count FROM follows GROUP BY followed_id) f3 ON f3.followed_id = u.id
       ORDER BY u.created_at DESC
     `).all(user?.id || 0);
     
@@ -1867,8 +1864,8 @@ async function startServer() {
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
-      WHERE (p.user_id = ? OR p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?))
-      AND p.is_visible = 1
+      WHERE p.is_visible = 1
+      AND (p.user_id = ? OR EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = p.user_id))
     `;
     const params: any[] = [userId, userId, userId];
 
@@ -1945,11 +1942,13 @@ async function startServer() {
 
     const comments = db.prepare(`
       SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type,
-      (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) as like_count,
-      (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
+      COUNT(cl.id) as like_count,
+      MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) as is_liked
       FROM comments c
       JOIN users u ON c.user_id = u.id
+      LEFT JOIN comment_likes cl ON cl.comment_id = c.id
       WHERE c.post_id = ?
+      GROUP BY c.id
       ORDER BY c.created_at ASC
     `).all(userId, req.params.id);
     res.json(comments);
@@ -2345,18 +2344,25 @@ async function startServer() {
           MAX(id) as max_id
         FROM direct_messages
         WHERE sender_id = ? OR receiver_id = ?
-        GROUP BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
+        GROUP BY 1
+      ),
+      UnreadCounts AS (
+        SELECT sender_id, COUNT(*) as count
+        FROM direct_messages
+        WHERE receiver_id = ? AND is_read = 0
+        GROUP BY sender_id
       )
       SELECT 
         u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at,
         dm.content as last_message, dm.created_at, dm.is_read,
         dm.sender_id,
-        (SELECT COUNT(*) FROM direct_messages WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread_count
+        COALESCE(uc.count, 0) as unread_count
       FROM LatestMessages lm
       JOIN direct_messages dm ON dm.id = lm.max_id
       JOIN users u ON u.id = lm.other_user_id
+      LEFT JOIN UnreadCounts uc ON uc.sender_id = u.id
       ORDER BY dm.created_at DESC
-    `).all(user.id, user.id, user.id, user.id, user.id);
+    `).all(user.id, user.id, user.id, user.id);
     res.json(conversations);
   });
 
