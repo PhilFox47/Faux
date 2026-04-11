@@ -2,9 +2,33 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import db, { initDb } from "./src/db";
 import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
+
+function saveBase64Image(base64String: string): string {
+  if (!base64String.startsWith('data:image/')) {
+    return base64String; // Not a base64 image, return as is
+  }
+  
+  const matches = base64String.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+  if (!matches || matches.length !== 3) {
+    return base64String;
+  }
+
+  const extension = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+  const buffer = Buffer.from(matches[2], 'base64');
+  const filename = `${crypto.randomUUID()}.${extension}`;
+  const uploadDir = path.join(process.cwd(), 'uploads');
+  
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  
+  fs.writeFileSync(path.join(uploadDir, filename), buffer);
+  return `/uploads/${filename}`;
+}
 
 async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId: number) {
   const minId = Math.min(user1Id, user2Id);
@@ -1703,11 +1727,14 @@ async function startServer() {
   app.put("/api/users/:id", (req, res) => {
     const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
     try {
+      const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
+      const finalReferenceImages = reference_images ? reference_images.map((img: string) => saveBase64Image(img)) : [];
+
       db.prepare(`
         UPDATE users 
         SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency), reference_images = ?, account_type = COALESCE(?, account_type), company_name = ?, brand_identity = ?, products_services = ?, target_audience = ?, run_by_character_id = ?
         WHERE id = ?
-      `).run(display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, reference_images ? JSON.stringify(reference_images) : '[]', account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id || null, req.params.id);
+      `).run(display_name, username, bio, finalAvatarUrl, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, JSON.stringify(finalReferenceImages), account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id || null, req.params.id);
 
       syncNewsFollowers(parseInt(req.params.id));
 
@@ -1747,12 +1774,15 @@ async function startServer() {
         return res.status(400).json({ error: "Username already taken. Please choose another one." });
       }
 
+      const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
+      const finalReferenceImages = reference_images ? reference_images.map((img: string) => saveBase64Image(img)) : [];
+
       const stmt = db.prepare(`
         INSERT INTO users (username, display_name, bio, avatar_url, is_ai, is_active, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, created_at)
         VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       `);
       const isActive = account_type === 'news' ? 1 : 0;
-      const info = stmt.run(username, display_name, bio, avatar_url, isActive, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, reference_images ? JSON.stringify(reference_images) : '[]', account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
+      const info = stmt.run(username, display_name, bio, finalAvatarUrl, isActive, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, JSON.stringify(finalReferenceImages), account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
       const userId = info.lastInsertRowid;
       
       // AI character follows real user by default, but real user does NOT follow AI character by default
@@ -1859,16 +1889,18 @@ async function startServer() {
     const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
-    const isVisible = (post_type === 'image_post' && !image_url) ? 0 : 1;
+    const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
+
+    const isVisible = (post_type === 'image_post' && !finalImageUrl) ? 0 : 1;
     const stmt = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, image_url) VALUES (?, ?, ?, ?, ?)");
-    const info = stmt.run(user.id, content, post_type || 'life_update', isVisible, image_url || null);
+    const info = stmt.run(user.id, content, post_type || 'life_update', isVisible, finalImageUrl);
     const postId = info.lastInsertRowid;
     
     res.json({ id: postId });
 
-    if (image_url) {
+    if (finalImageUrl) {
       try {
-        const description = await analyzeImage(image_url);
+        const description = await analyzeImage(finalImageUrl);
         db.prepare("UPDATE posts SET image_prompt = ? WHERE id = ?").run(description, postId);
       } catch (e) {
         console.error(e);
@@ -2429,9 +2461,10 @@ async function startServer() {
       const receiverId = parseInt(req.params.userId);
       
       let finalContent = content?.trim() || "";
+      const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
 
       const info = db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)")
-        .run(user.id, receiverId, finalContent, image_url || null);
+        .run(user.id, receiverId, finalContent, finalImageUrl);
       
       const messageId = info.lastInsertRowid;
       
@@ -2440,9 +2473,9 @@ async function startServer() {
       // Background processing
       (async () => {
         try {
-          if (image_url) {
+          if (finalImageUrl) {
             try {
-              const description = await analyzeImage(image_url);
+              const description = await analyzeImage(finalImageUrl);
               db.prepare("UPDATE direct_messages SET image_description = ? WHERE id = ?")
                 .run(description, messageId);
             } catch (imgErr) {
