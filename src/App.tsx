@@ -7,7 +7,7 @@ import { WELCOME_TEXTS } from './welcomeTexts';
 import { FauxPast } from './components/FauxPast';
 
 const getAvatarShape = (accountType?: string) => {
-  return accountType === 'company' || accountType === 'news' ? 'rounded-xl' : 'rounded-full';
+  return accountType === 'company' || accountType === 'news' || accountType === 'faux_news' ? 'rounded-xl' : 'rounded-full';
 };
 
 const estimateLines = (text: string) => {
@@ -4596,12 +4596,16 @@ export default function App() {
                   </div>
                 )}
                 
-                {viewingProfile.account_type === 'news' && (
+                {(viewingProfile.account_type === 'news' || viewingProfile.account_type === 'faux_news') && (
                   <div className="mb-4 space-y-2 text-sm bg-gray-950 p-4 rounded-xl border border-gray-800">
                     <div className="flex items-center gap-2 text-orange-400 font-bold mb-2">
-                      <Globe size={16} /> News Account
+                      <Globe size={16} /> {viewingProfile.account_type === 'faux_news' ? 'Platform News Account' : 'Universe News Account'}
                     </div>
-                    <p className="text-gray-400">This account provides daily news updates for its universe.</p>
+                    <p className="text-gray-400">
+                      {viewingProfile.account_type === 'faux_news' 
+                        ? 'This account provides platform-wide news recaps thrice daily.' 
+                        : 'This account provides daily news updates for its universe.'}
+                    </p>
                   </div>
                 )}
                 
@@ -4640,9 +4644,9 @@ export default function App() {
                         className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-bold py-2 rounded-lg transition flex items-center justify-center gap-2"
                       >
                         {isForcingPost ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
-                        {viewingProfile.account_type === 'news' ? 'Force Recap' : 'Force Text Post'}
+                        {(viewingProfile.account_type === 'news' || viewingProfile.account_type === 'faux_news') ? 'Force Recap' : 'Force Text Post'}
                       </button>
-                      {viewingProfile.account_type !== 'news' && (
+                      {viewingProfile.account_type !== 'news' && viewingProfile.account_type !== 'faux_news' && (
                         <button 
                           onClick={() => handleForcePost('image')}
                           disabled={isForcingPost}

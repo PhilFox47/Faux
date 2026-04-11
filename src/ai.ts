@@ -630,6 +630,42 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
   }
 }
 
+export async function generateFauxNewsPost(fauxNewsAccount: any, newsPosts: any[]) {
+  let prompt = `You are the ultimate news authority for the Faux platform: ${fauxNewsAccount.display_name}. `;
+  if (fauxNewsAccount.bio) prompt += `\nBio: ${fauxNewsAccount.bio}`;
+  if (fauxNewsAccount.description) prompt += `\nBackground: ${fauxNewsAccount.description}`;
+  if (fauxNewsAccount.writing_style) prompt += `\nWriting Style: ${fauxNewsAccount.writing_style}`;
+
+  prompt += `\n\nYour task is to write a cross-universe recap of the latest news on Faux. 
+You have been provided with news posts from various universe-specific news accounts. 
+Your goal is to summarize these events into a single, cohesive, and engaging platform-wide news update.`;
+
+  prompt += `\n\nRecent News Posts from other universes:\n`;
+  newsPosts.forEach(post => {
+    prompt += `[${post.created_at}] ${post.display_name} (Universe: ${post.universe_name}): ${post.content}\n`;
+  });
+
+  prompt += `\n\nWrite your platform-wide news recap now. Focus on the most interesting or impactful events. Return ONLY the text of the post.`;
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 2500,
+    });
+    
+    let content = stripReasoning(response.choices[0].message.content || "");
+    content = cleanAiResponse(content);
+    
+    logApi('generateFauxNewsPost', { newsAccountId: fauxNewsAccount.id, prompt }, { response: response.choices[0].message.content, content }, fauxNewsAccount.id);
+    return content;
+  } catch (e) {
+    console.error("Error generating faux news post:", e);
+    logApi('generateFauxNewsPost_error', { newsAccountId: fauxNewsAccount.id, prompt }, { error: String(e) }, fauxNewsAccount.id);
+    return null;
+  }
+}
+
 export async function concludeArc(character: any, arc: any, recentPosts: string, recentComments: string) {
   const prompt = `${buildCharacterPrompt(character)}
 This character's narrative arc has reached its end date. 

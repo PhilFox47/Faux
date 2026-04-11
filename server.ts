@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
 
 function saveBase64Image(base64String: string): string {
@@ -181,6 +181,52 @@ function scheduleNextNewsPost(user: any, timezone: string, forceTomorrow: boolea
   // Convert back to UTC for storage
   const offset = tzDate.getTime() - now.getTime();
   const utcScheduledDate = new Date(scheduledDate.getTime() - offset);
+
+  db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ?").run(utcScheduledDate.toISOString(), user.id);
+  user.next_scheduled_post = utcScheduledDate.toISOString();
+}
+
+function scheduleNextFauxNewsPost(user: any, timezone: string) {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+    hour12: false
+  });
+  
+  const parts = formatter.formatToParts(now);
+  const tzDate = new Date(
+    parseInt(parts.find(p => p.type === 'year')!.value),
+    parseInt(parts.find(p => p.type === 'month')!.value) - 1,
+    parseInt(parts.find(p => p.type === 'day')!.value),
+    parseInt(parts.find(p => p.type === 'hour')!.value),
+    parseInt(parts.find(p => p.type === 'minute')!.value),
+    parseInt(parts.find(p => p.type === 'second')!.value)
+  );
+
+  const targetHours = [8, 15, 22];
+  let nextScheduledDate: Date | null = null;
+
+  for (const hour of targetHours) {
+    const candidate = new Date(tzDate);
+    candidate.setHours(hour, 0, 0, 0);
+    if (candidate.getTime() > tzDate.getTime()) {
+      nextScheduledDate = candidate;
+      break;
+    }
+  }
+
+  if (!nextScheduledDate) {
+    // Tomorrow at 08:00
+    nextScheduledDate = new Date(tzDate);
+    nextScheduledDate.setDate(tzDate.getDate() + 1);
+    nextScheduledDate.setHours(8, 0, 0, 0);
+  }
+
+  // Convert back to UTC for storage
+  const offset = tzDate.getTime() - now.getTime();
+  const utcScheduledDate = new Date(nextScheduledDate.getTime() - offset);
 
   db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ?").run(utcScheduledDate.toISOString(), user.id);
   user.next_scheduled_post = utcScheduledDate.toISOString();
@@ -683,34 +729,52 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
 
   // NEWS LOGIC (FORCED RECAP)
-  if (aiUser.account_type === 'news') {
+  if (aiUser.account_type === 'news' || aiUser.account_type === 'faux_news') {
     try {
-      // Get recent posts from this universe (last 24 hours), excluding comments
-      const recentPosts = db.prepare(`
-        SELECT p.content, p.created_at, u.display_name
-        FROM posts p
-        JOIN users u ON p.user_id = u.id
-        WHERE u.universe_id = ? AND p.created_at >= datetime('now', '-24 hours') AND u.account_type != 'news'
-        ORDER BY p.created_at ASC
-      `).all(aiUser.universe_id) as any[];
+      let newsContent = null;
+      if (aiUser.account_type === 'faux_news') {
+        const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(aiUser.id) as any;
+        const sinceDate = lastPost ? lastPost.created_at : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-      // Get active universe arc
-      const activeUniverseArc = db.prepare(`
-        SELECT * FROM universe_arcs
-        WHERE universe_id = ? AND status = 'active'
-        ORDER BY created_at DESC LIMIT 1
-      `).get(aiUser.universe_id) as any;
+        const newsPosts = db.prepare(`
+          SELECT p.content, p.created_at, u.display_name, univ.name as universe_name
+          FROM posts p
+          JOIN users u ON p.user_id = u.id
+          LEFT JOIN universes univ ON u.universe_id = univ.id
+          WHERE u.account_type = 'news' AND p.created_at > ? AND u.id != ?
+          ORDER BY p.created_at ASC
+        `).all(sinceDate, aiUser.id) as any[];
 
-      // Get other news posts from today in this universe
-      const otherNewsPosts = db.prepare(`
-        SELECT p.content, p.created_at, u.display_name
-        FROM posts p
-        JOIN users u ON p.user_id = u.id
-        WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
-        ORDER BY p.created_at ASC
-      `).all(aiUser.universe_id, aiUser.id) as any[];
+        newsContent = await generateFauxNewsPost(aiUser, newsPosts);
+      } else {
+        // Get recent posts from this universe (last 24 hours), excluding comments
+        const recentPosts = db.prepare(`
+          SELECT p.content, p.created_at, u.display_name
+          FROM posts p
+          JOIN users u ON p.user_id = u.id
+          WHERE u.universe_id = ? AND p.created_at >= datetime('now', '-24 hours') AND u.account_type != 'news'
+          ORDER BY p.created_at ASC
+        `).all(aiUser.universe_id) as any[];
 
-      const newsContent = await generateNewsPost(aiUser, recentPosts, activeUniverseArc, otherNewsPosts);
+        // Get active universe arc
+        const activeUniverseArc = db.prepare(`
+          SELECT * FROM universe_arcs
+          WHERE universe_id = ? AND status = 'active'
+          ORDER BY created_at DESC LIMIT 1
+        `).get(aiUser.universe_id) as any;
+
+        // Get other news posts from today in this universe
+        const otherNewsPosts = db.prepare(`
+          SELECT p.content, p.created_at, u.display_name
+          FROM posts p
+          JOIN users u ON p.user_id = u.id
+          WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
+          ORDER BY p.created_at ASC
+        `).all(aiUser.universe_id, aiUser.id) as any[];
+
+        newsContent = await generateNewsPost(aiUser, recentPosts, activeUniverseArc, otherNewsPosts);
+      }
+
       if (newsContent) {
         const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(aiUser.id, newsContent);
         const postId = info.lastInsertRowid as number;
@@ -1081,6 +1145,17 @@ async function startServer() {
   }
 
   globalSyncNewsFollowers();
+
+  // Initialize Faux News Account
+  const fauxNews = db.prepare("SELECT * FROM users WHERE username = 'fauxnews'").get() as any;
+  if (!fauxNews) {
+    db.prepare(`
+      INSERT INTO users (username, display_name, bio, ai_persona, account_type, is_ai, is_active)
+      VALUES ('fauxnews', 'Faux News', 'The ultimate cross-universe news authority for the Faux platform.', 'A professional, slightly dramatic, and highly informative news anchor for the entire Faux network.', 'faux_news', 1, 1)
+    `).run();
+    const newUser = db.prepare("SELECT * FROM users WHERE username = 'fauxnews'").get() as any;
+    scheduleNextFauxNewsPost(newUser, 'UTC');
+  }
 
   const getRealUser = (req: any) => {
     const userId = req.headers['x-user-id'];
@@ -2791,6 +2866,61 @@ async function startServer() {
         }
       }
       // --- End News Accounts Logic ---
+      
+      // --- Faux News Logic ---
+      const fauxNewsAccounts = allAiUsers.filter(u => u.account_type === 'faux_news');
+      for (const fnAccount of fauxNewsAccounts) {
+        let shouldPost = false;
+        const nowMs = Date.now();
+        
+        if (!fnAccount.next_scheduled_post) {
+          scheduleNextFauxNewsPost(fnAccount, settings.timezone || 'UTC');
+        } else {
+          const scheduledTime = new Date(fnAccount.next_scheduled_post).getTime();
+          if (nowMs >= scheduledTime) {
+            const lockDate = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
+            const result = db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ? AND next_scheduled_post = ?").run(lockDate, fnAccount.id, fnAccount.next_scheduled_post);
+            if (result.changes > 0) {
+              shouldPost = true;
+            }
+          }
+        }
+
+        if (shouldPost) {
+          try {
+            // Get last post date to filter news posts since then
+            const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(fnAccount.id) as any;
+            const sinceDate = lastPost ? lastPost.created_at : new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+
+            // Get news posts since last update
+            const newsPosts = db.prepare(`
+              SELECT p.content, p.created_at, u.display_name, univ.name as universe_name
+              FROM posts p
+              JOIN users u ON p.user_id = u.id
+              LEFT JOIN universes univ ON u.universe_id = univ.id
+              WHERE u.account_type = 'news' AND p.created_at > ? AND u.id != ?
+              ORDER BY p.created_at ASC
+            `).all(sinceDate, fnAccount.id) as any[];
+
+            if (newsPosts.length >= 2) {
+              const newsContent = await generateFauxNewsPost(fnAccount, newsPosts);
+              if (newsContent) {
+                const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(fnAccount.id, newsContent);
+                const postId = info.lastInsertRowid as number;
+                triggerPostComments(postId, 'news');
+                console.log(`Faux News Account ${fnAccount.display_name} posted a platform-wide recap.`);
+              }
+            } else {
+              console.log(`Faux News Account ${fnAccount.display_name} skipped post: only ${newsPosts.length} news posts found since ${sinceDate}.`);
+            }
+          } catch (e) {
+            console.error(`Error generating faux news post for ${fnAccount.display_name}:`, e);
+          } finally {
+            scheduleNextFauxNewsPost(fnAccount, settings.timezone || 'UTC');
+          }
+        }
+      }
+      // --- End Faux News Logic ---
 
       const probPost = ((settings.prob_post ?? 100) / 1440) * onlineRatio;
       const probComment = ((settings.prob_comment ?? 1000) / 1440) * onlineRatio;
