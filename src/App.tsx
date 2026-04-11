@@ -237,6 +237,7 @@ export default function App() {
   const [activeChat, setActiveChat] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [displayedMessages, setDisplayedMessages] = useState<any[]>([]);
+  const [isFetchingChatMessages, setIsFetchingChatMessages] = useState(false);
   const [lastProcessedMsgId, setLastProcessedMsgId] = useState<number | null>(null);
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const [serverTypingUsers, setServerTypingUsers] = useState<string[]>([]);
@@ -348,10 +349,12 @@ export default function App() {
   const [viewingProfile, setViewingProfile] = useState<any>(null);
   const [viewingProfilePosts, setViewingProfilePosts] = useState<any[]>([]);
   const [viewingProfileArcs, setViewingProfileArcs] = useState<any[]>([]);
+  const [isFetchingProfileData, setIsFetchingProfileData] = useState(false);
   const [profileActiveTab, setProfileActiveTab] = useState<'posts' | 'arcs'>('posts');
   const [viewingUniverse, setViewingUniverse] = useState<any>(null);
   const [viewingUniverseCharacters, setViewingUniverseCharacters] = useState<any[]>([]);
   const [viewingUniverseArcs, setViewingUniverseArcs] = useState<any[]>([]);
+  const [isFetchingUniverseData, setIsFetchingUniverseData] = useState(false);
   const [universeActiveTab, setUniverseActiveTab] = useState<'characters' | 'arcs'>('characters');
   const [viewingPostData, setViewingPostData] = useState<any>(null);
   const [highlightedPostId, setHighlightedPostId] = useState<number | null>(null);
@@ -1048,6 +1051,11 @@ export default function App() {
     if (beforeId) {
       setIsLoadingMoreMessages(true);
       skipNextScroll.current = true;
+    } else {
+      setIsFetchingChatMessages(true);
+      setChatMessages([]);
+      setDisplayedMessages([]);
+      setLastProcessedMsgId(null);
     }
     
     apiFetch(url).then(r => r.json()).then(data => {
@@ -1056,8 +1064,13 @@ export default function App() {
         setIsLoadingMoreMessages(false);
       } else {
         setChatMessages(data);
+        setIsFetchingChatMessages(false);
       }
       setHasMoreMessages(data.length === limit);
+    }).catch(err => {
+      console.error(err);
+      if (!beforeId) setIsFetchingChatMessages(false);
+      else setIsLoadingMoreMessages(false);
     });
   }, [apiFetch]);
 
@@ -1147,10 +1160,15 @@ export default function App() {
     const existingUser = users.find(u => u.id === userId) || exploreUsers.find(u => u.id === userId);
     if (existingUser) {
       setViewingProfile(existingUser);
+    } else {
+      setViewingProfile(null);
     }
     
     setProfileActiveTab('posts');
     setVisibleProfilePosts(30);
+    setViewingProfilePosts([]);
+    setViewingProfileArcs([]);
+    setIsFetchingProfileData(true);
 
     // Fetch full user data (with counts)
     apiFetch(`/api/users/${userId}`).then(r => r.json()).then(data => {
@@ -1162,13 +1180,24 @@ export default function App() {
       }
     });
 
-    const res = await apiFetch(`/api/users/${userId}/posts`);
-    const posts = await res.json();
-    setViewingProfilePosts(posts);
-    
-    const arcsRes = await apiFetch(`/api/users/${userId}/arcs`);
-    const arcs = await arcsRes.json();
-    setViewingProfileArcs(arcs);
+    try {
+      const [postsRes, arcsRes] = await Promise.all([
+        apiFetch(`/api/users/${userId}/posts`),
+        apiFetch(`/api/users/${userId}/arcs`)
+      ]);
+      
+      const [posts, arcs] = await Promise.all([
+        postsRes.json(),
+        arcsRes.json()
+      ]);
+      
+      setViewingProfilePosts(posts);
+      setViewingProfileArcs(arcs);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsFetchingProfileData(false);
+    }
   };
 
   const handleViewUniverse = async (universeId: number) => {
@@ -1179,6 +1208,7 @@ export default function App() {
       setIsEditingUniverse(false);
       const chars = users.filter(u => !u.universe_id);
       setViewingUniverseCharacters(chars);
+      setViewingUniverseArcs([]);
       setActiveTab('universe_details');
       return;
     }
@@ -1189,13 +1219,28 @@ export default function App() {
     setEditUniverseDescription(universe.description || '');
     setEditUniverseImageUrl(universe.image_url || '');
     setIsEditingUniverse(false);
-    const res = await apiFetch(`/api/universes/${universeId}/characters`);
-    const chars = await res.json();
-    setViewingUniverseCharacters(chars);
+    setViewingUniverseCharacters([]);
+    setViewingUniverseArcs([]);
+    setIsFetchingUniverseData(true);
 
-    const arcsRes = await apiFetch(`/api/universes/${universeId}/arcs`);
-    const arcs = await arcsRes.json();
-    setViewingUniverseArcs(arcs);
+    try {
+      const [charsRes, arcsRes] = await Promise.all([
+        apiFetch(`/api/universes/${universeId}/characters`),
+        apiFetch(`/api/universes/${universeId}/arcs`)
+      ]);
+      
+      const [chars, arcs] = await Promise.all([
+        charsRes.json(),
+        arcsRes.json()
+      ]);
+      
+      setViewingUniverseCharacters(chars);
+      setViewingUniverseArcs(arcs);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsFetchingUniverseData(false);
+    }
     
     setActiveTab('universe_details');
   };
@@ -2899,18 +2944,25 @@ export default function App() {
                     </div>
                   </div>
                   <div ref={chatScrollRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {hasMoreMessages && (
-                      <div className="flex justify-center py-2">
-                        <button 
-                          onClick={() => fetchChatMessages(activeChat.id, isGroupChat, chatMessages[0]?.id)}
-                          disabled={isLoadingMoreMessages}
-                          className="text-xs font-bold text-orange-500 hover:text-orange-400 bg-orange-500/10 px-4 py-2 rounded-full transition disabled:opacity-50"
-                        >
-                          {isLoadingMoreMessages ? 'Loading...' : 'Load older messages'}
-                        </button>
+                    {isFetchingChatMessages ? (
+                      <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                        <Loader2 className="animate-spin mb-2" size={32} />
+                        <p>Loading messages...</p>
                       </div>
-                    )}
-                    {displayedMessages.map((msg, i) => {
+                    ) : (
+                      <>
+                        {hasMoreMessages && (
+                          <div className="flex justify-center py-2">
+                            <button 
+                              onClick={() => fetchChatMessages(activeChat.id, isGroupChat, chatMessages[0]?.id)}
+                              disabled={isLoadingMoreMessages}
+                              className="text-xs font-bold text-orange-500 hover:text-orange-400 bg-orange-500/10 px-4 py-2 rounded-full transition disabled:opacity-50"
+                            >
+                              {isLoadingMoreMessages ? 'Loading...' : 'Load older messages'}
+                            </button>
+                          </div>
+                        )}
+                        {displayedMessages.map((msg, i) => {
                       const currentUser = loggedInUser;
                       const isMe = msg.sender_id === currentUser?.id;
                       const sender = users.find(u => u.id === msg.sender_id);
@@ -3000,7 +3052,9 @@ export default function App() {
                         )}
                       </div>
                     )}
-                  </div>
+                  </>
+                )}
+              </div>
                   <div className="p-4 border-t border-gray-800">
                     <ChatInputForm 
                       users={users} 
@@ -3207,7 +3261,14 @@ export default function App() {
                 )}
               </div>
 
-              {universeActiveTab === 'characters' ? (
+              {isFetchingUniverseData ? (
+                <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                  <Loader2 className="animate-spin mb-2" size={32} />
+                  <p>Loading universe data...</p>
+                </div>
+              ) : (
+                <>
+                  {universeActiveTab === 'characters' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {viewingUniverseCharacters.map(char => (
                     <div key={char.id} onClick={() => handleViewProfile(char.id)} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
@@ -3308,8 +3369,10 @@ export default function App() {
                   )}
                 </div>
               )}
-            </div>
+            </>
           )}
+        </div>
+      )}
 
           {activeTab === 'following' && (
             <div className="p-6 max-w-4xl mx-auto">
@@ -4610,36 +4673,45 @@ export default function App() {
                 <div className="mt-6">
                   {profileActiveTab === 'posts' ? (
                     <div className="space-y-4">
-                      {viewingProfilePosts.slice(0, visibleProfilePosts).map(post => (
-                        <PostItem 
-                          apiFetch={apiFetch}
-                          loggedInUser={loggedInUser}
-                          key={post.id} 
-                          post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
-                          onLike={handleLike} 
-                          onViewProfile={handleViewProfile}
-                          onShowLikers={handleShowLikers}
-                          formatTimestamp={formatTimestamp}
-                          onRefresh={() => handleViewProfile(viewingProfile.id)}
-                          onDelete={(id) => {
-                            setViewingProfilePosts(prev => prev.filter(p => p.id !== id));
-                            fetchPosts();
-                          }}
-                          onViewApiLogs={handleViewApiLogs}
-                          users={users}
-                        />
-                      ))}
-                      {viewingProfilePosts.length > visibleProfilePosts && (
-                        <div className="flex justify-center py-4">
-                          <button 
-                            onClick={() => setVisibleProfilePosts(prev => prev + 30)}
-                            className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
-                          >
-                            Load More
-                          </button>
+                      {isFetchingProfileData ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                          <Loader2 className="animate-spin mb-2" size={32} />
+                          <p>Loading posts...</p>
                         </div>
+                      ) : (
+                        <>
+                          {viewingProfilePosts.slice(0, visibleProfilePosts).map(post => (
+                            <PostItem 
+                              apiFetch={apiFetch}
+                              loggedInUser={loggedInUser}
+                              key={post.id} 
+                              post={{...post, display_name: viewingProfile.display_name, username: viewingProfile.username, avatar_url: viewingProfile.avatar_url}} 
+                              onLike={handleLike} 
+                              onViewProfile={handleViewProfile}
+                              onShowLikers={handleShowLikers}
+                              formatTimestamp={formatTimestamp}
+                              onRefresh={() => handleViewProfile(viewingProfile.id)}
+                              onDelete={(id) => {
+                                setViewingProfilePosts(prev => prev.filter(p => p.id !== id));
+                                fetchPosts();
+                              }}
+                              onViewApiLogs={handleViewApiLogs}
+                              users={users}
+                            />
+                          ))}
+                          {viewingProfilePosts.length > visibleProfilePosts && (
+                            <div className="flex justify-center py-4">
+                              <button 
+                                onClick={() => setVisibleProfilePosts(prev => prev + 30)}
+                                className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
+                              >
+                                Load More
+                              </button>
+                            </div>
+                          )}
+                          {viewingProfilePosts.length === 0 && <p className="text-center text-gray-500 py-4">No posts yet.</p>}
+                        </>
                       )}
-                      {viewingProfilePosts.length === 0 && <p className="text-center text-gray-500 py-4">No posts yet.</p>}
                     </div>
                   ) : (
                     <div className="space-y-4">
