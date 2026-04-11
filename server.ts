@@ -1130,8 +1130,13 @@ async function startServer() {
 
     queryStr += ` ORDER BY l.created_at DESC LIMIT 50`;
 
-    const logs = db.prepare(queryStr).all(...params);
-    res.json(logs);
+    try {
+      const logs = db.prepare(queryStr).all(...params);
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching logs:", error);
+      res.status(500).json({ error: "Failed to fetch logs" });
+    }
   });
 
   app.get("/api/relationship-checks", (req, res) => {
@@ -2344,7 +2349,7 @@ async function startServer() {
           MAX(id) as max_id
         FROM direct_messages
         WHERE sender_id = ? OR receiver_id = ?
-        GROUP BY 1
+        GROUP BY other_user_id
       ),
       UnreadCounts AS (
         SELECT sender_id, COUNT(*) as count

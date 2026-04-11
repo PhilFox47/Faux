@@ -139,7 +139,16 @@ export default function App() {
     if (loggedInUser) {
       headers.set('x-user-id', loggedInUser.id.toString());
     }
-    return window.fetch(resource, { ...config, headers });
+    try {
+      const response = await window.fetch(resource, { ...config, headers });
+      if (!response.ok) {
+        console.warn(`API request failed: ${resource} ${response.status} ${response.statusText}`);
+      }
+      return response;
+    } catch (error) {
+      console.error(`Network error fetching ${resource}:`, error);
+      throw error;
+    }
   }, [loggedInUser]);
 
   useEffect(() => {
@@ -515,9 +524,9 @@ export default function App() {
       });
   };
 
-  const fetchApiLogs = (query?: string | React.MouseEvent | React.KeyboardEvent, errorOnly?: boolean) => {
-    const q = typeof query === 'string' ? query : apiLogSearch;
-    const isErrorOnly = typeof errorOnly === 'boolean' ? errorOnly : apiLogShowErrorsOnly;
+  const fetchApiLogs = useCallback((query?: string | React.MouseEvent | React.KeyboardEvent, errorOnly?: boolean) => {
+    const q = typeof query === 'string' ? query : '';
+    const isErrorOnly = typeof errorOnly === 'boolean' ? errorOnly : false;
     let url = `/api/logs?`;
     if (q) url += `q=${encodeURIComponent(q)}&`;
     if (isErrorOnly) url += `error=true&`;
@@ -535,7 +544,7 @@ export default function App() {
         console.error("Failed to fetch API logs:", err);
         setApiLogs([]);
       });
-  };
+  }, [apiFetch]);
 
   const toggleLogExpansion = (id: number) => {
     setExpandedLogs(prev => ({ ...prev, [id]: !prev[id] }));
@@ -979,31 +988,31 @@ export default function App() {
     });
   };
 
-  const fetchUsers = () => {
+  const fetchUsers = useCallback(() => {
     apiFetch('/api/users').then(r => r.json()).then(setUsers);
-  };
+  }, [apiFetch]);
 
-  const fetchUniverses = () => {
+  const fetchUniverses = useCallback(() => {
     apiFetch('/api/universes').then(r => r.json()).then(setUniverses);
-  };
+  }, [apiFetch]);
 
-  const fetchConversations = () => {
+  const fetchConversations = useCallback(() => {
     apiFetch('/api/dms').then(r => r.json()).then(setConversations);
-  };
+  }, [apiFetch]);
 
-  const fetchGroupChats = () => {
+  const fetchGroupChats = useCallback(() => {
     apiFetch('/api/group-chats').then(r => r.json()).then(setGroupChats);
-  };
+  }, [apiFetch]);
 
-  const fetchDmFavorites = () => {
+  const fetchDmFavorites = useCallback(() => {
     apiFetch('/api/favorites').then(r => r.json()).then(setDmFavorites);
-  };
+  }, [apiFetch]);
 
-  const fetchNotifications = () => {
+  const fetchNotifications = useCallback(() => {
     apiFetch('/api/notifications').then(r => r.json()).then(setNotifications);
-  };
+  }, [apiFetch]);
 
-  const fetchChatMessages = (id: number, isGroup: boolean = false, beforeId?: number) => {
+  const fetchChatMessages = useCallback((id: number, isGroup: boolean = false, beforeId?: number) => {
     const limit = 40;
     const url = isGroup 
       ? `/api/group-chats/${id}/messages?limit=${limit}${beforeId ? `&before_id=${beforeId}` : ''}`
@@ -1023,9 +1032,9 @@ export default function App() {
       }
       setHasMoreMessages(data.length === limit);
     });
-  };
+  }, [apiFetch]);
 
-  const fetchSettings = () => {
+  const fetchSettings = useCallback(() => {
     apiFetch('/api/settings').then(r => r.json()).then(data => {
       if (data) {
         setAiEnabled(data.ai_enabled === 1);
@@ -1042,15 +1051,15 @@ export default function App() {
         if (data.cross_universe_prob !== undefined) setCrossUniverseProb(data.cross_universe_prob);
       }
     });
-  };
+  }, [apiFetch]);
 
-  const fetchArchetypes = () => {
+  const fetchArchetypes = useCallback(() => {
     apiFetch('/api/archetypes').then(r => r.json()).then(data => {
       if (data && Array.isArray(data)) {
         setArchetypes(data);
       }
     });
-  };
+  }, [apiFetch]);
 
   const handleUpdateArchetypes = async (updatedArchetypes: any[]) => {
     setArchetypes(updatedArchetypes);
@@ -1912,19 +1921,27 @@ export default function App() {
   }, [loggedInUser, fetchFauxPics]);
 
   const [visibleProfilePosts, setVisibleProfilePosts] = useState(30);
+  const initialLoadDone = useRef(false);
 
   useEffect(() => {
-    if (!loggedInUser) return;
-    fetchPosts();
-    fetchUsers();
-    fetchUniverses();
-    fetchConversations();
-    fetchGroupChats();
-    fetchDmFavorites();
-    fetchNotifications();
-    fetchSettings();
-    fetchArchetypes();
-    fetchApiLogs();
+    if (!loggedInUser) {
+      initialLoadDone.current = false;
+      return;
+    }
+    
+    if (!initialLoadDone.current) {
+      initialLoadDone.current = true;
+      fetchPosts();
+      fetchUsers();
+      fetchUniverses();
+      fetchConversations();
+      fetchGroupChats();
+      fetchDmFavorites();
+      fetchNotifications();
+      fetchSettings();
+      fetchArchetypes();
+      fetchApiLogs();
+    }
   }, [loggedInUser, fetchPosts, fetchUsers, fetchUniverses, fetchConversations, fetchGroupChats, fetchDmFavorites, fetchNotifications, fetchSettings, fetchArchetypes, fetchApiLogs]);
 
   useEffect(() => {
