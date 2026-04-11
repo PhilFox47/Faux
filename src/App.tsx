@@ -1065,6 +1065,9 @@ export default function App() {
       } else {
         setChatMessages(data);
         setIsFetchingChatMessages(false);
+        // Refresh unread counts
+        if (isGroup) fetchGroupChats();
+        else fetchConversations();
       }
       setHasMoreMessages(data.length === limit);
     }).catch(err => {
@@ -1072,7 +1075,7 @@ export default function App() {
       if (!beforeId) setIsFetchingChatMessages(false);
       else setIsLoadingMoreMessages(false);
     });
-  }, [apiFetch]);
+  }, [apiFetch, fetchConversations, fetchGroupChats]);
 
   const fetchSettings = useCallback(() => {
     apiFetch('/api/settings').then(r => r.json()).then(data => {
