@@ -306,6 +306,7 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_group_chat_members_user_id ON group_chat_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_users_is_ai_is_active ON users(is_ai, is_active);
     CREATE INDEX IF NOT EXISTS idx_users_is_ai ON users(is_ai);
+    CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver ON direct_messages(sender_id, receiver_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender ON direct_messages(receiver_id, sender_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver_id ON direct_messages(sender_id, receiver_id, id DESC);

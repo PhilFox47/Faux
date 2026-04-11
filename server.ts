@@ -108,12 +108,17 @@ const timeFormatters = new Map<string, Intl.DateTimeFormat>();
 
 function getFormatter(timezone: string) {
   if (!timeFormatters.has(timezone)) {
-    timeFormatters.set(timezone, new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: false
-    }));
+    try {
+      timeFormatters.set(timezone, new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false
+      }));
+    } catch (e) {
+      console.warn(`Invalid timezone: ${timezone}, falling back to UTC`);
+      return getFormatter('UTC');
+    }
   }
   return timeFormatters.get(timezone)!;
 }
@@ -1421,22 +1426,31 @@ async function startServer() {
       
       // Batch check for recent DMs to optimize online status calculation
       const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      const recentDmUserIds = new Set<number>(db.prepare(`
-        SELECT DISTINCT receiver_id FROM direct_messages dm
-        JOIN users u ON dm.sender_id = u.id
-        WHERE u.is_ai = 0 AND dm.created_at >= ?
-      `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
+      let recentDmUserIds = new Set<number>();
+      try {
+        recentDmUserIds = new Set<number>(db.prepare(`
+          SELECT DISTINCT receiver_id FROM direct_messages dm
+          JOIN users u ON dm.sender_id = u.id
+          WHERE u.is_ai = 0 AND dm.created_at >= ?
+        `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
+      } catch (dmErr) {
+        console.error("Error fetching recent DMs for online status:", dmErr);
+      }
 
       users.forEach(u => {
-        const isOnline = getDeterministicOnlineStatus(u, timezone, recentDmUserIds);
-        u.current_online_status = isOnline ? 1 : 0;
-        u.status_expires_at = Date.now() + (15 * 60 * 1000);
+        try {
+          const isOnline = getDeterministicOnlineStatus(u, timezone, recentDmUserIds);
+          u.current_online_status = isOnline ? 1 : 0;
+          u.status_expires_at = Date.now() + (15 * 60 * 1000);
+        } catch (uErr) {
+          console.error(`Error calculating online status for user ${u.id}:`, uErr);
+        }
       });
 
       res.json(users);
     } catch (e: any) {
       console.error("Error in /api/users:", e);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: e.message || "Internal Server Error" });
     }
   });
 
@@ -3620,6 +3634,14 @@ async function startServer() {
       isWorkerRunning = false;
     }
   }, 60000); // Every 60 seconds
+
+  process.on('uncaughtException', (err) => {
+    console.error('CRITICAL: Uncaught Exception:', err);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
