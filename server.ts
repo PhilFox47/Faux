@@ -6,6 +6,7 @@ import crypto from "crypto";
 import db, { initDb } from "./src/db";
 import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
+import { logPerformance } from "./src/logger";
 
 function saveBase64Image(base64String: string): string {
   if (!base64String.startsWith('data:image/')) {
@@ -1069,6 +1070,23 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+  // Performance Logging Middleware
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      if (req.path.startsWith('/api/')) {
+        logPerformance('API_REQUEST', duration, {
+          method: req.method,
+          path: req.path,
+          query: req.query,
+          statusCode: res.statusCode
+        });
+      }
+    });
+    next();
+  });
 
   // Initialize Database
   initDb();

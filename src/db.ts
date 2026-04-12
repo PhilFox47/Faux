@@ -135,7 +135,8 @@ export function initDb() {
       prob_message REAL DEFAULT 5.0,
       prob_favorite_dm REAL DEFAULT 50.0,
       cross_universe_prob REAL DEFAULT 50.0,
-      allow_nsfw BOOLEAN DEFAULT 0
+      allow_nsfw BOOLEAN DEFAULT 0,
+      enable_performance_logging BOOLEAN DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS universes (
@@ -313,7 +314,6 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender_id ON direct_messages(receiver_id, sender_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_created ON direct_messages(receiver_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_api_logs_created_at ON api_logs(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_api_logs_user_id ON api_logs(user_id);
   `);
 
   // Add user_id column to api_logs if it doesn't exist
@@ -321,6 +321,12 @@ export function initDb() {
     db.exec("ALTER TABLE api_logs ADD COLUMN user_id INTEGER REFERENCES users(id)");
   } catch (e) {
     // Column might already exist
+  }
+  
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_api_logs_user_id ON api_logs(user_id);");
+  } catch (e) {
+    // Ignore
   }
 
   // Add account_type column to post_archetypes if it doesn't exist
@@ -672,6 +678,10 @@ export function initDb() {
 
   try {
     db.exec("ALTER TABLE users ADD COLUMN reference_images TEXT DEFAULT '[]'");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE settings ADD COLUMN enable_performance_logging BOOLEAN DEFAULT 0");
   } catch (e) {}
 
   // Insert default settings

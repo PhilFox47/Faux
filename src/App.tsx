@@ -229,6 +229,7 @@ export default function App() {
   const [exploreOffset, setExploreOffset] = useState(0);
   const [hasMoreExplore, setHasMoreExplore] = useState(true);
   const [isFetchingExplore, setIsFetchingExplore] = useState(false);
+  const isFetchingExploreRef = useRef(false);
   const [characterSearch, setCharacterSearch] = useState('');
   const [conversations, setConversations] = useState<any[]>([]);
   const [groupChats, setGroupChats] = useState<any[]>([]);
@@ -335,6 +336,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [timezone, setTimezone] = useState('UTC');
   const [allowNsfw, setAllowNsfw] = useState(false);
+  const [enablePerformanceLogging, setEnablePerformanceLogging] = useState(false);
   const [probPost, setProbPost] = useState(100);
   const [probComment, setProbComment] = useState(1000);
   const [probMessage, setProbMessage] = useState(5);
@@ -1002,7 +1004,8 @@ export default function App() {
   }, [apiFetch]);
 
   const fetchExploreUsers = useCallback((offset = 0, append = false, search = '') => {
-    if (isFetchingExplore) return;
+    if (isFetchingExploreRef.current) return;
+    isFetchingExploreRef.current = true;
     setIsFetchingExplore(true);
     const limit = 20;
     const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
@@ -1018,9 +1021,14 @@ export default function App() {
       }
       setHasMoreExplore(data.length === limit);
       setExploreOffset(offset);
+      isFetchingExploreRef.current = false;
       setIsFetchingExplore(false);
-    }).catch(() => setIsFetchingExplore(false));
-  }, [apiFetch, isFetchingExplore]);
+    }).catch(err => {
+      console.error(err);
+      isFetchingExploreRef.current = false;
+      setIsFetchingExplore(false);
+    });
+  }, [apiFetch]);
 
   const fetchUniverses = useCallback(() => {
     apiFetch('/api/universes').then(r => r.json()).then(setUniverses);
@@ -1042,7 +1050,7 @@ export default function App() {
     apiFetch('/api/notifications').then(r => r.json()).then(setNotifications);
   }, [apiFetch]);
 
-  const fetchChatMessages = useCallback((id: number, isGroup: boolean = false, beforeId?: number) => {
+  const fetchChatMessages = useCallback((id: number, isGroup: boolean = false, beforeId?: number, silent: boolean = false) => {
     const limit = 40;
     const url = isGroup 
       ? `/api/group-chats/${id}/messages?limit=${limit}${beforeId ? `&before_id=${beforeId}` : ''}`
@@ -1051,7 +1059,7 @@ export default function App() {
     if (beforeId) {
       setIsLoadingMoreMessages(true);
       skipNextScroll.current = true;
-    } else {
+    } else if (!silent) {
       setIsFetchingChatMessages(true);
       setChatMessages([]);
       setDisplayedMessages([]);
@@ -1064,7 +1072,7 @@ export default function App() {
         setIsLoadingMoreMessages(false);
       } else {
         setChatMessages(data);
-        setIsFetchingChatMessages(false);
+        if (!silent) setIsFetchingChatMessages(false);
         // Refresh unread counts
         if (isGroup) fetchGroupChats();
         else fetchConversations();
@@ -1072,8 +1080,8 @@ export default function App() {
       setHasMoreMessages(data.length === limit);
     }).catch(err => {
       console.error(err);
-      if (!beforeId) setIsFetchingChatMessages(false);
-      else setIsLoadingMoreMessages(false);
+      if (!beforeId && !silent) setIsFetchingChatMessages(false);
+      else if (beforeId) setIsLoadingMoreMessages(false);
     });
   }, [apiFetch, fetchConversations, fetchGroupChats]);
 
@@ -1087,6 +1095,7 @@ export default function App() {
         if (data.timezone) setTimezone(data.timezone);
         if (data.api_key !== undefined) setApiKey(data.api_key);
         if (data.allow_nsfw !== undefined) setAllowNsfw(data.allow_nsfw === 1);
+        if (data.enable_performance_logging !== undefined) setEnablePerformanceLogging(data.enable_performance_logging === 1);
         if (data.prob_post !== undefined) setProbPost(data.prob_post);
         if (data.prob_comment !== undefined) setProbComment(data.prob_comment);
         if (data.prob_message !== undefined) setProbMessage(data.prob_message);
@@ -1120,6 +1129,16 @@ export default function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ allow_nsfw: newVal ? 1 : 0 })
+    });
+  };
+
+  const togglePerformanceLogging = async () => {
+    const newVal = !enablePerformanceLogging;
+    setEnablePerformanceLogging(newVal);
+    await apiFetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable_performance_logging: newVal ? 1 : 0 })
     });
   };
 
@@ -1824,13 +1843,13 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: msg, image_url })
       });
-      fetchChatMessages(activeChat.id, isGroupChat);
+      fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
       if (isGroupChat) fetchGroupChats();
       else fetchConversations();
       fetchUsers();
     } catch (e) {
       setChatMessages(prev => prev.filter(m => m.id !== tempId));
-      fetchChatMessages(activeChat.id, isGroupChat);
+      fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
     } finally {
       setIsSendingMsg(false);
     }
@@ -1854,10 +1873,10 @@ export default function App() {
       });
       setEditingDmId(null);
       setEditingDmContent('');
-      fetchChatMessages(activeChat.id, isGroupChat);
+      fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
     } catch (e) {
       setChatMessages(previousMessages);
-      fetchChatMessages(activeChat.id, isGroupChat);
+      fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
     }
   };
 
@@ -1875,10 +1894,10 @@ export default function App() {
       await apiFetch(endpoint, {
         method: 'DELETE'
       });
-      fetchChatMessages(activeChat.id, isGroupChat);
+      fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
     } catch (e) {
       setChatMessages(previousMessages);
-      fetchChatMessages(activeChat.id, isGroupChat);
+      fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
     }
   };
 
@@ -2064,7 +2083,7 @@ export default function App() {
       
       // Chat-specific updates
       if (activeChat) {
-        fetchChatMessages(activeChat.id, isGroupChat);
+        fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
       }
     }, 20000); // Poll every 20s instead of 10s
     return () => clearInterval(interval);
@@ -3770,6 +3789,19 @@ export default function App() {
                         className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${allowNsfw ? 'bg-orange-500' : 'bg-gray-700'}`}
                       >
                         <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${allowNsfw ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <p className="font-medium">Enable Performance Logging</p>
+                        <p className="text-sm text-gray-500 mt-1">When enabled, a detailed log file will be generated in the backend to help diagnose performance issues.</p>
+                      </div>
+                      <button 
+                        onClick={togglePerformanceLogging}
+                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${enablePerformanceLogging ? 'bg-orange-500' : 'bg-gray-700'}`}
+                      >
+                        <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${enablePerformanceLogging ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                     </div>
 
