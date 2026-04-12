@@ -535,10 +535,17 @@ async function triggerPostComments(postId: number, postType: string, isForced: b
   const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
   const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
+  const postAuthor = db.prepare("SELECT u.is_ai FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
+  const isRealUserPost = postAuthor && postAuthor.is_ai === 0;
+
   const baseCount = (postType === 'question' || postType === 'discussion' || postType === 'seeking_advice') ? 5 : 3;
-  let count = Math.max(0, Math.round(baseCount * onlineRatio));
+  let count = Math.max(0, Math.round((isRealUserPost ? 10 : baseCount) * onlineRatio));
   
-  if (isForced && count < 2) {
+  if (isRealUserPost && isForced) {
+    // Real users should get 6-10 comments initially
+    if (count < 6) count = 6 + Math.floor(Math.random() * 3); // 6, 7, or 8
+    if (count > 10) count = 10;
+  } else if (isForced && count < 2) {
     count = 2; // Ensure at least 2 comments for forced posts
   }
   
