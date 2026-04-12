@@ -233,7 +233,9 @@ function scheduleNextFauxNewsPost(user: any, timezone: string) {
   user.next_scheduled_post = utcScheduledDate.toISOString();
 }
 
-function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserIds?: Set<number>) {
+const timeMinutesCache = new Map<string, { minutes: number, timestamp: number }>();
+
+function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserIds?: Set<number>, precalculatedTime?: { currentTimeInMinutes: number }) {
   const userId = user.id;
   if (!userId) return true;
   if (user.is_ai === 0) return true;
@@ -260,10 +262,21 @@ function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserI
     try {
       const onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : user.online_times;
       if (onlineTimes && onlineTimes.length > 0) {
-        const localTime = getFormatter(timezone).format(new Date(now));
-        let [currentHour, currentMinute] = localTime.split(':').map(Number);
-        if (currentHour === 24) currentHour = 0;
-        const currentTimeInMinutes = currentHour * 60 + currentMinute;
+        let currentTimeInMinutes: number;
+        if (precalculatedTime) {
+          currentTimeInMinutes = precalculatedTime.currentTimeInMinutes;
+        } else {
+          const cached = timeMinutesCache.get(timezone);
+          if (cached && now - cached.timestamp < 10000) {
+            currentTimeInMinutes = cached.minutes;
+          } else {
+            const localTime = getFormatter(timezone).format(new Date(now));
+            let [currentHour, currentMinute] = localTime.split(':').map(Number);
+            if (currentHour === 24) currentHour = 0;
+            currentTimeInMinutes = currentHour * 60 + currentMinute;
+            timeMinutesCache.set(timezone, { minutes: currentTimeInMinutes, timestamp: now });
+          }
+        }
 
         inOnlineTimeframe = onlineTimes.some((window: string) => {
           const parts = window.split('-');
@@ -294,7 +307,7 @@ function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserI
   return randomValue < chance;
 }
 
-function isUserOnline(user: any, timezone: string, recentDmUserIds?: Set<number>) {
+function isUserOnline(user: any, timezone: string, recentDmUserIds?: Set<number>, precalculatedTime?: { currentTimeInMinutes: number }) {
   // Determine the correct user ID based on the object structure
   let userId = user.id;
   if (user.ai_user_id) userId = user.ai_user_id; // From unrepliedMentions
@@ -308,7 +321,7 @@ function isUserOnline(user: any, timezone: string, recentDmUserIds?: Set<number>
     if (!dbUser) return true;
   }
 
-  const isOnline = getDeterministicOnlineStatus(dbUser, timezone, recentDmUserIds);
+  const isOnline = getDeterministicOnlineStatus(dbUser, timezone, recentDmUserIds, precalculatedTime);
   
   // Update the object in memory so subsequent checks in the same loop are consistent
   user.current_online_status = isOnline ? 1 : 0;
@@ -1012,7 +1025,14 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
         WHERE u.is_ai = 0 AND dm.created_at >= ?
       `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
 
-      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC', recentDmUserIds));
+      const now = Date.now();
+      const timezone = settings.timezone || 'UTC';
+      const localTime = getFormatter(timezone).format(new Date(now));
+      let [currentHour, currentMinute] = localTime.split(':').map(Number);
+      if (currentHour === 24) currentHour = 0;
+      const precalculatedTime = { currentTimeInMinutes: currentHour * 60 + currentMinute };
+
+      const onlineUsers = allUsers.filter(u => isUserOnline(u, timezone, recentDmUserIds, precalculatedTime));
       const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
       const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1);
       const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
@@ -1175,13 +1195,42 @@ async function startServer() {
     scheduleNextFauxNewsPost(newUser, 'UTC');
   }
 
+  const userCache = new Map<string, { user: any, timestamp: number }>();
+  const USER_CACHE_TTL = 5000; // 5 seconds
+
   const getRealUser = (req: any) => {
+    if (req.user) return req.user;
+    
     const userId = req.headers['x-user-id'];
-    if (userId) {
-      return db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
+    const cacheKey = userId || 'default';
+    const cached = userCache.get(cacheKey);
+    
+    if (cached && (Date.now() - cached.timestamp < USER_CACHE_TTL)) {
+      req.user = cached.user;
+      return cached.user;
     }
-    return db.prepare("SELECT * FROM users WHERE is_ai = 0 ORDER BY id ASC LIMIT 1").get() as any;
+
+    let user;
+    if (userId) {
+      user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
+    } else {
+      user = db.prepare("SELECT * FROM users WHERE is_ai = 0 ORDER BY id ASC LIMIT 1").get() as any;
+    }
+    
+    userCache.set(cacheKey, { user, timestamp: Date.now() });
+    req.user = user;
+    return user;
   };
+
+  // Middleware to populate req.user
+  app.use((req: any, res, next) => {
+    try {
+      getRealUser(req);
+    } catch (e) {
+      // Ignore errors in middleware
+    }
+    next();
+  });
 
   // API Routes
   app.get("/api/logs", (req, res) => {
@@ -1420,9 +1469,10 @@ async function startServer() {
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
-      (SELECT COUNT(*) FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
+      l.id IS NOT NULL as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
+      LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = ?
       WHERE p.user_id = ? AND p.is_visible = 1
       ORDER BY p.created_at DESC
     `).all(userId, req.params.id);
@@ -1530,11 +1580,18 @@ async function startServer() {
         console.error("Error fetching recent DMs for online status:", dmErr);
       }
 
+      // Pre-calculate time for online status to avoid repeated expensive calls
+      const now = Date.now();
+      const localTime = getFormatter(timezone).format(new Date(now));
+      let [currentHour, currentMinute] = localTime.split(':').map(Number);
+      if (currentHour === 24) currentHour = 0;
+      const precalculatedTime = { currentTimeInMinutes: currentHour * 60 + currentMinute };
+
       users.forEach(u => {
         try {
-          const isOnline = getDeterministicOnlineStatus(u, timezone, recentDmUserIds);
+          const isOnline = getDeterministicOnlineStatus(u, timezone, recentDmUserIds, precalculatedTime);
           u.current_online_status = isOnline ? 1 : 0;
-          u.status_expires_at = Date.now() + (15 * 60 * 1000);
+          u.status_expires_at = now + (15 * 60 * 1000);
         } catch (uErr) {
           console.error(`Error calculating online status for user ${u.id}:`, uErr);
         }
@@ -2026,11 +2083,12 @@ async function startServer() {
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
-      (SELECT COUNT(*) FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
+      l.id IS NOT NULL as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
+      LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = ?
       WHERE p.is_visible = 1
-      AND (p.user_id = ? OR EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = p.user_id))
+      AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)
     `;
     const params: any[] = [userId, userId, userId];
 
@@ -2813,7 +2871,14 @@ async function startServer() {
         WHERE u.is_ai = 0 AND dm.created_at >= ?
       `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
 
-      const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC', recentDmUserIds));
+      const now = Date.now();
+      const timezone = settings.timezone || 'UTC';
+      const localTime = getFormatter(timezone).format(new Date(now));
+      let [currentHour, currentMinute] = localTime.split(':').map(Number);
+      if (currentHour === 24) currentHour = 0;
+      const precalculatedTime = { currentTimeInMinutes: currentHour * 60 + currentMinute };
+
+      const onlineUsers = allUsers.filter(u => isUserOnline(u, timezone, recentDmUserIds, precalculatedTime));
       const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
       const allAiUsers = allUsers.filter(u => u.is_ai === 1);

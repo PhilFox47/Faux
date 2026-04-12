@@ -278,8 +278,11 @@ export function initDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_posts_user_visible_created ON posts(user_id, is_visible, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_is_visible ON posts(is_visible);
+    CREATE INDEX IF NOT EXISTS idx_posts_visible_created ON posts(is_visible, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_posts_visible_type_created ON posts(is_visible, post_type, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id_created_at ON comments(post_id, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id);
@@ -296,6 +299,7 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_direct_messages_created_at ON direct_messages(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_follows_followed_id ON follows(followed_id);
     CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows(follower_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_follower_followed ON follows(follower_id, followed_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user_id_created_at ON notifications(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
@@ -308,6 +312,7 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_users_is_ai_is_active ON users(is_ai, is_active);
     CREATE INDEX IF NOT EXISTS idx_users_is_ai ON users(is_ai);
     CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_users_is_ai_created ON users(is_ai, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver ON direct_messages(sender_id, receiver_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender ON direct_messages(receiver_id, sender_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver_id ON direct_messages(sender_id, receiver_id, id DESC);
