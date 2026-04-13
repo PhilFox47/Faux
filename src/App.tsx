@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp, Brain } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -9,6 +9,147 @@ import { FauxPast } from './components/FauxPast';
 const getAvatarShape = (accountType?: string) => {
   return accountType === 'company' || accountType === 'news' || accountType === 'faux_news' ? 'rounded-xl' : 'rounded-full';
 };
+
+const CharacterSidebarItem = React.memo(({ 
+  u, 
+  handleViewProfile, 
+  isUserOnline, 
+  handleFollow, 
+  activeChat, 
+  isGroupChat, 
+  setActiveTab, 
+  setActiveChat, 
+  fetchChatMessages, 
+  handleEditProfile 
+}: any) => {
+  return (
+    <div className={`flex items-center gap-3 group ${!u.is_active ? 'opacity-50 grayscale' : ''}`}>
+      <div 
+        onClick={() => handleViewProfile(u.id)}
+        className="relative w-10 h-10 flex-shrink-0 cursor-pointer"
+      >
+        <div className={`w-full h-full bg-gray-700 ${getAvatarShape(u.account_type)} flex items-center justify-center overflow-hidden`}>
+          {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
+        </div>
+        {u.is_ai === 1 && (
+          <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-900 ${isUserOnline(u) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(u) ? 'Online' : 'Offline'}></div>
+        )}
+      </div>
+      <div 
+        onClick={() => handleViewProfile(u.id)}
+        className="flex-1 overflow-hidden cursor-pointer"
+      >
+        <p className="font-bold truncate text-sm group-hover:underline">{u.display_name}</p>
+        <p className="text-gray-500 text-xs truncate">@{u.username}</p>
+      </div>
+      <div className="flex flex-col gap-1 flex-shrink-0">
+        <button 
+          onClick={() => handleFollow(u.id)}
+          className={`text-xs font-bold px-3 py-1 rounded-full transition ${u.is_followed ? 'bg-gray-800 text-white hover:bg-red-900/50 hover:text-red-500' : 'bg-white text-black hover:bg-gray-200'}`}
+        >
+          {u.is_followed ? 'Following' : 'Follow'}
+        </button>
+        <div className="flex gap-1">
+          <button 
+            onClick={() => { const isAlreadyOpen = activeChat?.id === u.id && !isGroupChat; setActiveTab('messages'); setActiveChat({ id: u.id, name: u.display_name, avatar_url: u.avatar_url, account_type: u.account_type }); fetchChatMessages(u.id, false, undefined, isAlreadyOpen); }}
+            className="flex-1 bg-transparent text-gray-400 hover:text-white text-xs font-bold px-2 py-1 rounded-full transition"
+          >
+            Chat
+          </button>
+          <button 
+            onClick={() => handleEditProfile(u)}
+            className="flex-1 bg-transparent text-gray-400 hover:text-white text-xs font-bold px-2 py-1 rounded-full transition"
+          >
+            Edit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const CharacterSidebar = React.memo(({ 
+  apiFetch, 
+  handleViewProfile, 
+  isUserOnline, 
+  handleFollow, 
+  activeChat, 
+  isGroupChat, 
+  setActiveTab, 
+  setActiveChat, 
+  fetchChatMessages, 
+  handleEditProfile,
+  exploreUsers,
+  exploreOffset,
+  hasMoreExplore,
+  isFetchingExplore,
+  fetchExploreUsers,
+  characterSearch,
+  setCharacterSearch
+}: any) => {
+  const [localSearch, setLocalSearch] = useState(characterSearch);
+
+  useEffect(() => {
+    setLocalSearch(characterSearch);
+  }, [characterSearch]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localSearch !== characterSearch) {
+        setCharacterSearch(localSearch);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [localSearch, characterSearch, setCharacterSearch]);
+
+  return (
+    <div className="w-80 p-4 hidden lg:flex sticky top-0 h-screen flex-col border-l border-gray-800">
+      <div className="bg-gray-900 rounded-2xl p-4 flex-1 flex flex-col overflow-hidden min-h-0">
+        <h2 className="font-bold text-xl mb-4">Characters</h2>
+        <div className="mb-4">
+          <input 
+            type="text" 
+            placeholder="Search characters..." 
+            value={localSearch}
+            onChange={e => setLocalSearch(e.target.value)}
+            className="w-full bg-gray-800 text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
+          />
+        </div>
+        <div className="space-y-4 overflow-y-auto flex-1 pr-2 min-h-0">
+          {exploreUsers.map((u: any) => (
+            <CharacterSidebarItem 
+              key={u.id} 
+              u={u} 
+              handleViewProfile={handleViewProfile}
+              isUserOnline={isUserOnline}
+              handleFollow={handleFollow}
+              activeChat={activeChat}
+              isGroupChat={isGroupChat}
+              setActiveTab={setActiveTab}
+              setActiveChat={setActiveChat}
+              fetchChatMessages={fetchChatMessages}
+              handleEditProfile={handleEditProfile}
+            />
+          ))}
+          {exploreUsers.length === 0 && !isFetchingExplore && (
+            <p className="text-gray-500 text-sm text-center py-4">No characters found.</p>
+          )}
+          {hasMoreExplore && (
+            <div className="flex justify-center py-4">
+              <button 
+                onClick={() => fetchExploreUsers(exploreOffset + 20, true, characterSearch)}
+                disabled={isFetchingExplore}
+                className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-xs font-bold py-2 px-4 rounded-full transition"
+              >
+                {isFetchingExplore ? 'Loading...' : 'Load More'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 const estimateLines = (text: string) => {
   const lines = text.split('\n');
@@ -225,6 +366,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [posts, setPosts] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [currentTick, setCurrentTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTick(t => t + 1), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   const [exploreUsers, setExploreUsers] = useState<any[]>([]);
   const [exploreOffset, setExploreOffset] = useState(0);
   const [hasMoreExplore, setHasMoreExplore] = useState(true);
@@ -342,6 +489,7 @@ export default function App() {
   const [probMessage, setProbMessage] = useState(5);
   const [probFavoriteDm, setProbFavoriteDm] = useState(50);
   const [crossUniverseProb, setCrossUniverseProb] = useState(50);
+  const [showInternalThoughts, setShowInternalThoughts] = useState(false);
   const [archetypes, setArchetypes] = useState<any[]>([]);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean, message?: string, error?: string} | null>(null);
@@ -580,7 +728,7 @@ export default function App() {
     hour12: false
   }), [timezone]);
 
-  const isUserOnline = useCallback((user: any) => {
+  const isUserOnline = useCallback((user: any, precalculatedTime?: number) => {
     if (!user || user.is_ai === 0) return true;
     
     // Use backend-calculated status if available and not expired
@@ -604,12 +752,14 @@ export default function App() {
     
     if (onlineTimes.length === 0) return true;
     
-    const now = new Date();
-    const userTime = timeFormatter.format(now);
-    
-    let [currentHour, currentMinute] = userTime.split(':').map(Number);
-    if (currentHour === 24) currentHour = 0;
-    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+    let currentTimeInMinutes = precalculatedTime;
+    if (currentTimeInMinutes === undefined) {
+      const now = new Date();
+      const userTime = timeFormatter.format(now);
+      let [currentHour, currentMinute] = userTime.split(':').map(Number);
+      if (currentHour === 24) currentHour = 0;
+      currentTimeInMinutes = currentHour * 60 + currentMinute;
+    }
 
     return onlineTimes.some((window: string) => {
       const parts = window.split('-');
@@ -629,6 +779,41 @@ export default function App() {
       }
     });
   }, [timeFormatter]);
+
+  const universeCounts = useMemo(() => {
+    const counts: Record<number | string, number> = {};
+    users.forEach(u => {
+      const key = u.universe_id || 'none';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }, [users]);
+
+  const universeCharactersMap = useMemo(() => {
+    const map: Record<number | string, any[]> = {};
+    users.forEach(u => {
+      const key = u.universe_id || 'none';
+      if (!map[key]) map[key] = [];
+      map[key].push(u);
+    });
+    return map;
+  }, [users]);
+
+  const currentTimeInMinutes = useMemo(() => {
+    const now = new Date();
+    const userTime = timeFormatter.format(now);
+    let [currentHour, currentMinute] = userTime.split(':').map(Number);
+    if (currentHour === 24) currentHour = 0;
+    return currentHour * 60 + currentMinute;
+  }, [timeFormatter, currentTick]);
+
+  const onlineAiCount = useMemo(() => {
+    return users.filter(u => u.is_ai === 1 && isUserOnline(u, currentTimeInMinutes)).length;
+  }, [users, isUserOnline, currentTimeInMinutes]);
+
+  const followedUsers = useMemo(() => {
+    return users.filter(u => u.is_followed);
+  }, [users]);
 
   const ONLINE_TIME_WINDOWS = [
     { label: '04:00 - 07:00', value: '04:00-07:00' },
@@ -1106,6 +1291,7 @@ export default function App() {
         if (data.prob_message !== undefined) setProbMessage(data.prob_message);
         if (data.prob_favorite_dm !== undefined) setProbFavoriteDm(data.prob_favorite_dm);
         if (data.cross_universe_prob !== undefined) setCrossUniverseProb(data.cross_universe_prob);
+        if (data.show_internal_thoughts !== undefined) setShowInternalThoughts(data.show_internal_thoughts === 1);
       }
     });
   }, [apiFetch]);
@@ -1154,6 +1340,7 @@ export default function App() {
     if (newSettings.prob_message !== undefined) setProbMessage(newSettings.prob_message);
     if (newSettings.prob_favorite_dm !== undefined) setProbFavoriteDm(newSettings.prob_favorite_dm);
     if (newSettings.cross_universe_prob !== undefined) setCrossUniverseProb(newSettings.cross_universe_prob);
+    if (newSettings.show_internal_thoughts !== undefined) setShowInternalThoughts(newSettings.show_internal_thoughts === 1);
     await apiFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2007,10 +2194,7 @@ export default function App() {
   }, [timestampFormatter]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchExploreUsers(0, false, characterSearch);
-    }, 300);
-    return () => clearTimeout(timer);
+    fetchExploreUsers(0, false, characterSearch);
   }, [characterSearch, fetchExploreUsers]);
   const [visiblePosts, setVisiblePosts] = useState(30);
   const [fauxPicsPosts, setFauxPicsPosts] = useState<any[]>([]);
@@ -2419,7 +2603,7 @@ export default function App() {
             <div className="flex flex-col gap-2 mt-8">
               <div className="hidden xl:flex items-center gap-2 p-3 text-sm text-gray-400">
                 <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
-                <span>{users.filter(u => u.is_ai === 1 && isUserOnline(u)).length} AI Online</span>
+                <span>{onlineAiCount} AI Online</span>
               </div>
               <div 
                 onClick={() => handleEditProfile(loggedInUser)}
@@ -3095,7 +3279,21 @@ export default function App() {
                                     </div>
                                   </div>
                                 ) : (
-                                  (msg.content || '').trim()
+                                  <>
+                                    {(msg.content || '').trim()}
+                                    {msg.internal_thought && (
+                                      <div className={`mt-2 p-2 rounded-lg text-xs italic relative overflow-hidden group ${isMe ? 'bg-orange-600/50 border-l-2 border-white/50 text-white/90' : 'bg-gray-700/50 border-l-2 border-orange-500 text-gray-300'}`}>
+                                        <div className="absolute -right-2 -top-2 opacity-5">
+                                          <Brain size={32} />
+                                        </div>
+                                        <div className={`flex items-center gap-1 mb-1 font-bold text-[10px] uppercase tracking-wider ${isMe ? 'text-white/70' : 'text-orange-400/80'}`}>
+                                          <Brain size={10} />
+                                          <span>Thought</span>
+                                        </div>
+                                        {msg.internal_thought}
+                                      </div>
+                                    )}
+                                  </>
                                 )}
                               </div>
                               <div className={`flex gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? 'justify-end' : 'justify-start'}`}>
@@ -3160,12 +3358,12 @@ export default function App() {
                     </div>
                     <div>
                       <h3 className="font-bold text-lg">None</h3>
-                      <p className="text-sm text-gray-400">{users.filter(u => !u.universe_id).length} characters</p>
+                      <p className="text-sm text-gray-400">{universeCounts['none'] || 0} characters</p>
                     </div>
                   </div>
                   <p className="text-sm text-gray-300 line-clamp-2 mb-4 flex-1">Characters without an assigned universe.</p>
                   <div className="flex -space-x-2 overflow-hidden mt-auto pt-2">
-                    {users.filter(char => !char.universe_id).slice(0, 7).map(char => (
+                    {(universeCharactersMap['none'] || []).slice(0, 7).map(char => (
                       <div key={char.id} className={`relative inline-block ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                         <img 
                           src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
@@ -3173,14 +3371,14 @@ export default function App() {
                           className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-gray-900 object-cover bg-gray-800`} 
                           referrerPolicy="no-referrer" 
                         />
-                        {char.is_active && isUserOnline(char) && (
+                        {char.is_active && isUserOnline(char, currentTimeInMinutes) && (
                           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-gray-900 rounded-full"></div>
                         )}
                       </div>
                     ))}
-                    {users.filter(char => !char.universe_id).length > 7 && (
+                    {(universeCharactersMap['none'] || []).length > 7 && (
                       <div className="w-8 h-8 rounded-full border-2 border-gray-900 bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-400 z-10 relative">
-                        +{users.filter(char => !char.universe_id).length - 7}
+                        +{(universeCharactersMap['none'] || []).length - 7}
                       </div>
                     )}
                   </div>
@@ -3197,7 +3395,7 @@ export default function App() {
                       </div>
                       <div>
                         <h3 className="font-bold text-lg">{u.name}</h3>
-                        <p className="text-sm text-gray-400">{u.character_count || 0} characters</p>
+                        <p className="text-sm text-gray-400">{universeCounts[u.id] || 0} characters</p>
                       </div>
                     </div>
                     {u.description && (
@@ -3205,7 +3403,7 @@ export default function App() {
                     )}
                     {!u.description && <div className="flex-1"></div>}
                     <div className="flex -space-x-2 overflow-hidden mt-auto pt-2">
-                      {users.filter(char => char.universe_id === u.id).slice(0, 7).map(char => (
+                      {(universeCharactersMap[u.id] || []).slice(0, 7).map(char => (
                         <div key={char.id} className={`relative inline-block ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                           <img 
                             src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
@@ -3213,14 +3411,14 @@ export default function App() {
                             className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-gray-900 object-cover bg-gray-800`} 
                             referrerPolicy="no-referrer" 
                           />
-                          {char.is_active && isUserOnline(char) && (
+                          {char.is_active && isUserOnline(char, currentTimeInMinutes) && (
                             <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-gray-900 rounded-full"></div>
                           )}
                         </div>
                       ))}
-                      {users.filter(char => char.universe_id === u.id).length > 7 && (
+                      {(universeCharactersMap[u.id] || []).length > 7 && (
                         <div className="w-8 h-8 rounded-full border-2 border-gray-900 bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-400 z-10 relative">
-                          +{users.filter(char => char.universe_id === u.id).length - 7}
+                          +{(universeCharactersMap[u.id] || []).length - 7}
                         </div>
                       )}
                     </div>
@@ -3467,12 +3665,12 @@ export default function App() {
                 Manage the characters you are currently following.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {users.filter(u => u.is_followed).map(char => (
+                {followedUsers.map(char => (
                   <div key={char.id} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-3 hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                     <div className="flex items-center gap-3 cursor-pointer overflow-hidden flex-1" onClick={() => handleViewProfile(char.id)}>
                       <div className="relative flex-shrink-0">
                         <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className={`w-12 h-12 ${getAvatarShape(char.account_type)} object-cover`} referrerPolicy="no-referrer" />
-                        {char.is_active && isUserOnline(char) && (
+                        {char.is_active && isUserOnline(char, currentTimeInMinutes) && (
                           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
                         )}
                       </div>
@@ -3493,7 +3691,7 @@ export default function App() {
                     </button>
                   </div>
                 ))}
-                {users.filter(u => u.is_followed).length === 0 && (
+                {followedUsers.length === 0 && (
                   <div className="col-span-full text-center py-12 text-gray-500">
                     <UserCheck size={48} className="mx-auto mb-4 opacity-20" />
                     <p>You are not following any characters yet.</p>
@@ -3929,6 +4127,18 @@ export default function App() {
                             onChange={e => handleUpdateSettings({ cross_universe_prob: parseInt(e.target.value) })}
                             className="w-full accent-orange-500" 
                           />
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-gray-900 rounded-lg border border-gray-800">
+                          <div>
+                            <p className="font-bold text-sm">Show Internal Thoughts</p>
+                            <p className="text-xs text-gray-500">Reveal the private thoughts of AI characters on their posts and messages.</p>
+                          </div>
+                          <button 
+                            onClick={() => handleUpdateSettings({ show_internal_thoughts: showInternalThoughts ? 0 : 1 })}
+                            className={`w-12 h-6 rounded-full transition-colors relative ${showInternalThoughts ? 'bg-orange-500' : 'bg-gray-700'}`}
+                          >
+                            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${showInternalThoughts ? 'left-7' : 'left-1'}`} />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -4472,83 +4682,25 @@ export default function App() {
         </div>
 
         {/* Right Sidebar */}
-        <div className="w-80 p-4 hidden lg:flex sticky top-0 h-screen flex-col border-l border-gray-800">
-          <div className="bg-gray-900 rounded-2xl p-4 flex-1 flex flex-col overflow-hidden min-h-0">
-            <h2 className="font-bold text-xl mb-4">Characters</h2>
-            <div className="mb-4">
-              <input 
-                type="text" 
-                placeholder="Search characters..." 
-                value={characterSearch}
-                onChange={e => {
-                  setCharacterSearch(e.target.value);
-                }}
-                className="w-full bg-gray-800 text-white px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-            <div className="space-y-4 overflow-y-auto flex-1 pr-2 min-h-0">
-              {exploreUsers
-                .map(u => (
-                <div key={u.id} className={`flex items-center gap-3 group ${!u.is_active ? 'opacity-50 grayscale' : ''}`}>
-                  <div 
-                    onClick={() => handleViewProfile(u.id)}
-                    className="relative w-10 h-10 flex-shrink-0 cursor-pointer"
-                  >
-                    <div className={`w-full h-full bg-gray-700 ${getAvatarShape(u.account_type)} flex items-center justify-center overflow-hidden`}>
-                      {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
-                    </div>
-                    {u.is_ai === 1 && (
-                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-900 ${isUserOnline(u) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(u) ? 'Online' : 'Offline'}></div>
-                    )}
-                  </div>
-                  <div 
-                    onClick={() => handleViewProfile(u.id)}
-                    className="flex-1 overflow-hidden cursor-pointer"
-                  >
-                    <p className="font-bold truncate text-sm group-hover:underline">{u.display_name}</p>
-                    <p className="text-gray-500 text-xs truncate">@{u.username}</p>
-                  </div>
-                  <div className="flex flex-col gap-1 flex-shrink-0">
-                    <button 
-                      onClick={() => handleFollow(u.id)}
-                      className={`text-xs font-bold px-3 py-1 rounded-full transition ${u.is_followed ? 'bg-gray-800 text-white hover:bg-red-900/50 hover:text-red-500' : 'bg-white text-black hover:bg-gray-200'}`}
-                    >
-                      {u.is_followed ? 'Following' : 'Follow'}
-                    </button>
-                    <div className="flex gap-1">
-                      <button 
-                        onClick={() => { const isAlreadyOpen = activeChat?.id === u.id && !isGroupChat; setActiveTab('messages'); setActiveChat({ id: u.id, name: u.display_name, avatar_url: u.avatar_url, account_type: u.account_type }); fetchChatMessages(u.id, false, undefined, isAlreadyOpen); }}
-                        className="flex-1 bg-transparent text-gray-400 hover:text-white text-xs font-bold px-2 py-1 rounded-full transition"
-                      >
-                        Chat
-                      </button>
-                      <button 
-                        onClick={() => handleEditProfile(u)}
-                        className="flex-1 bg-transparent text-gray-400 hover:text-white text-xs font-bold px-2 py-1 rounded-full transition"
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {exploreUsers.length === 0 && (
-                <p className="text-gray-500 text-sm text-center py-4">No characters found.</p>
-              )}
-              {hasMoreExplore && (
-                <div className="flex justify-center py-4">
-                  <button 
-                    onClick={() => fetchExploreUsers(exploreOffset + 20, true, characterSearch)}
-                    disabled={isFetchingExplore}
-                    className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-xs font-bold py-2 px-4 rounded-full transition"
-                  >
-                    {isFetchingExplore ? 'Loading...' : 'Load More'}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <CharacterSidebar 
+          apiFetch={apiFetch}
+          handleViewProfile={handleViewProfile}
+          isUserOnline={isUserOnline}
+          handleFollow={handleFollow}
+          activeChat={activeChat}
+          isGroupChat={isGroupChat}
+          setActiveTab={setActiveTab}
+          setActiveChat={setActiveChat}
+          fetchChatMessages={fetchChatMessages}
+          handleEditProfile={handleEditProfile}
+          exploreUsers={exploreUsers}
+          exploreOffset={exploreOffset}
+          hasMoreExplore={hasMoreExplore}
+          isFetchingExplore={isFetchingExplore}
+          fetchExploreUsers={fetchExploreUsers}
+          characterSearch={characterSearch}
+          setCharacterSearch={setCharacterSearch}
+        />
 
         {/* Viewing Post Modal */}
         {viewingPostData && (
@@ -5733,6 +5885,19 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
               </p>
             </div>
           )}
+
+          {post.internal_thought && (
+            <div className="mt-3 p-3 bg-gray-900/80 border-l-4 border-orange-500 rounded-r-lg text-sm italic text-gray-300 relative overflow-hidden group">
+              <div className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                <Brain size={64} />
+              </div>
+              <div className="flex items-center gap-2 mb-1 text-orange-400 font-bold text-xs uppercase tracking-wider">
+                <Brain size={14} />
+                <span>Internal Monologue</span>
+              </div>
+              {post.internal_thought}
+            </div>
+          )}
           {post.image_url && (
             <>
               <div 
@@ -5944,6 +6109,18 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
               </div>
             ) : (
               <p className="text-sm whitespace-pre-wrap">{renderContentWithTags(comment.content, users, onViewProfile)}</p>
+            )}
+            {comment.internal_thought && (
+              <div className="mt-2 p-2 bg-gray-800/50 border-l-2 border-orange-500 rounded-r-lg text-xs italic text-gray-400 relative overflow-hidden group">
+                <div className="absolute -right-2 -top-2 opacity-5">
+                  <Brain size={32} />
+                </div>
+                <div className="flex items-center gap-1 mb-1 text-orange-400/80 font-bold text-[10px] uppercase tracking-wider">
+                  <Brain size={10} />
+                  <span>Thought</span>
+                </div>
+                {comment.internal_thought}
+              </div>
             )}
           </div>
           <div className="flex gap-6 mt-1 ml-2 text-gray-500">

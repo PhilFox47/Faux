@@ -597,10 +597,10 @@ async function triggerPostComments(postId: number, postType: string, isForced: b
     const relContext = rel ? rel.description : '';
 
     try {
-      const commentContent = await generateComment(randomAi, post.content, post.author_name, otherComments, false, relContext, post.user_id, post.image_prompt, post.created_at);
-      if (commentContent) {
-        const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
-          .run(postId, randomAi.id, commentContent);
+      const commentData = await generateComment(randomAi, post.content, post.author_name, otherComments, false, relContext, post.user_id, post.image_prompt, post.created_at);
+      if (commentData) {
+        const info = db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+          .run(postId, randomAi.id, commentData.content, commentData.internal_thought);
         checkDynamicRelationship(randomAi.id, post.user_id).catch(console.error);
         console.log(`${randomAi.display_name} auto-commented on post ${postId}`);
 
@@ -722,10 +722,10 @@ async function handleOPReplies() {
       const threadContext = buildThreadContext(comment.id);
 
       try {
-        const replyContent = await generateComment(opUser, comment.content, comment.author_name, threadContext, true, relContext, comment.user_id, undefined, comment.created_at);
-        if (replyContent) {
-          const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
-            .run(comment.post_id, opUser.id, replyContent, comment.id);
+        const commentData = await generateComment(opUser, comment.content, comment.author_name, threadContext, true, relContext, comment.user_id, undefined, comment.created_at);
+        if (commentData) {
+          const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id, internal_thought) VALUES (?, ?, ?, ?, ?)")
+            .run(comment.post_id, opUser.id, commentData.content, comment.id, commentData.internal_thought);
           checkDynamicRelationship(opUser.id, comment.user_id).catch(console.error);
           console.log(`OP ${opUser.display_name} replied to comment ${comment.id}`);
 
@@ -798,7 +798,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       }
 
       if (newsContent) {
-        const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(aiUser.id, newsContent);
+        const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)").run(aiUser.id, newsContent.content, newsContent.internal_thought);
         const postId = info.lastInsertRowid as number;
         triggerPostComments(postId, 'news', forceType !== null);
         return true;
@@ -998,21 +998,27 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   let negativePrompt = "";
   let characterVisible = false;
   
+  let internalThought = "";
   if (archetype.id === 'image_post') {
     const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
     if (imageData) {
       postContent = imageData.textPost;
+      internalThought = imageData.internal_thought || "";
       positivePrompt = imageData.positivePrompt;
       negativePrompt = imageData.negativePrompt;
       characterVisible = imageData.characterVisible;
     }
   } else {
-    postContent = (await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost, activeArc, pastArcs, arcInstruction, arcComments, activeUniverseArc, pastUniverseArcs, recentNewsPosts)) || "";
+    const postData = await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost, activeArc, pastArcs, arcInstruction, arcComments, activeUniverseArc, pastUniverseArcs, recentNewsPosts);
+    if (postData) {
+      postContent = postData.content;
+      internalThought = postData.internal_thought || "";
+    }
   }
 
   if (postContent) {
     const isVisible = archetype.id === 'image_post' ? 0 : 1;
-    const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible) VALUES (?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible);
+    const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, internal_thought) VALUES (?, ?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible, internalThought);
     const postId = info.lastInsertRowid as number;
     console.log(`${aiUser.display_name} created a post (${archetype.id})`);
 
@@ -1092,10 +1098,10 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
               const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(otherAi.id, aiUser.id) as any;
               const relContext = rel ? rel.description : '';
               const post = db.prepare("SELECT created_at FROM posts WHERE id = ?").get(postId) as any;
-              const commentContent = await generateComment(otherAi, postContent, aiUser.display_name, '', false, relContext, aiUser.id, undefined, post?.created_at);
-              if (commentContent) {
-                db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
-                  .run(postId, otherAi.id, commentContent);
+              const commentData = await generateComment(otherAi, postContent, aiUser.display_name, '', false, relContext, aiUser.id, undefined, post?.created_at);
+              if (commentData) {
+                db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                  .run(postId, otherAi.id, commentData.content, commentData.internal_thought);
                 checkDynamicRelationship(otherAi.id, aiUser.id).catch(console.error);
                 console.log(`${otherAi.display_name} reacted to ${archetype.id} by ${aiUser.display_name}`);
               }
@@ -1363,6 +1369,11 @@ async function startServer() {
     res.json(settings);
   });
 
+  function shouldShowInternalThoughts() {
+    const settings = db.prepare("SELECT show_internal_thoughts FROM settings WHERE id = 1").get() as any;
+    return settings?.show_internal_thoughts === 1;
+  }
+
   app.get("/api/archetypes", (req, res) => {
     const archetypes = db.prepare("SELECT * FROM post_archetypes").all();
     res.json(archetypes);
@@ -1385,7 +1396,7 @@ async function startServer() {
   });
 
   app.post("/api/settings", (req, res) => {
-    const { ai_enabled, model_name, image_model_name, vision_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob } = req.body;
+    const { ai_enabled, model_name, image_model_name, vision_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob, show_internal_thoughts } = req.body;
     if (ai_enabled !== undefined) {
       db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(ai_enabled ? 1 : 0);
     }
@@ -1421,6 +1432,9 @@ async function startServer() {
     }
     if (cross_universe_prob !== undefined) {
       db.prepare("UPDATE settings SET cross_universe_prob = ? WHERE id = 1").run(cross_universe_prob);
+    }
+    if (show_internal_thoughts !== undefined) {
+      db.prepare("UPDATE settings SET show_internal_thoughts = ? WHERE id = 1").run(show_internal_thoughts);
     }
     res.json({ success: true });
   });
@@ -1504,7 +1518,12 @@ async function startServer() {
       LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = ?
       WHERE p.user_id = ? AND p.is_visible = 1
       ORDER BY p.created_at DESC
-    `).all(userId, req.params.id);
+    `).all(userId, req.params.id) as any[];
+    
+    const showThoughts = shouldShowInternalThoughts();
+    if (!showThoughts) {
+      posts.forEach(p => delete p.internal_thought);
+    }
     res.json(posts);
   });
 
@@ -2129,7 +2148,11 @@ async function startServer() {
     query += ` ORDER BY p.created_at DESC LIMIT ?`;
     params.push(limit);
 
-    const posts = db.prepare(query).all(...params);
+    const posts = db.prepare(query).all(...params) as any[];
+    const showThoughts = shouldShowInternalThoughts();
+    if (!showThoughts) {
+      posts.forEach(p => delete p.internal_thought);
+    }
     res.json(posts);
   });
 
@@ -2202,7 +2225,12 @@ async function startServer() {
       WHERE c.post_id = ?
       GROUP BY c.id
       ORDER BY c.created_at ASC
-    `).all(userId, req.params.id);
+    `).all(userId, req.params.id) as any[];
+
+    const showThoughts = shouldShowInternalThoughts();
+    if (!showThoughts) {
+      comments.forEach(c => delete c.internal_thought);
+    }
     res.json(comments);
   });
 
@@ -2259,8 +2287,12 @@ async function startServer() {
       FROM posts p
       JOIN users u ON p.user_id = u.id
       WHERE p.id = ? AND p.is_visible = 1
-    `).get(user?.id || 0, req.params.id);
+    `).get(user?.id || 0, req.params.id) as any;
     if (post) {
+      const showThoughts = shouldShowInternalThoughts();
+      if (!showThoughts) {
+        delete post.internal_thought;
+      }
       res.json(post);
     } else {
       res.status(404).json({ error: "Post not found" });
@@ -2435,7 +2467,11 @@ async function startServer() {
     query += ` ORDER BY m.id DESC LIMIT ?`;
     params.push(limit);
 
-    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params);
+    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params) as any[];
+    const showThoughts = shouldShowInternalThoughts();
+    if (!showThoughts) {
+      messages.forEach(m => delete m.internal_thought);
+    }
     res.json(messages);
   });
 
@@ -2532,15 +2568,15 @@ async function startServer() {
               WHERE gcm.group_chat_id = ? AND u.id != ?
             `).all(groupId, aiUser.id) as any[];
 
-            const reply = await generateGroupChatReply(aiUser, group.name, formattedHistory, otherMembers);
-            if (reply) {
-              db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-                .run(groupId, aiUser.id, reply);
+            const replyData = await generateGroupChatReply(aiUser, group.name, formattedHistory, otherMembers);
+            if (replyData) {
+              db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                .run(groupId, aiUser.id, replyData.content, replyData.internal_thought);
               
               // Add this reply to history for the next AI
               formattedHistory.push({
                 role: 'assistant',
-                content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${reply}`
+                content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${replyData.content}`
               });
             }
           } finally {
@@ -2639,8 +2675,13 @@ async function startServer() {
     query += ` ORDER BY id DESC LIMIT ?`;
     params.push(limit);
 
-    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params);
+    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params) as any[];
     
+    const showThoughts = shouldShowInternalThoughts();
+    if (!showThoughts) {
+      messages.forEach(m => delete m.internal_thought);
+    }
+
     // Mark as read
     db.prepare("UPDATE direct_messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0")
       .run(req.params.userId, user.id);
@@ -2763,7 +2804,7 @@ async function startServer() {
 
               const replyData = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id, false, allowImageGen);
               if (replyData) {
-                const { content: replyContent, imagePrompt } = replyData;
+                const { content: replyContent, internal_thought, imagePrompt } = replyData;
                 
                 let imageUrl: string | null = null;
                 let finalImagePrompt = imagePrompt;
@@ -2785,8 +2826,8 @@ async function startServer() {
                   imageUrl = await generateImage(finalImagePrompt, negativePrompt, refImages.length > 0 ? refImages : undefined) || null;
                 }
 
-                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt) VALUES (?, ?, ?, ?, ?)")
-                  .run(receiverId, user.id, replyContent.trim(), imageUrl, finalImagePrompt || null);
+                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt, internal_thought) VALUES (?, ?, ?, ?, ?, ?)")
+                  .run(receiverId, user.id, replyContent.trim(), imageUrl, finalImagePrompt || null, internal_thought);
 
                 checkDynamicRelationship(receiver.id, user.id).catch(console.error);
               }
@@ -2976,9 +3017,9 @@ async function startServer() {
                 ORDER BY created_at DESC LIMIT 10
               `).all(newsAccount.id).reverse() as any[];
 
-              const newsContent = await generateNewsPost(newsAccount, recentPosts, activeArc, otherNewsPosts, pastNewsPosts);
-              if (newsContent) {
-                const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(newsAccount.id, newsContent);
+              const newsData = await generateNewsPost(newsAccount, recentPosts, activeArc, otherNewsPosts, pastNewsPosts);
+              if (newsData) {
+                const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)").run(newsAccount.id, newsData.content, newsData.internal_thought);
                 const postId = info.lastInsertRowid as number;
                 triggerPostComments(postId, 'news');
                 console.log(`News Account ${newsAccount.display_name} posted their daily news.`);
@@ -3040,9 +3081,9 @@ async function startServer() {
               `).all(fnAccount.id).reverse() as any[];
 
               const localTimeStr = getFormatter(settings.timezone || 'UTC').format(new Date(nowMs));
-              const newsContent = await generateFauxNewsPost(fnAccount, newsPosts, pastNewsPosts, localTimeStr);
-              if (newsContent) {
-                const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(fnAccount.id, newsContent);
+              const newsData = await generateFauxNewsPost(fnAccount, newsPosts, pastNewsPosts, localTimeStr);
+              if (newsData) {
+                const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)").run(fnAccount.id, newsData.content, newsData.internal_thought);
                 const postId = info.lastInsertRowid as number;
                 triggerPostComments(postId, 'news');
                 console.log(`Faux News Account ${fnAccount.display_name} posted a platform-wide recap.`);
@@ -3208,10 +3249,10 @@ async function startServer() {
                           WHERE gcm.group_chat_id = ? AND u.id != ?
                         `).all(randomFav.target_id, randomAi.id) as any[];
                         
-                        const replyContent = await generateGroupChatReply(randomAi, groupChat.name, formattedHistory, otherMembers);
-                        if (replyContent) {
-                          db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-                            .run(randomFav.target_id, randomAi.id, replyContent.trim());
+                        const replyData = await generateGroupChatReply(randomAi, groupChat.name, formattedHistory, otherMembers);
+                        if (replyData) {
+                          db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                            .run(randomFav.target_id, randomAi.id, replyData.content.trim(), replyData.internal_thought);
                           console.log(`${randomAi.display_name} sent a message to group chat ${groupChat.name}`);
                         }
                       } finally {
@@ -3236,10 +3277,10 @@ async function startServer() {
                         
                         const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
 
-                        const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-                        if (dmContent) {
-                          db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                            .run(randomAi.id, realUser.id, dmContent.trim());
+                        const dmData = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                        if (dmData) {
+                          db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                            .run(randomAi.id, realUser.id, dmData.content.trim(), dmData.internal_thought);
                           checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
                           console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
                         }
@@ -3262,10 +3303,10 @@ async function startServer() {
                     
                     const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
 
-                    const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-                    if (dmContent) {
-                      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                        .run(randomAi.id, realUser.id, dmContent.trim());
+                    const dmData = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                    if (dmData) {
+                      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                        .run(randomAi.id, realUser.id, dmData.content.trim(), dmData.internal_thought);
                       checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
                       console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
                     }
@@ -3287,10 +3328,10 @@ async function startServer() {
                   
                   const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
 
-                  const dmContent = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-                  if (dmContent) {
-                    db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                      .run(randomAi.id, realUser.id, dmContent.trim());
+                  const dmData = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                  if (dmData) {
+                    db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                      .run(randomAi.id, realUser.id, dmData.content.trim(), dmData.internal_thought);
                     checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
                     console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
                   }
@@ -3338,12 +3379,12 @@ async function startServer() {
                 const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(realUser.id, aiUser.id) as any;
                 const allowImageGen = dmSettings ? dmSettings.allow_image_gen === 1 : false;
 
-                const reply = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true, allowImageGen);
-                if (reply && reply.content) {
+                const replyData = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true, allowImageGen);
+                if (replyData && replyData.content) {
                   let imageUrl: string | null = null;
-                  let finalImagePrompt = reply.imagePrompt;
-                  if (reply.imagePrompt && allowImageGen) {
-                    const enriched = await enrichDMImagePrompt(aiUser, reply.imagePrompt);
+                  let finalImagePrompt = replyData.imagePrompt;
+                  if (replyData.imagePrompt && allowImageGen) {
+                    const enriched = await enrichDMImagePrompt(aiUser, replyData.imagePrompt);
                     finalImagePrompt = enriched.prompt;
                     const negativePrompt = await generateNegativeImagePrompt(finalImagePrompt);
 
@@ -3360,8 +3401,8 @@ async function startServer() {
                     imageUrl = await generateImage(finalImagePrompt, negativePrompt, refImages.length > 0 ? refImages : undefined) || null;
                   }
 
-                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt) VALUES (?, ?, ?, ?, ?)")
-                    .run(aiUser.id, realUser.id, reply.content.trim(), imageUrl, finalImagePrompt || null);
+                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt, internal_thought) VALUES (?, ?, ?, ?, ?, ?)")
+                    .run(aiUser.id, realUser.id, replyData.content.trim(), imageUrl, finalImagePrompt || null, replyData.internal_thought);
                   checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
                   console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
                 }
@@ -3516,10 +3557,10 @@ async function startServer() {
                   WHERE gcm.group_chat_id = ? AND u.id != ?
                 `).all(group.id, selectedAi.id) as any[];
 
-                const reply = await generateGroupChatReply(selectedAi, group.name, formattedHistory, otherMembers);
-                if (reply) {
-                  db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-                    .run(group.id, selectedAi.id, reply);
+                const replyData = await generateGroupChatReply(selectedAi, group.name, formattedHistory, otherMembers);
+                if (replyData) {
+                  db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                    .run(group.id, selectedAi.id, replyData.content, replyData.internal_thought);
                   console.log(`${selectedAi.display_name} replied in group chat ${group.name}`);
                 }
               } finally {
@@ -3604,9 +3645,9 @@ async function startServer() {
                   `).all(randomAi.id, commentData.user_id) as any[];
                   const relStr = rels.length > 0 ? rels[0].description : '';
 
-                  const commentContent = await generateComment(randomAi, commentData.content, commentData.author_name, threadContext, true, relStr, commentData.user_id, undefined, commentData.created_at);
-                  if (commentContent) {
-                    const info = db.prepare("INSERT INTO comments (post_id, user_id, parent_id, content) VALUES (?, ?, ?, ?)").run(commentData.post_id, randomAi.id, commentData.id, commentContent);
+                  const newCommentData = await generateComment(randomAi, commentData.content, commentData.author_name, threadContext, true, relStr, commentData.user_id, undefined, commentData.created_at);
+                  if (newCommentData) {
+                    const info = db.prepare("INSERT INTO comments (post_id, user_id, parent_id, content, internal_thought) VALUES (?, ?, ?, ?, ?)").run(commentData.post_id, randomAi.id, commentData.id, newCommentData.content, newCommentData.internal_thought);
                     checkDynamicRelationship(randomAi.id, commentData.user_id).catch(console.error);
                     console.log(`${randomAi.display_name} replied to mention in comment ${commentData.id}`);
 
@@ -3650,9 +3691,10 @@ async function startServer() {
                   `).all(randomAi.id, postData.user_id) as any[];
                   const relStr = rels.length > 0 ? rels[0].description : '';
 
-                  const commentContent = await generateComment(randomAi, postData.content, postData.author_name, commentsStr, false, relStr, postData.user_id, postData.image_prompt, postData.created_at);
-                  if (commentContent) {
-                    const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)").run(postData.id, randomAi.id, commentContent);
+                  const commentData = await generateComment(randomAi, postData.content, postData.author_name, commentsStr, false, relStr, postData.user_id, postData.image_prompt, postData.created_at);
+                  if (commentData) {
+                    const info = db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                      .run(postData.id, randomAi.id, commentData.content, commentData.internal_thought);
                     checkDynamicRelationship(randomAi.id, postData.user_id).catch(console.error);
                     console.log(`${randomAi.display_name} replied to mention in post ${postData.id}`);
 
@@ -3771,10 +3813,10 @@ async function startServer() {
                 // Fetch message history
                 const messageHistory = await getDMSummaryAndHistory(randomAi.id, author.id, randomAi.id);
 
-                const dmContent = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext, messageHistory);
-                if (dmContent) {
-                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)")
-                    .run(randomAi.id, author.id, dmContent);
+                const dmData = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext, messageHistory);
+                if (dmData) {
+                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                    .run(randomAi.id, author.id, dmData.content, dmData.internal_thought);
                   console.log(`${randomAi.display_name} sent a DM to ${author.display_name} in response to a dm_invitation post`);
                 }
               } finally {
@@ -3831,10 +3873,10 @@ async function startServer() {
                   const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
                   const relContext = rel ? rel.description : '';
 
-                  const commentContent = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id, randomPost.image_prompt, randomPost.created_at);
-                  if (commentContent) {
-                    const info = db.prepare("INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)")
-                      .run(randomPost.id, randomAi.id, commentContent);
+                  const commentData = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id, randomPost.image_prompt, randomPost.created_at);
+                  if (commentData) {
+                    const info = db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                      .run(randomPost.id, randomAi.id, commentData.content, commentData.internal_thought);
                     checkDynamicRelationship(randomAi.id, randomPost.user_id).catch(console.error);
                     console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
 
@@ -3866,10 +3908,10 @@ async function startServer() {
 
                     const threadContext = buildThreadContext(randomComment.id);
 
-                    const replyContent = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id, undefined, randomComment.created_at);
-                    if (replyContent) {
-                      const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)")
-                        .run(randomComment.post_id, randomAi.id, replyContent, randomComment.id);
+                    const replyData = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id, undefined, randomComment.created_at);
+                    if (replyData) {
+                      const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id, internal_thought) VALUES (?, ?, ?, ?, ?)")
+                        .run(randomComment.post_id, randomAi.id, replyData.content, randomComment.id, replyData.internal_thought);
                       checkDynamicRelationship(randomAi.id, randomComment.user_id).catch(console.error);
                       console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
 

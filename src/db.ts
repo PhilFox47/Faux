@@ -36,6 +36,7 @@ export function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       content TEXT NOT NULL,
+      internal_thought TEXT,
       image_url TEXT,
       image_prompt TEXT,
       post_type TEXT DEFAULT 'life_update',
@@ -60,6 +61,7 @@ export function initDb() {
       user_id INTEGER NOT NULL,
       parent_id INTEGER DEFAULT NULL,
       content TEXT NOT NULL,
+      internal_thought TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (post_id) REFERENCES posts(id),
       FOREIGN KEY (user_id) REFERENCES users(id),
@@ -81,6 +83,7 @@ export function initDb() {
       sender_id INTEGER NOT NULL,
       receiver_id INTEGER NOT NULL,
       content TEXT NOT NULL,
+      internal_thought TEXT,
       image_url TEXT,
       image_prompt TEXT,
       image_description TEXT,
@@ -136,7 +139,8 @@ export function initDb() {
       prob_favorite_dm REAL DEFAULT 50.0,
       cross_universe_prob REAL DEFAULT 50.0,
       allow_nsfw BOOLEAN DEFAULT 0,
-      enable_performance_logging BOOLEAN DEFAULT 0
+      enable_performance_logging BOOLEAN DEFAULT 0,
+      show_internal_thoughts BOOLEAN DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS universes (
@@ -179,6 +183,7 @@ export function initDb() {
       group_chat_id INTEGER NOT NULL,
       sender_id INTEGER NOT NULL,
       content TEXT NOT NULL,
+      internal_thought TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (group_chat_id) REFERENCES group_chats(id) ON DELETE CASCADE,
       FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
@@ -317,6 +322,8 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_users_is_ai ON users(is_ai);
     CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_users_is_ai_created ON users(is_ai, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name);
+    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver ON direct_messages(sender_id, receiver_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender ON direct_messages(receiver_id, sender_id);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver_id ON direct_messages(sender_id, receiver_id, id DESC);
@@ -720,6 +727,26 @@ export function initDb() {
 
   try {
     db.exec("ALTER TABLE settings ADD COLUMN enable_performance_logging BOOLEAN DEFAULT 0");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE settings ADD COLUMN show_internal_thoughts BOOLEAN DEFAULT 0");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE posts ADD COLUMN internal_thought TEXT");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE comments ADD COLUMN internal_thought TEXT");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE direct_messages ADD COLUMN internal_thought TEXT");
+  } catch (e) {}
+
+  try {
+    db.exec("ALTER TABLE group_chat_messages ADD COLUMN internal_thought TEXT");
   } catch (e) {}
 
   // Insert default settings

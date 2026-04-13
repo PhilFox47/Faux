@@ -470,8 +470,19 @@ Respond with ONLY the brief idea.`;
 Based on this idea for a photo post: "${idea}"
 Generate the Text Part of the post. DO NOT include an image description (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.
 ${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ''}
-Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
-    const textPost = await helperCallLLM(textPrompt, "generateImagePostData_text", 0.9);
+Do not use hashtags unless it fits the character. Keep it under 280 characters.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this post. This is what you are REALLY thinking or feeling while writing this post. It can be different from what you actually post.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual social media post text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
+    const textPostRaw = await helperCallLLM(textPrompt, "generateImagePostData_text", 0.9);
+    const textPostJson = extractJSON(textPostRaw);
+    const textPost = cleanAiResponse(textPostJson.content || textPostRaw);
+    const internal_thought = textPostJson.internal_thought || "";
 
     // Step 3: Positive Prompt
     const imagePrompt = `You are an expert at writing highly detailed prompts for the Chroma AI image generator.
@@ -524,7 +535,7 @@ Output ONLY the JSON object, nothing else.`;
     // Step 4: Negative Prompt
     const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
 
-    return { idea, textPost, positivePrompt, negativePrompt, characterVisible };
+    return { idea, textPost, internal_thought, positivePrompt, negativePrompt, characterVisible };
   } catch (error: any) {
     console.error('Error generating image post data:', error);
     logApi(
@@ -658,7 +669,15 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
     prompt += `\nTry to cover different topics or provide a different perspective than the other news accounts, unless something really big happened that everyone must cover.`;
   }
 
-  prompt += `\n\nWrite your news post now. Remember to focus on new developments and avoid repeating past reports. Return ONLY the text of the post.`;
+  prompt += `\n\nWrite your news post now. Remember to focus on new developments and avoid repeating past reports.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this news post. This is what you are REALLY thinking or feeling while writing this news post. It can be different from what you actually post.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual news post text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -667,11 +686,16 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
       max_tokens: 2000,
     });
     
-    let content = stripReasoning(response.choices[0].message.content || "");
-    content = cleanAiResponse(content);
+    let rawContent = response.choices[0].message.content || "";
+    let content = stripReasoning(rawContent);
     
-    logApi('generateNewsPost', { newsAccountId: newsAccount.id, prompt }, { response: response.choices[0].message.content, content }, newsAccount.id);
-    return content;
+    logApi('generateNewsPost', { newsAccountId: newsAccount.id, prompt }, { response: rawContent, content }, newsAccount.id);
+    
+    const json = extractJSON(content);
+    return {
+      content: cleanAiResponse(json.content || content),
+      internal_thought: json.internal_thought || ""
+    };
   } catch (e) {
     console.error("Error generating news post:", e);
     logApi('generateNewsPost_error', { newsAccountId: newsAccount.id, prompt }, { error: String(e) }, newsAccount.id);
@@ -706,7 +730,15 @@ Your goal is to summarize these events into a single, cohesive, and engaging pla
     prompt += `[${post.created_at}] ${post.display_name} (Universe: ${post.universe_name}): ${post.content}\n`;
   });
 
-  prompt += `\n\nWrite your platform-wide news recap now. Focus on the most interesting or impactful events and new developments. Return ONLY the text of the post.`;
+  prompt += `\n\nWrite your platform-wide news recap now. Focus on the most interesting or impactful events and new developments.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this news post. This is what you are REALLY thinking or feeling while writing this news post. It can be different from what you actually post.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual news post text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -715,11 +747,16 @@ Your goal is to summarize these events into a single, cohesive, and engaging pla
       max_tokens: 2500,
     });
     
-    let content = stripReasoning(response.choices[0].message.content || "");
-    content = cleanAiResponse(content);
+    let rawContent = response.choices[0].message.content || "";
+    let content = stripReasoning(rawContent);
     
-    logApi('generateFauxNewsPost', { newsAccountId: fauxNewsAccount.id, prompt }, { response: response.choices[0].message.content, content }, fauxNewsAccount.id);
-    return content;
+    logApi('generateFauxNewsPost', { newsAccountId: fauxNewsAccount.id, prompt }, { response: rawContent, content }, fauxNewsAccount.id);
+    
+    const json = extractJSON(content);
+    return {
+      content: cleanAiResponse(json.content || content),
+      internal_thought: json.internal_thought || ""
+    };
   } catch (e) {
     console.error("Error generating faux news post:", e);
     logApi('generateFauxNewsPost_error', { newsAccountId: fauxNewsAccount.id, prompt }, { error: String(e) }, fauxNewsAccount.id);
@@ -902,7 +939,15 @@ ${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by
 ${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
 ${postTypeObj.id === 'event' ? `IMPORTANT: This is an EVENT post. An event has happened that affects you and some other characters. Describe the event and your reaction to it. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
 ${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}`}
-Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it under 280 characters.`;
+Do not use hashtags unless it fits the character. Keep it under 280 characters.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this post. This is what you are REALLY thinking or feeling while writing this post. It can be different from what you actually post. It should reflect your true motives, hidden emotions, or secret plans.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual social media post text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
 
   try {
     let content = "";
@@ -933,7 +978,11 @@ Do not use hashtags unless it fits the character. Do not wrap in quotes. Keep it
       character.id
     );
     
-    return cleanAiResponse(content);
+    const json = extractJSON(content);
+    return {
+      content: cleanAiResponse(json.content || content),
+      internal_thought: json.internal_thought || ""
+    };
   } catch (error: any) {
     console.error('Error generating post:', error);
     logApi(
@@ -967,7 +1016,15 @@ ${isReply ? `Write a reply that fits your character perfectly and continues the 
 IMPORTANT: This is a text-only comment. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). 
 CRITICAL: DO NOT include any timestamps in your comment (e.g., no "[2026-04-08 22:04:15]"). Your comment must rely entirely on text and emojis.
 ${character.account_type === 'company' ? 'Your comment should reflect your brand identity, promote your products/services if relevant, or engage with your target audience in a corporate or brand-appropriate way.' : ''}
-Keep it short, natural, and in character. Focus on the topic being discussed. Do not wrap in quotes. Keep it under 150 characters.`;
+Keep it short, natural, and in character. Focus on the topic being discussed. Keep it under 150 characters.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this comment. This is what you are REALLY thinking or feeling while writing this comment. It can be different from what you actually post.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual comment text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
 
   try {
     let content = "";
@@ -998,7 +1055,11 @@ Keep it short, natural, and in character. Focus on the topic being discussed. Do
       character.id
     );
     
-    return cleanAiResponse(content);
+    const json = extractJSON(content);
+    return {
+      content: cleanAiResponse(json.content || content),
+      internal_thought: json.internal_thought || ""
+    };
   } catch (error: any) {
     console.error('Error generating comment:', error);
     logApi(
@@ -1079,7 +1140,15 @@ Notice the timestamps in the history to understand how much time has passed sinc
 ${context ? 'Use the provided context as the reason for reaching out.' : (recentActivity ? 'Give a good reason for reaching out (e.g., asking a casual question about their recent post or comment, sharing a quick thought, or checking in).' : 'Give a good reason for reaching out (e.g., sharing a quick thought, asking a random question, talking about your own life, or just checking in).')} 
 IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never actually posted. ${context ? 'Focus on the provided context.' : (recentActivity ? 'Only reference the recent posts/comments provided above, or find another reason to reach out.' : 'Since no recent posts/comments are provided, you MUST find another reason to reach out.')}
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.
-IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.`;
+IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this DM. This is what you are REALLY thinking or feeling while writing this DM. It can be different from what you actually post.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual DM text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
 
   try {
     let content = "";
@@ -1110,7 +1179,11 @@ IMPORTANT: This is a text-only message. DO NOT include any image descriptions, p
       character.id
     );
     
-    return cleanAiResponse(content);
+    const json = extractJSON(content);
+    return {
+      content: cleanAiResponse(json.content || content),
+      internal_thought: json.internal_thought || ""
+    };
   } catch (error: any) {
     console.error('Error generating DM:', error);
     logApi(
@@ -1190,7 +1263,15 @@ CRITICAL: Make it feel like a REALISTIC text message/DM.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
 - Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
 Focus on the conversation topic.
-IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
+IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this reply. This is what you are REALLY thinking or feeling while writing this reply. It can be different from what you actually post.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual reply text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
 
   const messages: any[] = [
     { role: 'system', content: systemPrompt },
@@ -1229,17 +1310,18 @@ IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.`;
       character.id
     );
     
-    let imagePrompt: string | undefined = undefined;
-    const cleanedContent = cleanAiResponse(content);
-    const imageMatch = cleanedContent.match(/\[GENERATE_IMAGE:\s*(.*?)\]/i);
+    const json = extractJSON(content);
+    let finalContent = cleanAiResponse(json.content || content);
+    let internal_thought = json.internal_thought || "";
+    let imagePrompt = json.image_prompt;
+
+    const imageMatch = finalContent.match(/\[GENERATE_IMAGE:\s*(.*?)\]/i);
     if (imageMatch) {
-      imagePrompt = imageMatch[1].trim();
-      content = cleanedContent.replace(/\[GENERATE_IMAGE:\s*.*?\]/gi, '').trim();
-    } else {
-      content = cleanedContent;
+      if (!imagePrompt) imagePrompt = imageMatch[1].trim();
+      finalContent = finalContent.replace(/\[GENERATE_IMAGE:\s*.*?\]/gi, '').trim();
     }
 
-    return { content, imagePrompt };
+    return { content: finalContent, internal_thought, imagePrompt };
   } catch (error: any) {
     console.error('Error replying to DM:', error);
     logApi(
@@ -1284,7 +1366,15 @@ CRITICAL: Make it feel like a REALISTIC group chat message.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
 - Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
 - IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.
-You can address specific people by name if you want.`;
+You can address specific people by name if you want.
+
+CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this group chat message. This is what you are REALLY thinking or feeling while writing this message. It can be different from what you actually post.
+
+Return your response in the following JSON format:
+{
+  "content": "The actual group chat message text.",
+  "internal_thought": "Your hidden internal monologue/thoughts."
+}`;
 
   const messages = [
     { role: "system", content: systemPrompt },
@@ -1320,7 +1410,11 @@ You can address specific people by name if you want.`;
       character.id
     );
     
-    return cleanAiResponse(content);
+    const json = extractJSON(content);
+    return {
+      content: cleanAiResponse(json.content || content),
+      internal_thought: json.internal_thought || ""
+    };
   } catch (error: any) {
     console.error('Error replying to Group Chat:', error);
     logApi(
