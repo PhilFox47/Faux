@@ -663,8 +663,18 @@ export function initDb() {
     db.prepare('SELECT current_status_text FROM character_arcs').get();
   } catch (e) {
     db.exec("ALTER TABLE character_arcs ADD COLUMN current_status_text TEXT");
+  }
+
+  try {
+    db.prepare('SELECT last_update_date FROM character_arcs').get();
+  } catch (e) {
     db.exec("ALTER TABLE character_arcs ADD COLUMN last_update_date DATETIME");
     db.exec("UPDATE character_arcs SET last_update_date = CURRENT_TIMESTAMP WHERE last_update_date IS NULL");
+  }
+
+  try {
+    db.prepare('SELECT history FROM character_arcs').get();
+  } catch (e) {
     db.exec("ALTER TABLE character_arcs ADD COLUMN history TEXT DEFAULT '[]'");
   }
 
