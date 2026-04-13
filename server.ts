@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, updateCharacterArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
 import { logPerformance } from "./src/logger";
 
@@ -477,6 +477,7 @@ function filterAvailableUsersForComment(opId: number, availableAiUsers: any[], p
       if (Math.random() > companyCommentProb) return false;
     }
 
+    if (opAccountType === 'faux_news') return true; // Faux news is multiversal, anyone can reply
     if (u.universe_id === opUniverseId) return true;
     // News posts are strictly universe-locked for comments and replies
     if (opAccountType === 'news' || isNewsPost) return false;
@@ -882,8 +883,14 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
         `).all(universe.id, activeUniverseArc.last_update_date).map((p: any) => `${p.display_name}: ${p.content}`).join(" | ");
         
         const newStatusText = await updateUniverseArc(universe, activeUniverseArc, recentUniversePosts);
-        db.prepare("UPDATE universe_arcs SET current_status_text = ?, last_update_date = datetime('now') WHERE id = ?").run(newStatusText, activeUniverseArc.id);
+        
+        let history = [];
+        try { history = JSON.parse(activeUniverseArc.history || '[]'); } catch (e) {}
+        history.push({ date: new Date().toISOString(), status: newStatusText });
+        
+        db.prepare("UPDATE universe_arcs SET current_status_text = ?, history = ?, last_update_date = datetime('now') WHERE id = ?").run(newStatusText, JSON.stringify(history), activeUniverseArc.id);
         activeUniverseArc.current_status_text = newStatusText;
+        activeUniverseArc.history = JSON.stringify(history);
       }
     }
   }
@@ -938,6 +945,8 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
     } else {
       const now = new Date();
       const targetDate = new Date(activeArc.target_end_date);
+      const lastUpdateDate = new Date(activeArc.last_update_date || activeArc.start_date);
+
       if (now >= targetDate) {
         // Fetch recent posts for context
         const recentUserPosts = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5").all(aiUser.id).map((p: any) => `[${p.created_at}] ${p.content}`).join(" | ");
@@ -956,6 +965,19 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
         activeArc.completion_summary = conclusion;
         arcInstruction = 'CONCLUDE_ARC';
       } else {
+        if (now.getTime() - lastUpdateDate.getTime() >= 24 * 60 * 60 * 1000) {
+          const recentUserPosts = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10").all(aiUser.id, activeArc.last_update_date || activeArc.start_date).map((p: any) => `[${p.created_at}] ${p.content}`).join(" | ");
+          const newStatusText = await updateCharacterArc(aiUser, activeArc, recentUserPosts);
+          
+          let history = [];
+          try { history = JSON.parse(activeArc.history || '[]'); } catch (e) {}
+          history.push({ date: new Date().toISOString(), status: newStatusText });
+          
+          db.prepare("UPDATE character_arcs SET current_status_text = ?, history = ?, last_update_date = datetime('now') WHERE id = ?").run(newStatusText, JSON.stringify(history), activeArc.id);
+          activeArc.current_status_text = newStatusText;
+          activeArc.history = JSON.stringify(history);
+        }
+
         arcInstruction = 'PROGRESS_ARC';
         const recentUserComments = db.prepare(`
           SELECT c.content, u.display_name 
@@ -2916,37 +2938,53 @@ async function startServer() {
 
         if (shouldPost) {
           try {
-            // Get recent posts from this universe (last 24 hours), excluding comments
+            // Get last post date to filter posts since then
+            const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(newsAccount.id) as any;
+            const sinceDate = lastPost ? lastPost.created_at : new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+
+            // Get recent posts from this universe since last news post, excluding comments
             const recentPosts = db.prepare(`
               SELECT p.content, p.created_at, u.display_name
               FROM posts p
               JOIN users u ON p.user_id = u.id
-              WHERE u.universe_id = ? AND p.created_at >= datetime('now', '-24 hours') AND u.account_type != 'news'
+              WHERE u.universe_id = ? AND p.created_at > ? AND u.account_type != 'news'
               ORDER BY p.created_at ASC
-            `).all(newsAccount.universe_id) as any[];
+            `).all(newsAccount.universe_id, sinceDate) as any[];
 
-            // Get active universe arc
-            const activeArc = db.prepare(`
-              SELECT * FROM universe_arcs
-              WHERE universe_id = ? AND status = 'active'
-              ORDER BY created_at DESC LIMIT 1
-            `).get(newsAccount.universe_id) as any;
+            if (recentPosts.length >= 6) {
+              // Get active universe arc
+              const activeArc = db.prepare(`
+                SELECT * FROM universe_arcs
+                WHERE universe_id = ? AND status = 'active'
+                ORDER BY created_at DESC LIMIT 1
+              `).get(newsAccount.universe_id) as any;
 
-            // Get other news posts from today in this universe
-            const otherNewsPosts = db.prepare(`
-              SELECT p.content, p.created_at, u.display_name
-              FROM posts p
-              JOIN users u ON p.user_id = u.id
-              WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
-              ORDER BY p.created_at ASC
-            `).all(newsAccount.universe_id, newsAccount.id) as any[];
+              // Get other news posts from today in this universe
+              const otherNewsPosts = db.prepare(`
+                SELECT p.content, p.created_at, u.display_name
+                FROM posts p
+                JOIN users u ON p.user_id = u.id
+                WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
+                ORDER BY p.created_at ASC
+              `).all(newsAccount.universe_id, newsAccount.id) as any[];
 
-            const newsContent = await generateNewsPost(newsAccount, recentPosts, activeArc, otherNewsPosts);
-            if (newsContent) {
-              const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(newsAccount.id, newsContent);
-              const postId = info.lastInsertRowid as number;
-              triggerPostComments(postId, 'news');
-              console.log(`News Account ${newsAccount.display_name} posted their daily news.`);
+              // Get last 10 news posts from this account for continuity
+              const pastNewsPosts = db.prepare(`
+                SELECT content, created_at
+                FROM posts
+                WHERE user_id = ?
+                ORDER BY created_at DESC LIMIT 10
+              `).all(newsAccount.id).reverse() as any[];
+
+              const newsContent = await generateNewsPost(newsAccount, recentPosts, activeArc, otherNewsPosts, pastNewsPosts);
+              if (newsContent) {
+                const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(newsAccount.id, newsContent);
+                const postId = info.lastInsertRowid as number;
+                triggerPostComments(postId, 'news');
+                console.log(`News Account ${newsAccount.display_name} posted their daily news.`);
+              }
+            } else {
+              console.log(`News Account ${newsAccount.display_name} skipped post: only ${recentPosts.length} posts found since ${sinceDate}.`);
             }
           } catch (e) {
             console.error(`Error generating news post for ${newsAccount.display_name}:`, e);
@@ -2993,7 +3031,16 @@ async function startServer() {
             `).all(sinceDate, fnAccount.id) as any[];
 
             if (newsPosts.length >= 2) {
-              const newsContent = await generateFauxNewsPost(fnAccount, newsPosts);
+              // Get last 10 faux news posts from this account for continuity
+              const pastNewsPosts = db.prepare(`
+                SELECT content, created_at
+                FROM posts
+                WHERE user_id = ?
+                ORDER BY created_at DESC LIMIT 10
+              `).all(fnAccount.id).reverse() as any[];
+
+              const localTimeStr = getFormatter(settings.timezone || 'UTC').format(new Date(nowMs));
+              const newsContent = await generateFauxNewsPost(fnAccount, newsPosts, pastNewsPosts, localTimeStr);
               if (newsContent) {
                 const info = db.prepare("INSERT INTO posts (user_id, content, post_type) VALUES (?, ?, 'news')").run(fnAccount.id, newsContent);
                 const postId = info.lastInsertRowid as number;

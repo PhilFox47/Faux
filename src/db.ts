@@ -227,10 +227,13 @@ export function initDb() {
       user_id INTEGER NOT NULL,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
+      current_status_text TEXT,
       status TEXT DEFAULT 'active',
       start_date DATETIME DEFAULT CURRENT_TIMESTAMP,
       target_end_date DATETIME NOT NULL,
+      last_update_date DATETIME DEFAULT CURRENT_TIMESTAMP,
       completion_summary TEXT,
+      history TEXT DEFAULT '[]',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -246,6 +249,7 @@ export function initDb() {
       target_end_date DATETIME NOT NULL,
       last_update_date DATETIME DEFAULT CURRENT_TIMESTAMP,
       completion_summary TEXT,
+      history TEXT DEFAULT '[]',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (universe_id) REFERENCES universes(id) ON DELETE CASCADE
     );
@@ -643,6 +647,20 @@ export function initDb() {
     db.prepare('SELECT is_visible FROM posts').get();
   } catch (e) {
     db.exec("ALTER TABLE posts ADD COLUMN is_visible BOOLEAN DEFAULT 1");
+  }
+
+  try {
+    db.prepare('SELECT history FROM universe_arcs').get();
+  } catch (e) {
+    db.exec("ALTER TABLE universe_arcs ADD COLUMN history TEXT DEFAULT '[]'");
+  }
+
+  try {
+    db.prepare('SELECT current_status_text FROM character_arcs').get();
+  } catch (e) {
+    db.exec("ALTER TABLE character_arcs ADD COLUMN current_status_text TEXT");
+    db.exec("ALTER TABLE character_arcs ADD COLUMN last_update_date DATETIME DEFAULT CURRENT_TIMESTAMP");
+    db.exec("ALTER TABLE character_arcs ADD COLUMN history TEXT DEFAULT '[]'");
   }
 
   // Handle schema migrations for settings

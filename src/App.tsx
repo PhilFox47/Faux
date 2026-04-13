@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -484,6 +484,11 @@ export default function App() {
   const [arcs, setArcs] = useState<any[]>([]);
   const [arcsOffset, setArcsOffset] = useState(0);
   const [hasMoreArcs, setHasMoreArcs] = useState(true);
+  const [expandedArcHistories, setExpandedArcHistories] = useState<Record<string, boolean>>({});
+
+  const toggleArcHistory = (arcId: string) => {
+    setExpandedArcHistories(prev => ({ ...prev, [arcId]: !prev[arcId] }));
+  };
 
   const fetchArcs = (reset = false) => {
     const offset = reset ? 0 : arcsOffset;
@@ -2172,6 +2177,41 @@ export default function App() {
     );
   }
 
+  const renderArcHistory = (arc: any) => {
+    let history = [];
+    try {
+      history = JSON.parse(arc.history || '[]');
+    } catch (e) {}
+    
+    if (history.length === 0) return null;
+    
+    const arcKey = `${arc.arc_type || (arc.universe_id ? 'universe' : 'character')}-${arc.id}`;
+    const isExpanded = expandedArcHistories[arcKey];
+    
+    return (
+      <div className="mt-4 border-t border-gray-800 pt-4">
+        <button 
+          onClick={() => toggleArcHistory(arcKey)}
+          className="flex items-center text-sm font-medium text-gray-400 hover:text-white transition-colors"
+        >
+          {isExpanded ? <ChevronUp size={16} className="mr-1" /> : <ChevronDown size={16} className="mr-1" />}
+          Arc History ({history.length} updates)
+        </button>
+        
+        {isExpanded && (
+          <div className="mt-3 space-y-3 pl-2 border-l-2 border-gray-800">
+            {history.map((h: any, idx: number) => (
+              <div key={idx} className="text-sm">
+                <span className="text-gray-500 text-xs block mb-1">{new Date(h.date).toLocaleString()}</span>
+                <p className="text-gray-300 whitespace-pre-wrap">{h.status}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-black text-white flex justify-center font-sans">
       {toastMessage && (
@@ -2837,7 +2877,7 @@ export default function App() {
                     {groupChats.map(group => (
                       <div 
                         key={`group-${group.id}`} 
-                        onClick={() => { setActiveChat({ id: group.id, name: group.name, account_type: 'group', isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true); }}
+                        onClick={() => { const isAlreadyOpen = activeChat?.id === group.id && isGroupChat; setActiveChat({ id: group.id, name: group.name, account_type: 'group', isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true, undefined, isAlreadyOpen); }}
                         className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-gray-900' : ''}`}
                       >
                         <div className="flex items-center gap-3">
@@ -2868,7 +2908,7 @@ export default function App() {
                     {conversations.map(conv => (
                       <div 
                         key={`dm-${conv.other_user_id}`} 
-                        onClick={() => { setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, account_type: conv.account_type, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false); }}
+                        onClick={() => { const isAlreadyOpen = activeChat?.id === conv.other_user_id && !isGroupChat; setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, account_type: conv.account_type, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false, undefined, isAlreadyOpen); }}
                         className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-gray-900' : ''}`}
                       >
                         <div className="flex items-center gap-3">
@@ -2992,11 +3032,30 @@ export default function App() {
                       const nextMsg = displayedMessages[i + 1];
                       const isLastInSequence = !nextMsg || nextMsg.sender_id !== msg.sender_id;
                       const prevMsg = i > 0 ? displayedMessages[i - 1] : null;
-                      const isFirstInSequence = !prevMsg || prevMsg.sender_id !== msg.sender_id;
+                      
+                      let showTimeSeparator = false;
+                      if (prevMsg) {
+                        const timeDiff = new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime();
+                        if (timeDiff > 4 * 60 * 60 * 1000) {
+                          showTimeSeparator = true;
+                        }
+                      } else {
+                        showTimeSeparator = true;
+                      }
+
+                      const isFirstInSequence = !prevMsg || prevMsg.sender_id !== msg.sender_id || showTimeSeparator;
 
                       return (
-                        <div key={i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isLastInSequence ? 'mb-2' : 'mb-0.5'} w-full`}>
-                          {!isMe && isGroupChat && sender && isFirstInSequence && (
+                        <React.Fragment key={i}>
+                          {showTimeSeparator && (
+                            <div className="flex justify-center my-6">
+                              <span className="text-xs font-medium text-gray-500 bg-gray-900/50 px-3 py-1 rounded-full">
+                                {new Date(msg.created_at).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          )}
+                          <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isLastInSequence ? 'mb-2' : 'mb-0.5'} w-full`}>
+                            {!isMe && isGroupChat && sender && isFirstInSequence && (
                             <span className="text-xs text-gray-400 ml-9 mb-1">{sender.display_name}</span>
                           )}
                           <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
@@ -3056,6 +3115,7 @@ export default function App() {
                             </span>
                           )}
                         </div>
+                        </React.Fragment>
                       );
                     })}
                     {(typingUser || serverTypingUsers.length > 0) && (
@@ -3386,6 +3446,7 @@ export default function App() {
                           <span>Target End: {new Date(arc.target_end_date).toLocaleDateString()}</span>
                           <span>Last Updated: {new Date(arc.last_update_date).toLocaleDateString()}</span>
                         </div>
+                        {renderArcHistory(arc)}
                       </div>
                     ))
                   )}
@@ -3519,6 +3580,7 @@ export default function App() {
                             <p className="text-gray-300 mt-1">{arc.completion_summary}</p>
                           </div>
                         )}
+                        {renderArcHistory(arc)}
                       </div>
                     </div>
                   ))
@@ -4455,7 +4517,7 @@ export default function App() {
                     </button>
                     <div className="flex gap-1">
                       <button 
-                        onClick={() => { setActiveTab('messages'); setActiveChat({ id: u.id, name: u.display_name, avatar_url: u.avatar_url, account_type: u.account_type }); fetchChatMessages(u.id); }}
+                        onClick={() => { const isAlreadyOpen = activeChat?.id === u.id && !isGroupChat; setActiveTab('messages'); setActiveChat({ id: u.id, name: u.display_name, avatar_url: u.avatar_url, account_type: u.account_type }); fetchChatMessages(u.id, false, undefined, isAlreadyOpen); }}
                         className="flex-1 bg-transparent text-gray-400 hover:text-white text-xs font-bold px-2 py-1 rounded-full transition"
                       >
                         Chat
@@ -4580,7 +4642,8 @@ export default function App() {
                           if (existingChat) {
                             setActiveChat(existingChat);
                             setIsGroupChat(false);
-                            fetchChatMessages(existingChat.id, false);
+                            const isAlreadyOpen = activeChat?.id === existingChat.id && !isGroupChat;
+                            fetchChatMessages(existingChat.id, false, undefined, isAlreadyOpen);
                           } else {
                             setActiveChat({ id: viewingProfile.id, other_user: viewingProfile } as any);
                             setIsGroupChat(false);
@@ -4813,6 +4876,7 @@ export default function App() {
                               <span>Started: {new Date(arc.start_date).toLocaleDateString()}</span>
                               <span>Target End: {new Date(arc.target_end_date).toLocaleDateString()}</span>
                             </div>
+                            {renderArcHistory(arc)}
                           </div>
                         ))
                       )}

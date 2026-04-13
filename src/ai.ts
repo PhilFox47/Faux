@@ -570,7 +570,48 @@ Ensure duration_days is an integer between 7 and 42.`;
   }
 }
 
-export async function generateNewsPost(newsAccount: any, recentPosts: any[], activeArc: any, otherNewsPosts: any[]) {
+export async function updateCharacterArc(character: any, arc: any, recentPosts: string) {
+  let historyText = '';
+  try {
+    const history = JSON.parse(arc.history || '[]');
+    if (history.length > 0) {
+      historyText = `\nPast Updates (Oldest to Newest):\n${history.map((h: any) => `- [${h.date}] ${h.status}`).join('\n')}\n`;
+    }
+  } catch (e) {}
+
+  const prompt = `You are the narrative director for the character "${character.display_name}".
+There is an ongoing Character Arc:
+Title: ${arc.title}
+Overall Premise: ${arc.description}
+${historyText}
+Previous Status: ${arc.current_status_text || 'Just started.'}
+
+It has been 24 hours since the last update. The character arc should progress naturally based on what the character has been doing recently.
+
+Recent posts from this character:
+${recentPosts}
+
+Write an updated "current_status_text" (2-4 sentences) that describes the latest developments in this character's personal storyline.
+
+Return ONLY a JSON object with the following structure:
+{
+  "current_status_text": "The updated status of the character arc."
+}`;
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1000,
+    });
+    return extractJSON(response.choices[0].message.content || '{}').current_status_text || arc.current_status_text;
+  } catch (e) {
+    console.error("Error updating character arc:", e);
+    return arc.current_status_text;
+  }
+}
+
+export async function generateNewsPost(newsAccount: any, recentPosts: any[], activeArc: any, otherNewsPosts: any[], pastNewsPosts: any[] = []) {
   let prompt = `You are managing the news account: ${newsAccount.display_name}. `;
   if (newsAccount.bio) prompt += `\nBio: ${newsAccount.bio}`;
   if (newsAccount.description) prompt += `\nBackground: ${newsAccount.description}`;
@@ -586,19 +627,27 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
     }
   } catch (e) {}
 
-  prompt += `\n\nYour task is to write a daily news summary post about the events of the last 24 hours in your universe. You can make it longer than a typical social media post to provide a good update.`;
+  prompt += `\n\nYour task is to write a daily news summary post about the events in your universe. You can make it longer than a typical social media post to provide a good update.`;
+
+  if (pastNewsPosts.length > 0) {
+    prompt += `\n\nIMPORTANT CONTEXT - Your Previous News Posts (Oldest to Newest):\n`;
+    pastNewsPosts.forEach(post => {
+      prompt += `[${post.created_at}] ${post.content}\n\n`;
+    });
+    prompt += `CRITICAL INSTRUCTION: You MUST build upon these previous posts. DO NOT repeat the same explanations or retell events you have already covered. Focus entirely on what has CHANGED or what is NEW since your last report. Ensure a strong sense of continuity.`;
+  }
 
   if (activeArc) {
     prompt += `\n\nCurrently Active Universe Arc: "${activeArc.title}"\nDescription: ${activeArc.description}\nCurrent Status: ${activeArc.current_status_text}`;
   }
 
   if (recentPosts.length > 0) {
-    prompt += `\n\nRecent Posts from characters in your universe (last 24 hours):\n`;
+    prompt += `\n\nRecent Posts from characters in your universe (since your last update):\n`;
     recentPosts.forEach(post => {
       prompt += `[${post.created_at}] ${post.display_name}: ${post.content}\n`;
     });
   } else {
-    prompt += `\n\nThere have been no new posts from characters in your universe in the last 24 hours. You can report on the general state of the universe or the active arc.`;
+    prompt += `\n\nThere have been no new posts from characters in your universe since your last update. You can report on the general state of the universe or the active arc.`;
   }
 
   if (otherNewsPosts.length > 0) {
@@ -609,7 +658,7 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
     prompt += `\nTry to cover different topics or provide a different perspective than the other news accounts, unless something really big happened that everyone must cover.`;
   }
 
-  prompt += `\n\nWrite your news post now. Return ONLY the text of the post.`;
+  prompt += `\n\nWrite your news post now. Remember to focus on new developments and avoid repeating past reports. Return ONLY the text of the post.`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -630,22 +679,34 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
   }
 }
 
-export async function generateFauxNewsPost(fauxNewsAccount: any, newsPosts: any[]) {
+export async function generateFauxNewsPost(fauxNewsAccount: any, newsPosts: any[], pastNewsPosts: any[] = [], currentTimeStr: string = "") {
   let prompt = `You are the ultimate news authority for the Faux platform: ${fauxNewsAccount.display_name}. `;
   if (fauxNewsAccount.bio) prompt += `\nBio: ${fauxNewsAccount.bio}`;
   if (fauxNewsAccount.description) prompt += `\nBackground: ${fauxNewsAccount.description}`;
   if (fauxNewsAccount.writing_style) prompt += `\nWriting Style: ${fauxNewsAccount.writing_style}`;
 
+  if (currentTimeStr) {
+    prompt += `\n\nThe current local time is: ${currentTimeStr}. Please ensure any temporal references (like "Good morning", "Tonight's recap") align with this time.`;
+  }
+
   prompt += `\n\nYour task is to write a cross-universe recap of the latest news on Faux. 
 You have been provided with news posts from various universe-specific news accounts. 
 Your goal is to summarize these events into a single, cohesive, and engaging platform-wide news update.`;
+
+  if (pastNewsPosts.length > 0) {
+    prompt += `\n\nIMPORTANT CONTEXT - Your Previous News Posts (Oldest to Newest):\n`;
+    pastNewsPosts.forEach(post => {
+      prompt += `[${post.created_at}] ${post.content}\n\n`;
+    });
+    prompt += `CRITICAL INSTRUCTION: You MUST build upon these previous posts. DO NOT repeat the same explanations or retell events you have already covered. Focus entirely on what has CHANGED or what is NEW since your last report. Ensure a strong sense of continuity.`;
+  }
 
   prompt += `\n\nRecent News Posts from other universes:\n`;
   newsPosts.forEach(post => {
     prompt += `[${post.created_at}] ${post.display_name} (Universe: ${post.universe_name}): ${post.content}\n`;
   });
 
-  prompt += `\n\nWrite your platform-wide news recap now. Focus on the most interesting or impactful events. Return ONLY the text of the post.`;
+  prompt += `\n\nWrite your platform-wide news recap now. Focus on the most interesting or impactful events and new developments. Return ONLY the text of the post.`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
@@ -731,10 +792,19 @@ Return ONLY a JSON object with the following structure:
 }
 
 export async function updateUniverseArc(universe: any, arc: any, recentPosts: string) {
+  let historyText = '';
+  try {
+    const history = JSON.parse(arc.history || '[]');
+    if (history.length > 0) {
+      historyText = `\nPast Updates (Oldest to Newest):\n${history.map((h: any) => `- [${h.date}] ${h.status}`).join('\n')}\n`;
+    }
+  } catch (e) {}
+
   const prompt = `You are the narrative director for the universe "${universe.name}".
 There is an ongoing Universe Arc:
 Title: ${arc.title}
 Overall Premise: ${arc.description}
+${historyText}
 Previous Status: ${arc.current_status_text}
 
 It has been 24 hours since the last update. The universe arc should progress naturally. It can progress on its own, or it can be influenced by what the characters in this universe have been doing recently.
