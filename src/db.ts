@@ -466,7 +466,11 @@ export function initDb() {
 
   // Add last_read_at column if it doesn't exist
   try {
-    db.exec("ALTER TABLE group_chat_members ADD COLUMN last_read_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+    const info = db.prepare("PRAGMA table_info(group_chat_members)").all() as any[];
+    if (!info.find(c => c.name === 'last_read_at')) {
+      db.exec("ALTER TABLE group_chat_members ADD COLUMN last_read_at DATETIME");
+      db.exec("UPDATE group_chat_members SET last_read_at = CURRENT_TIMESTAMP WHERE last_read_at IS NULL");
+    }
   } catch (e) {
     // Column might already exist
   }
@@ -659,7 +663,8 @@ export function initDb() {
     db.prepare('SELECT current_status_text FROM character_arcs').get();
   } catch (e) {
     db.exec("ALTER TABLE character_arcs ADD COLUMN current_status_text TEXT");
-    db.exec("ALTER TABLE character_arcs ADD COLUMN last_update_date DATETIME DEFAULT CURRENT_TIMESTAMP");
+    db.exec("ALTER TABLE character_arcs ADD COLUMN last_update_date DATETIME");
+    db.exec("UPDATE character_arcs SET last_update_date = CURRENT_TIMESTAMP WHERE last_update_date IS NULL");
     db.exec("ALTER TABLE character_arcs ADD COLUMN history TEXT DEFAULT '[]'");
   }
 
