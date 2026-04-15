@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp, Brain } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp, Brain, Menu } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -364,6 +364,7 @@ export default function App() {
   };
 
   const [activeTab, setActiveTab] = useState('home');
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [posts, setPosts] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [currentTick, setCurrentTick] = useState(0);
@@ -393,6 +394,7 @@ export default function App() {
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostImage, setNewPostImage] = useState('');
   const [newPostType, setNewPostType] = useState('life_update');
+  const [newPostUniverse, setNewPostUniverse] = useState<string>('');
   const [isCreatingPost, setIsCreatingPost] = useState(false);
   const [isSendingMsg, setIsSendingMsg] = useState(false);
   const [isGroupChat, setIsGroupChat] = useState(false);
@@ -500,7 +502,7 @@ export default function App() {
   const [viewingProfilePosts, setViewingProfilePosts] = useState<any[]>([]);
   const [viewingProfileArcs, setViewingProfileArcs] = useState<any[]>([]);
   const [isFetchingProfileData, setIsFetchingProfileData] = useState(false);
-  const [profileActiveTab, setProfileActiveTab] = useState<'posts' | 'arcs'>('posts');
+  const [profileActiveTab, setProfileActiveTab] = useState<'posts' | 'arcs' | 'images'>('posts');
   const [viewingUniverse, setViewingUniverse] = useState<any>(null);
   const [viewingUniverseCharacters, setViewingUniverseCharacters] = useState<any[]>([]);
   const [viewingUniverseArcs, setViewingUniverseArcs] = useState<any[]>([]);
@@ -2287,7 +2289,7 @@ export default function App() {
           </div>
         )}
         <div className="mb-12">
-          <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-16 object-contain" referrerPolicy="no-referrer" />
+          <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-24 object-contain" referrerPolicy="no-referrer" />
         </div>
         <h1 className="text-4xl font-bold mb-10 text-center">{welcomeText}</h1>
         <div className="flex flex-wrap justify-center gap-8 max-w-4xl px-4">
@@ -2531,35 +2533,28 @@ export default function App() {
         </div>
       )}
 
-      <div className="w-full max-w-7xl flex min-h-screen">
+      <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden">
         
-        {/* Left Sidebar */}
-        <div className="w-20 xl:w-64 border-r border-gray-800 p-4 flex flex-col h-full sticky top-0">
+        {/* Desktop Sidebar */}
+        <div className="hidden md:flex w-20 xl:w-64 border-r border-white/10 bg-white/5 backdrop-blur-md flex-col justify-between p-4 flex-shrink-0 z-20 relative">
           <div>
             <div className="flex items-center justify-center xl:justify-start mb-8 p-2">
               <img 
-                src="https://i.imgur.com/8FO0ENo.png" 
-                alt="Faux Logo" 
-                className="w-10 h-10 object-contain xl:hidden" 
-                referrerPolicy="no-referrer"
-              />
-              <img 
                 src="https://i.imgur.com/tI0YtLX.png" 
                 alt="Faux Logo" 
-                className="hidden xl:block h-10 object-contain" 
+                className="h-12 xl:h-16 w-auto max-w-full object-contain" 
                 referrerPolicy="no-referrer"
               />
             </div>
             <nav className="space-y-2">
-              <NavItem icon={<Home />} label="Home" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
+              <NavItem icon={<Home />} label="Nexus" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
               <NavItem icon={<Camera />} label="FauxPics" active={activeTab === 'fauxpics'} onClick={() => setActiveTab('fauxpics')} />
-              <NavItem icon={<Search />} label="Add Character" active={activeTab === 'explore'} onClick={() => setActiveTab('explore')} />
               <NavItem 
                 icon={
                   <div className="relative">
                     <Bell />
                     {unreadNotifs > 0 && (
-                      <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                      <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-[0_0_8px_rgba(249,115,22,0.8)]">
                         {unreadNotifs}
                       </span>
                     )}
@@ -2574,19 +2569,21 @@ export default function App() {
                   <div className="relative">
                     <MessageSquare />
                     {unreadMessages > 0 && (
-                      <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                      <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow-[0_0_8px_rgba(249,115,22,0.8)]">
                         {unreadMessages}
                       </span>
                     )}
                   </div>
                 } 
-                label="Messages" 
+                label="Comms" 
                 active={activeTab === 'messages'} 
                 onClick={() => setActiveTab('messages')} 
               />
+              <div className="my-4 border-t border-white/10"></div>
               <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); }} />
-              <NavItem icon={<BookOpen />} label="Arcs" active={activeTab === 'arcs'} onClick={() => { setActiveTab('arcs'); fetchArcs(true); }} />
               <NavItem icon={<UserCheck />} label="Following" active={activeTab === 'following'} onClick={() => setActiveTab('following')} />
+              <NavItem icon={<UserPlus />} label="Add Character" active={activeTab === 'explore'} onClick={() => setActiveTab('explore')} />
+              <NavItem icon={<BookOpen />} label="Arcs" active={activeTab === 'arcs'} onClick={() => { setActiveTab('arcs'); fetchArcs(true); }} />
               {loggedInUser?.role === 'admin' && (
                 <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(true); }} />
               )}
@@ -2595,30 +2592,30 @@ export default function App() {
             </nav>
             <button 
               onClick={() => setActiveTab('home')}
-              className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white rounded-full py-3 font-bold transition duration-200 xl:block hidden"
+              className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white rounded-xl py-3 font-bold transition duration-300 xl:block hidden shadow-[0_0_15px_rgba(249,115,22,0.4)]"
             >
-              Post
+              Broadcast
             </button>
 
             <div className="flex flex-col gap-2 mt-8">
-              <div className="hidden xl:flex items-center gap-2 p-3 text-sm text-gray-400">
+              <div className="hidden xl:flex items-center gap-2 p-3 text-sm text-slate-400">
                 <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
                 <span>{onlineAiCount} AI Online</span>
               </div>
               <div 
                 onClick={() => handleEditProfile(loggedInUser)}
-                className="flex items-center gap-3 p-3 hover:bg-gray-900 rounded-full cursor-pointer transition duration-200"
+                className="flex items-center gap-3 p-3 hover:bg-white/10 rounded-xl cursor-pointer transition duration-200"
               >
-                <div className={`w-10 h-10 bg-blue-900 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden`}>
+                <div className={`w-10 h-10 bg-slate-800 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden border border-white/10`}>
                   {loggedInUser?.avatar_url ? (
                     <img src={loggedInUser.avatar_url} alt="" className="w-full h-full object-cover" />
                   ) : (
                     loggedInUser?.display_name?.[0] || 'Y'
                   )}
                 </div>
-                <div className="hidden xl:block">
-                  <p className="font-bold text-sm">{loggedInUser?.display_name || 'You'}</p>
-                  <p className="text-gray-500 text-sm">@{loggedInUser?.username || 'real_user'}</p>
+                <div className="hidden xl:block overflow-hidden">
+                  <p className="font-bold text-sm truncate text-slate-200">{loggedInUser?.display_name || 'You'}</p>
+                  <p className="text-slate-500 text-xs truncate">@{loggedInUser?.username || 'real_user'}</p>
                 </div>
               </div>
               <button 
@@ -2626,7 +2623,7 @@ export default function App() {
                   setLoggedInUser(null);
                   localStorage.removeItem(SESSION_KEY);
                 }}
-                className="text-xs text-gray-500 hover:text-white transition text-center py-2"
+                className="text-xs text-slate-500 hover:text-red-400 transition text-center py-2"
               >
                 Log out
               </button>
@@ -2635,16 +2632,45 @@ export default function App() {
         </div>
 
         {/* Main Feed */}
-        <div className="flex-1 border-r border-gray-800 overflow-y-auto relative">
-          <div className="sticky top-0 bg-black/80 backdrop-blur-md border-b border-gray-800 p-4 z-10">
-            <h1 className="text-xl font-bold capitalize">{activeTab === 'explore' ? 'Add Character' : activeTab}</h1>
+        <div className="flex-1 border-r border-white/10 overflow-y-auto relative pb-20 md:pb-0 scrollbar-hide">
+          <div className="sticky top-0 bg-slate-950/80 backdrop-blur-xl border-b border-white/10 p-4 z-30 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button className="md:hidden text-slate-100 p-1 -ml-1 hover:bg-white/10 rounded-lg transition" onClick={() => setShowMobileMenu(true)}>
+                <Menu size={24} />
+              </button>
+              <h1 className="text-xl font-bold capitalize tracking-tight text-slate-100">
+                {activeTab === 'explore' ? 'Add Character' : activeTab === 'home' ? 'Nexus' : activeTab}
+              </h1>
+            </div>
+            <div className="md:hidden flex items-center gap-3">
+              <button 
+                onClick={() => {
+                  setActiveTab('search');
+                }}
+                className="text-slate-100 p-2 hover:bg-white/10 rounded-lg transition"
+              >
+                <Search size={20} />
+              </button>
+              <button 
+                onClick={() => {
+                  setActiveTab('home');
+                  setTimeout(() => {
+                    document.getElementById('compose-post-textarea')?.focus();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }, 100);
+                }}
+                className="bg-orange-500 hover:bg-orange-600 text-white rounded-lg px-3 py-1.5 text-sm font-bold transition shadow-[0_0_10px_rgba(249,115,22,0.4)]"
+              >
+                Broadcast
+              </button>
+            </div>
           </div>
           
           {activeTab === 'home' && (
             <>
               {/* Compose Post */}
-              <div className="border-b border-gray-800 p-4 flex gap-4">
-                <div className={`w-10 h-10 bg-blue-900 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden`}>
+              <div className="border-b border-white/10 p-4 flex gap-4 bg-white/5 backdrop-blur-sm">
+                <div className={`w-10 h-10 bg-slate-800 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden border border-white/10`}>
                   {loggedInUser?.avatar_url ? (
                     <img src={loggedInUser?.avatar_url} alt="" className="w-full h-full object-cover" />
                   ) : (
@@ -2653,63 +2679,76 @@ export default function App() {
                 </div>
                 <div className="flex-1">
                   <TagTextarea 
+                    id="compose-post-textarea"
                     users={users}
                     value={newPostContent}
                     onValueChange={setNewPostContent}
-                    className="w-full bg-transparent text-xl outline-none resize-none placeholder-gray-500" 
-                    placeholder="What's happening?"
+                    className="w-full bg-transparent text-xl outline-none resize-none placeholder-slate-500 text-slate-100" 
+                    placeholder="Broadcast to the Nexus..."
                     rows={3}
                   />
                   {newPostImage && (
                     <div className="relative mt-2 inline-block">
-                      <img src={newPostImage} alt="Post preview" className="max-h-48 rounded-xl object-cover" />
+                      <img src={newPostImage} alt="Post preview" className="max-h-48 rounded-xl object-cover border border-white/10" />
                       <button 
                         onClick={() => setNewPostImage('')}
-                        className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white rounded-full p-1"
+                        className="absolute top-2 right-2 bg-slate-950/70 hover:bg-slate-950 text-white rounded-full p-1 backdrop-blur-md transition"
                       >
                         <X size={16} />
                       </button>
                     </div>
                   )}
-                  <div className="flex justify-between items-center mt-2 border-t border-gray-800 pt-3">
+                  <div className="flex justify-between items-center mt-2 border-t border-white/10 pt-3">
                     <div className="text-orange-500 flex gap-4 items-center">
-                      <label className="cursor-pointer hover:bg-gray-800 p-2 rounded-full transition">
+                      <label className="cursor-pointer hover:bg-white/10 p-2 rounded-full transition">
                         <Image size={20} />
                         <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, setNewPostImage)} />
                       </label>
+                      {loggedInUser?.is_ai === 1 && (
+                        <select 
+                          value={newPostType} 
+                          onChange={(e) => setNewPostType(e.target.value)}
+                          className="bg-slate-900 text-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none border border-white/10 focus:border-orange-500 transition"
+                        >
+                          <option value="life_update">Life Update</option>
+                          <option value="image_post">Image Post</option>
+                          <option value="question">Question</option>
+                          <option value="random_thought">Random Thought</option>
+                          <option value="discussion">Discussion</option>
+                          <option value="recommendation">Recommendation</option>
+                          <option value="follow_up">Follow up</option>
+                          <option value="picking_up_trend">Picking up a Trend</option>
+                          <option value="mention">Mention</option>
+                          <option value="joke">Joke</option>
+                          <option value="shitpost">Shitpost / Rage Bait</option>
+                          <option value="venting">Venting</option>
+                          <option value="dm_invitation">DM Invitation</option>
+                        </select>
+                      )}
                       <select 
-                        value={newPostType} 
-                        onChange={(e) => setNewPostType(e.target.value)}
-                        className="bg-gray-800 text-white rounded px-2 py-1 text-sm outline-none border border-gray-700 focus:border-orange-500"
+                        value={newPostUniverse} 
+                        onChange={(e) => setNewPostUniverse(e.target.value)}
+                        className="bg-slate-900 text-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none border border-white/10 focus:border-orange-500 transition max-w-[150px] truncate"
                       >
-                        <option value="life_update">Life Update</option>
-                        <option value="image_post">Image Post</option>
-                        <option value="question">Question</option>
-                        <option value="random_thought">Random Thought</option>
-                        <option value="discussion">Discussion</option>
-                        <option value="recommendation">Recommendation</option>
-                        <option value="follow_up">Follow up</option>
-                        <option value="picking_up_trend">Picking up a Trend</option>
-                        <option value="mention">Mention</option>
-                        <option value="joke">Joke</option>
-                        <option value="shitpost">Shitpost / Rage Bait</option>
-                        <option value="venting">Venting</option>
-                        <option value="dm_invitation">DM Invitation</option>
+                        <option value="">Global Nexus</option>
+                        {universes.map(u => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
                       </select>
                     </div>
                     <button 
                       onClick={handleCreatePost}
                       disabled={!newPostContent.trim() && !newPostImage}
-                      className="bg-gradient-to-r from-orange-500 to-yellow-500 hover:from-orange-600 hover:to-yellow-600 disabled:opacity-50 text-white rounded-full px-6 py-2 font-bold transition duration-200 shadow-lg"
+                      className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 text-white rounded-xl px-6 py-2 font-bold transition duration-300 shadow-[0_0_15px_rgba(249,115,22,0.4)]"
                     >
-                      Post
+                      Broadcast
                     </button>
                   </div>
                 </div>
               </div>
 
               {/* Feed */}
-              <div>
+              <div className="divide-y divide-white/5">
                 {posts.slice(0, visiblePosts).map(post => (
                   <PostItem 
                     apiFetch={apiFetch}
@@ -2733,19 +2772,19 @@ export default function App() {
                   />
                 ))}
                 {posts.length > visiblePosts && (
-                  <div className="p-6 flex justify-center border-b border-gray-800">
+                  <div className="p-6 flex justify-center border-b border-white/10">
                     <button 
                       onClick={() => setVisiblePosts(prev => prev + 30)}
-                      className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-full transition"
+                      className="bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-2 px-6 rounded-xl transition border border-white/10"
                     >
                       Load More
                     </button>
                   </div>
                 )}
                 {posts.length === 0 && (
-                  <div className="p-8 text-center text-gray-500">
-                    <p>The feed is currently empty.</p>
-                    <p className="text-sm mt-2">Add AI characters to see them post!</p>
+                  <div className="p-8 text-center text-slate-500">
+                    <p>The Nexus is currently quiet.</p>
+                    <p className="text-sm mt-2">Add characters to see them broadcast!</p>
                   </div>
                 )}
               </div>
@@ -2756,7 +2795,7 @@ export default function App() {
             <div className="p-4">
               <div className="grid grid-cols-1 gap-8 max-w-2xl mx-auto">
                 {fauxPicsPosts.length === 0 ? (
-                  <div className="text-center py-20 text-gray-500">
+                  <div className="text-center py-20 text-slate-500">
                     <Camera size={64} className="mx-auto mb-4 opacity-20" />
                     <p className="text-xl font-medium">No photos yet</p>
                   </div>
@@ -2780,7 +2819,7 @@ export default function App() {
                   <div className="flex justify-center mt-8">
                     <button 
                       onClick={() => setVisibleFauxPics(prev => prev + 20)}
-                      className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-8 rounded-full transition"
+                      className="bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-3 px-8 rounded-xl transition border border-white/10"
                     >
                       Load More Images
                     </button>
@@ -2790,30 +2829,76 @@ export default function App() {
             </div>
           )}
 
+          {activeTab === 'search' && (
+            <div className="flex h-[calc(100vh-60px)]">
+              <div className="flex-1 p-6 overflow-y-auto pb-24">
+                <h2 className="text-2xl font-bold mb-6 tracking-tight text-slate-100">Search Characters</h2>
+                <input 
+                  type="text" 
+                  placeholder="Search characters..." 
+                  value={characterSearch}
+                  onChange={e => setCharacterSearch(e.target.value)}
+                  className="w-full bg-slate-900 border border-white/10 text-white px-4 py-3 rounded-xl outline-none focus:border-orange-500 mb-6"
+                />
+                <div className="space-y-4">
+                  {exploreUsers.map((u: any) => (
+                    <CharacterSidebarItem 
+                      key={u.id} 
+                      u={u} 
+                      handleViewProfile={handleViewProfile}
+                      isUserOnline={isUserOnline}
+                      handleFollow={handleFollow}
+                      activeChat={activeChat}
+                      isGroupChat={isGroupChat}
+                      setActiveTab={setActiveTab}
+                      setActiveChat={setActiveChat}
+                      fetchChatMessages={fetchChatMessages}
+                      handleEditProfile={handleEditProfile}
+                    />
+                  ))}
+                  {exploreUsers.length === 0 && !isFetchingExplore && (
+                    <p className="text-gray-500 text-sm text-center py-4">No characters found.</p>
+                  )}
+                  {hasMoreExplore && (
+                    <div className="flex justify-center py-4">
+                      <button 
+                        onClick={() => fetchExploreUsers(exploreOffset + 20, true, characterSearch)}
+                        disabled={isFetchingExplore}
+                        className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-sm font-bold py-2 px-6 rounded-xl transition"
+                      >
+                        {isFetchingExplore ? 'Loading...' : 'Load More'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'explore' && (
             <div className="flex h-[calc(100vh-60px)]">
               <div className="flex-1 p-6 overflow-y-auto">
-                <h2 className="text-2xl font-bold mb-6">Add Account</h2>
+                <h2 className="text-2xl font-bold mb-6 tracking-tight text-slate-100">Add Account</h2>
                 <form onSubmit={handleAddCharacter} className="space-y-4 max-w-3xl mx-auto">
                   <div className="flex gap-4 mb-6">
                     <button
                       type="button"
                       onClick={() => setCharAccountType('character')}
-                      className={`flex-1 py-3 rounded-lg font-bold transition-colors ${charAccountType === 'character' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                      className={`flex-1 py-3 rounded-xl font-bold transition-colors ${charAccountType === 'character' ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]' : 'bg-slate-900 text-slate-400 hover:bg-slate-800 border border-white/10'}`}
                     >
                       Character
                     </button>
                     <button
                       type="button"
                       onClick={() => setCharAccountType('company')}
-                      className={`flex-1 py-3 rounded-lg font-bold transition-colors ${charAccountType === 'company' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                      className={`flex-1 py-3 rounded-xl font-bold transition-colors ${charAccountType === 'company' ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]' : 'bg-slate-900 text-slate-400 hover:bg-slate-800 border border-white/10'}`}
                     >
                       Company Account
                     </button>
                     <button
                       type="button"
                       onClick={() => setCharAccountType('news')}
-                      className={`flex-1 py-3 rounded-lg font-bold transition-colors ${charAccountType === 'news' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                      className={`flex-1 py-3 rounded-xl font-bold transition-colors ${charAccountType === 'news' ? 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]' : 'bg-slate-900 text-slate-400 hover:bg-slate-800 border border-white/10'}`}
                     >
                       News Account
                     </button>
@@ -2822,38 +2907,38 @@ export default function App() {
                   {charAccountType === 'character' ? (
                     <>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Character Name</label>
-                        <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Geralt of Rivia" />
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Character Name</label>
+                        <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. Geralt of Rivia" />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Additional Info (Franchise, Context, etc.)</label>
-                        <textarea value={charPersona} onChange={e => setCharPersona(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. From The Witcher 3, currently looking for Ciri..."></textarea>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Additional Info (Franchise, Context, etc.)</label>
+                        <textarea value={charPersona} onChange={e => setCharPersona(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. From The Witcher 3, currently looking for Ciri..."></textarea>
                       </div>
                     </>
                   ) : charAccountType === 'company' ? (
                     <>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Company / Brand Name</label>
-                        <input required value={charCompanyName} onChange={e => { setCharCompanyName(e.target.value); setCharName(e.target.value); }} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Vought International" />
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Company / Brand Name</label>
+                        <input required value={charCompanyName} onChange={e => { setCharCompanyName(e.target.value); setCharName(e.target.value); }} type="text" className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. Vought International" />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Brand Identity</label>
-                        <textarea value={charBrandIdentity} onChange={e => setCharBrandIdentity(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Corporate, patriotic, slightly sinister..."></textarea>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Brand Identity</label>
+                        <textarea value={charBrandIdentity} onChange={e => setCharBrandIdentity(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. Corporate, patriotic, slightly sinister..."></textarea>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Products / Services</label>
-                        <textarea value={charProductsServices} onChange={e => setCharProductsServices(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Compound V, Superheroes, Energy Drinks..."></textarea>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Products / Services</label>
+                        <textarea value={charProductsServices} onChange={e => setCharProductsServices(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. Compound V, Superheroes, Energy Drinks..."></textarea>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Target Audience</label>
-                        <input value={charTargetAudience} onChange={e => setCharTargetAudience(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. General public, superhero fans" />
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Target Audience</label>
+                        <input value={charTargetAudience} onChange={e => setCharTargetAudience(e.target.value)} type="text" className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. General public, superhero fans" />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Run By Character (Optional)</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Run By Character (Optional)</label>
                         <select 
                           value={charRunByCharacterId || ''} 
                           onChange={e => setCharRunByCharacterId(e.target.value ? parseInt(e.target.value) : null)}
-                          className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"
+                          className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition"
                         >
                           <option value="">Nameless Employee</option>
                           {users.filter(u => u.is_ai).map(u => (
@@ -2865,22 +2950,22 @@ export default function App() {
                   ) : charAccountType === 'news' ? (
                     <>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">News Account Name</label>
-                        <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Daily Planet" />
+                        <label className="block text-sm font-medium text-slate-400 mb-1">News Account Name</label>
+                        <input required value={charName} onChange={e => setCharName(e.target.value)} type="text" className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. Daily Planet" />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Background / Focus</label>
-                        <textarea value={charDescription} onChange={e => setCharDescription(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. The premier news source for Metropolis..."></textarea>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Background / Focus</label>
+                        <textarea value={charDescription} onChange={e => setCharDescription(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. The premier news source for Metropolis..."></textarea>
                       </div>
                     </>
                   ) : null}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Username</label>
-                      <input required value={charUsername} onChange={e => setCharUsername(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. white_wolf" />
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Username</label>
+                      <input required value={charUsername} onChange={e => setCharUsername(e.target.value)} type="text" className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. white_wolf" />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Universe</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Universe</label>
                       <SearchableDropdown
                         options={universes.map(u => ({ id: u.id, name: u.name }))}
                         value={charUniverseId}
@@ -2893,7 +2978,7 @@ export default function App() {
                         placeholder="Select a Universe (Optional)"
                       />
                       {charUniverseId === -1 && (
-                        <div className="mt-2 flex items-center gap-2 text-sm text-orange-400 bg-orange-500/10 p-2 rounded-lg border border-orange-500/20">
+                        <div className="mt-2 flex items-center gap-2 text-sm text-orange-400 bg-orange-500/10 p-2 rounded-xl border border-orange-500/20">
                           <Plus size={14} />
                           Creating new universe: <span className="font-bold">{charNewUniverseName}</span>
                         </div>
@@ -2901,10 +2986,10 @@ export default function App() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Profile Picture (URL or Upload)</label>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Profile Picture (URL or Upload)</label>
                     <div className="flex gap-2">
-                      <input value={charAvatar} onChange={e => setCharAvatar(e.target.value)} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Image URL..." />
-                      <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-3 rounded-lg cursor-pointer flex items-center gap-2">
+                      <input value={charAvatar} onChange={e => setCharAvatar(e.target.value)} type="text" className="flex-1 bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="Image URL..." />
+                      <label className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-3 rounded-xl cursor-pointer flex items-center gap-2 transition">
                         <UserPlus size={18} />
                         Upload
                         <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, setCharAvatar)} />
@@ -2912,24 +2997,24 @@ export default function App() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Reference Images (Overrides Profile Pic for Image Gen)</label>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Reference Images (Overrides Profile Pic for Image Gen)</label>
                     <div className="flex flex-col gap-2">
                       {charReferenceImages.map((img, idx) => (
                         <div key={idx} className="flex gap-2 items-center">
-                          {img && <img src={img} alt="Ref" className="w-10 h-10 object-cover rounded" />}
+                          {img && <img src={img} alt="Ref" className="w-10 h-10 object-cover rounded-lg border border-white/10" />}
                           <input value={img} onChange={e => {
                             const newImgs = [...charReferenceImages];
                             newImgs[idx] = e.target.value;
                             setCharReferenceImages(newImgs);
-                          }} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" placeholder="Image URL..." />
-                          <button type="button" onClick={() => setCharReferenceImages(charReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
+                          }} type="text" className="flex-1 bg-slate-900 border border-white/10 rounded-xl p-2 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="Image URL..." />
+                          <button type="button" onClick={() => setCharReferenceImages(charReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2 transition"><X size={16} /></button>
                         </div>
                       ))}
                       <div className="flex gap-2">
-                        <button type="button" onClick={() => setCharReferenceImages([...charReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                        <button type="button" onClick={() => setCharReferenceImages([...charReferenceImages, ''])} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl flex items-center gap-2 text-sm transition">
                           <Plus size={16} /> Add URL
                         </button>
-                        <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer flex items-center gap-2 text-sm">
+                        <label className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl cursor-pointer flex items-center gap-2 text-sm transition">
                           <Upload size={16} /> Upload Image
                           <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, (base64) => setCharReferenceImages([...charReferenceImages, base64]))} />
                         </label>
@@ -2937,40 +3022,40 @@ export default function App() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Public Bio</label>
-                    <textarea value={charBio} onChange={e => setCharBio(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Short public bio..."></textarea>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Public Bio</label>
+                    <textarea value={charBio} onChange={e => setCharBio(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="Short public bio..."></textarea>
                   </div>
                   {charAccountType !== 'news' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">General Description (Private)</label>
-                      <textarea value={charDescription} onChange={e => setCharDescription(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Detailed personality and background..."></textarea>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">General Description (Private)</label>
+                      <textarea value={charDescription} onChange={e => setCharDescription(e.target.value)} rows={3} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="Detailed personality and background..."></textarea>
                     </div>
                   )}
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Writing Style (Private)</label>
-                    <textarea value={charWritingStyle} onChange={e => setCharWritingStyle(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Tone of voice, catchphrases, interaction style..."></textarea>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Writing Style (Private)</label>
+                    <textarea value={charWritingStyle} onChange={e => setCharWritingStyle(e.target.value)} rows={3} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="Tone of voice, catchphrases, interaction style..."></textarea>
                   </div>
                   {charAccountType === 'character' && (
                     <>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Physical Appearance (Private)</label>
-                        <textarea value={charPhysicalAppearance} onChange={e => setCharPhysicalAppearance(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Hair color, body type, facial features..."></textarea>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Physical Appearance (Private)</label>
+                        <textarea value={charPhysicalAppearance} onChange={e => setCharPhysicalAppearance(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="Hair color, body type, facial features..."></textarea>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Clothing Style (Private)</label>
-                        <textarea value={charClothingStyle} onChange={e => setCharClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="Usual outfits, fashion sense, accessories..."></textarea>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Clothing Style (Private)</label>
+                        <textarea value={charClothingStyle} onChange={e => setCharClothingStyle(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="Usual outfits, fashion sense, accessories..."></textarea>
                       </div>
                     </>
                   )}
                   {charAccountType !== 'news' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle (Private)</label>
-                      <textarea value={charArtstyle} onChange={e => setCharArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="e.g. Anime, Realistic, Pixel Art, Oil Painting..."></textarea>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Artstyle (Private)</label>
+                      <textarea value={charArtstyle} onChange={e => setCharArtstyle(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. Anime, Realistic, Pixel Art, Oil Painting..."></textarea>
                     </div>
                   )}
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Online Time (Optional - Default: Always Online)</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Online Time (Optional - Default: Always Online)</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-slate-900/50 p-4 rounded-xl border border-white/5">
                       {ONLINE_TIME_WINDOWS.map(window => (
                         <label key={window.value} className="flex items-center gap-2 cursor-pointer group">
                           <input 
@@ -2983,17 +3068,17 @@ export default function App() {
                                 setCharOnlineTimes(prev => prev.filter(t => t !== window.value));
                               }
                             }}
-                            className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-orange-500 focus:ring-orange-500 focus:ring-offset-gray-900"
+                            className="w-4 h-4 rounded border-white/10 bg-slate-800 text-orange-500 focus:ring-orange-500 focus:ring-offset-slate-900"
                           />
-                          <span className="text-sm text-gray-300 group-hover:text-white transition">{window.label}</span>
+                          <span className="text-sm text-slate-300 group-hover:text-white transition">{window.label}</span>
                         </label>
                       ))}
                     </div>
-                    <p className="text-xs text-gray-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
+                    <p className="text-xs text-slate-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
                   </div>
                   {charAccountType !== 'news' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-2">Activity Level (1-10)</label>
                       <div className="flex items-center gap-4">
                         <input 
                           type="range" 
@@ -3004,10 +3089,10 @@ export default function App() {
                         />
                         <span className="text-white font-bold w-6 text-center">{charActivityLevel}</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
+                      <p className="text-xs text-slate-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
                     </div>
                   )}
-                  <button type="submit" className="w-full bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold py-3 rounded-full hover:from-orange-600 hover:to-yellow-600 transition shadow-lg">
+                  <button type="submit" className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white font-bold py-3 rounded-xl hover:from-orange-600 hover:to-orange-700 transition shadow-[0_0_15px_rgba(249,115,22,0.4)]">
                     Add Character
                   </button>
                 </form>
@@ -3016,30 +3101,32 @@ export default function App() {
           )}
 
           {activeTab === 'notifications' && (
-            <div>
+            <div className="divide-y divide-white/5">
               {notifications.map(notif => (
                 <div 
                   key={notif.id} 
                   onClick={() => handleNotificationClick(notif)}
-                  className={`p-4 border-b border-gray-800 flex gap-4 hover:bg-gray-900/50 transition cursor-pointer ${notif.is_read ? 'opacity-70' : ''}`}
+                  className={`p-4 hover:bg-white/5 transition cursor-pointer ${notif.is_read ? 'opacity-70' : ''}`}
                 >
-                  <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-gray-700">
-                    {notif.actor_avatar ? <img src={notif.actor_avatar} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
-                  </div>
-                  <div>
-                    <p>
-                      <span className="font-bold">{notif.actor_name}</span>
-                      {notif.type === 'like_post' && ' liked your post.'}
-                      {notif.type === 'like_comment' && ' liked your comment.'}
-                      {notif.type === 'comment' && ' commented on your post.'}
-                      {notif.type === 'reply' && ' replied to your comment.'}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">{formatTimestamp(notif.created_at)}</p>
+                  <div className="flex gap-4">
+                    <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-800 border border-white/10">
+                      {notif.actor_avatar ? <img src={notif.actor_avatar} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
+                    </div>
+                    <div>
+                      <p className="text-slate-200">
+                        <span className="font-bold text-white">{notif.actor_name}</span>
+                        {notif.type === 'like_post' && ' liked your broadcast.'}
+                        {notif.type === 'like_comment' && ' liked your comment.'}
+                        {notif.type === 'comment' && ' commented on your broadcast.'}
+                        {notif.type === 'reply' && ' replied to your comment.'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">{formatTimestamp(notif.created_at)}</p>
+                    </div>
                   </div>
                 </div>
               ))}
               {notifications.length === 0 && (
-                <div className="p-8 text-center text-gray-500">
+                <div className="p-8 text-center text-slate-500">
                   <p>No notifications yet.</p>
                 </div>
               )}
@@ -3051,38 +3138,38 @@ export default function App() {
               {/* Conversation List */}
               {!activeChat && (
                 <div className="w-full flex flex-col">
-                  <div className="p-4 border-b border-gray-800 flex justify-between items-center">
-                    <h2 className="font-bold text-lg">Messages</h2>
-                    <button onClick={() => setShowCreateGroupModal(true)} className="p-2 hover:bg-gray-800 rounded-full" title="New Group Chat">
+                  <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-950/80 backdrop-blur-xl">
+                    <h2 className="font-bold text-lg tracking-tight text-slate-100">Comms</h2>
+                    <button onClick={() => setShowCreateGroupModal(true)} className="p-2 hover:bg-white/10 rounded-full transition" title="New Group Chat">
                       <Plus size={20} />
                     </button>
                   </div>
-                  <div className="overflow-y-auto flex-1">
+                  <div className="overflow-y-auto flex-1 divide-y divide-white/5">
                     {groupChats.map(group => (
                       <div 
                         key={`group-${group.id}`} 
                         onClick={() => { const isAlreadyOpen = activeChat?.id === group.id && isGroupChat; setActiveChat({ id: group.id, name: group.name, account_type: 'group', isGroup: true }); setIsGroupChat(true); fetchChatMessages(group.id, true, undefined, isAlreadyOpen); }}
-                        className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-gray-900' : ''}`}
+                        className={`p-4 cursor-pointer hover:bg-white/5 transition ${activeChat?.id === group.id && isGroupChat ? 'bg-white/5' : ''}`}
                       >
                         <div className="flex items-center gap-3">
                           <div className="relative w-12 h-12 flex-shrink-0 cursor-pointer">
-                            <div className="w-full h-full bg-gray-700 rounded-full flex items-center justify-center overflow-hidden">
+                            <div className="w-full h-full bg-slate-800 rounded-full flex items-center justify-center overflow-hidden border border-white/10">
                               <Users size={24} />
                             </div>
                             {group.members?.some((m: any) => m.is_ai === 1 && isUserOnline(m)) && (
-                              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-gray-800 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" title="AI Member Online"></div>
+                              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-slate-950 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" title="AI Member Online"></div>
                             )}
                           </div>
                           <div className="overflow-hidden flex-1">
                             <div className="flex justify-between items-center">
-                              <p className="font-bold truncate">{group.name}</p>
+                              <p className="font-bold truncate text-slate-200">{group.name}</p>
                               {group.unread_count > 0 && (
-                                <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-[0_0_8px_rgba(249,115,22,0.8)]">
                                   {group.unread_count}
                                 </span>
                               )}
                             </div>
-                            <p className={`text-sm truncate ${group.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
+                            <p className={`text-sm truncate ${group.unread_count > 0 ? 'text-white font-bold' : 'text-slate-500'}`}>
                               {group.last_message || 'No messages yet'}
                             </p>
                           </div>
@@ -3093,27 +3180,27 @@ export default function App() {
                       <div 
                         key={`dm-${conv.other_user_id}`} 
                         onClick={() => { const isAlreadyOpen = activeChat?.id === conv.other_user_id && !isGroupChat; setActiveChat({ id: conv.other_user_id, name: conv.display_name, avatar_url: conv.avatar_url, account_type: conv.account_type, isGroup: false }); setIsGroupChat(false); fetchChatMessages(conv.other_user_id, false, undefined, isAlreadyOpen); }}
-                        className={`p-4 border-b border-gray-800 cursor-pointer hover:bg-gray-900 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-gray-900' : ''}`}
+                        className={`p-4 cursor-pointer hover:bg-white/5 transition ${activeChat?.id === conv.other_user_id && !isGroupChat ? 'bg-white/5' : ''}`}
                       >
                         <div className="flex items-center gap-3">
                           <div className="relative w-12 h-12 flex-shrink-0 cursor-pointer">
-                            <div className={`w-full h-full bg-gray-700 ${getAvatarShape(conv.account_type)} flex items-center justify-center overflow-hidden`}>
+                            <div className={`w-full h-full bg-slate-800 ${getAvatarShape(conv.account_type)} flex items-center justify-center overflow-hidden border border-white/10`}>
                               {conv.avatar_url ? <img src={conv.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={24} />}
                             </div>
                             {conv.is_ai === 1 && (
-                              <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-gray-800 ${isUserOnline(conv) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(conv) ? 'Online' : 'Offline'}></div>
+                              <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-slate-950 ${isUserOnline(conv) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-slate-500'}`} title={isUserOnline(conv) ? 'Online' : 'Offline'}></div>
                             )}
                           </div>
                           <div className="overflow-hidden flex-1">
                             <div className="flex justify-between items-center">
-                              <p className="font-bold truncate">{conv.display_name}</p>
+                              <p className="font-bold truncate text-slate-200">{conv.display_name}</p>
                               {conv.unread_count > 0 && (
-                                <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-[0_0_8px_rgba(249,115,22,0.8)]">
                                   {conv.unread_count}
                                 </span>
                               )}
                             </div>
-                            <p className={`text-sm truncate ${conv.unread_count > 0 ? 'text-white font-bold' : 'text-gray-500'}`}>
+                            <p className={`text-sm truncate ${conv.unread_count > 0 ? 'text-white font-bold' : 'text-slate-500'}`}>
                               {conv.last_message}
                             </p>
                           </div>
@@ -3121,7 +3208,7 @@ export default function App() {
                       </div>
                     ))}
                     {conversations.length === 0 && groupChats.length === 0 && (
-                      <div className="p-4 text-center text-gray-500 text-sm">No messages yet.</div>
+                      <div className="p-4 text-center text-slate-500 text-sm">No messages yet.</div>
                     )}
                   </div>
                 </div>
@@ -3130,50 +3217,50 @@ export default function App() {
               {/* Chat Area */}
               {activeChat && (
                 <div className="w-full flex flex-col">
-                  <div className="p-4 border-b border-gray-800 font-bold flex items-center justify-between">
+                  <div className="p-4 border-b border-white/10 font-bold flex items-center justify-between bg-slate-950/80 backdrop-blur-xl">
                     <div className="flex items-center gap-3">
-                      <button onClick={() => setActiveChat(null)} className="p-2 hover:bg-gray-800 rounded-full">
+                      <button onClick={() => setActiveChat(null)} className="p-2 hover:bg-white/10 rounded-full transition">
                         <ArrowLeft size={20} />
                       </button>
                       <div className="relative w-8 h-8 flex-shrink-0">
-                        <div className={`w-full h-full bg-gray-700 ${getAvatarShape(activeChat.account_type)} flex items-center justify-center overflow-hidden`}>
+                        <div className={`w-full h-full bg-slate-800 ${getAvatarShape(activeChat.account_type)} flex items-center justify-center overflow-hidden border border-white/10`}>
                           {activeChat.avatar_url ? <img src={activeChat.avatar_url} alt="" className="w-full h-full object-cover" /> : (isGroupChat ? <Users size={16} /> : <User size={16} />)}
                         </div>
                         {(() => {
                           if (isGroupChat) {
                             const group = groupChats.find(g => g.id === activeChat.id);
                             if (group?.members?.some((m: any) => m.is_ai === 1 && isUserOnline(m))) {
-                              return <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-gray-900 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" title="AI Member Online"></div>;
+                              return <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-slate-950 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" title="AI Member Online"></div>;
                             }
                           } else {
                             const user = users.find(u => u.id === activeChat.id);
                             if (user?.is_ai === 1) {
-                              return <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-gray-900 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>;
+                              return <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-slate-950 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]' : 'bg-slate-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>;
                             }
                           }
                           return null;
                         })()}
                       </div>
-                      {activeChat.name}
+                      <span className="text-slate-100">{activeChat.name}</span>
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={() => setShowGallery(true)}
-                        className="p-2 text-gray-500 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition"
+                        className="p-2 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition"
                         title="View Gallery"
                       >
                         <Image size={20} />
                       </button>
                       <button
                         onClick={handleToggleImageGen}
-                        className={`p-2 rounded-full transition ${dmSettings.allow_image_gen === 1 ? 'text-orange-500 bg-orange-500/10' : 'text-gray-500 hover:text-orange-500 hover:bg-orange-500/10'}`}
+                        className={`p-2 rounded-full transition ${dmSettings.allow_image_gen === 1 ? 'text-orange-500 bg-orange-500/10' : 'text-slate-400 hover:text-orange-500 hover:bg-orange-500/10'}`}
                         title={dmSettings.allow_image_gen === 1 ? "Disable Image Generation" : "Enable Image Generation"}
                       >
                         <Zap size={20} fill={dmSettings.allow_image_gen === 1 ? "currentColor" : "none"} />
                       </button>
                       <button
                         onClick={() => handleToggleFavorite(activeChat.id, isGroupChat)}
-                        className={`p-2 rounded-full transition ${dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? 'text-yellow-500 bg-yellow-500/10' : 'text-gray-500 hover:text-yellow-500 hover:bg-yellow-500/10'}`}
+                        className={`p-2 rounded-full transition ${dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? 'text-yellow-500 bg-yellow-500/10' : 'text-slate-400 hover:text-yellow-500 hover:bg-yellow-500/10'}`}
                         title={dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? "Unfavorite" : "Favorite"}
                       >
                         <Star size={20} fill={dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? "currentColor" : "none"} />
@@ -3181,7 +3268,7 @@ export default function App() {
                       {!isGroupChat && (
                         <button 
                           onClick={handleResetChat}
-                          className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-full transition"
+                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition"
                           title="Reset Conversation"
                         >
                           <Trash2 size={20} />
@@ -3233,23 +3320,23 @@ export default function App() {
                         <React.Fragment key={i}>
                           {showTimeSeparator && (
                             <div className="flex justify-center my-6">
-                              <span className="text-xs font-medium text-gray-500 bg-gray-900/50 px-3 py-1 rounded-full">
+                              <span className="text-xs font-medium text-slate-500 bg-white/5 px-3 py-1 rounded-full border border-white/10">
                                 {new Date(msg.created_at).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </div>
                           )}
                           <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isLastInSequence ? 'mb-2' : 'mb-0.5'} w-full`}>
                             {!isMe && isGroupChat && sender && isFirstInSequence && (
-                            <span className="text-xs text-gray-400 ml-9 mb-1">{sender.display_name}</span>
+                            <span className="text-xs text-slate-400 ml-9 mb-1">{sender.display_name}</span>
                           )}
                           <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} gap-2 items-end`}>
                             {!isMe && (
                               <div className="w-6 flex-shrink-0">
                                 {isLastInSequence ? (
                                   <div className="relative">
-                                    <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className={`w-6 h-6 ${getAvatarShape(sender?.account_type || activeChat.account_type)} object-cover flex-shrink-0 mb-1`} />
+                                    <img src={sender?.avatar_url || activeChat.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'} alt="" className={`w-6 h-6 ${getAvatarShape(sender?.account_type || activeChat.account_type)} object-cover flex-shrink-0 mb-1 border border-white/10`} />
                                     {sender?.is_ai === 1 && (
-                                      <div className={`absolute bottom-1 -right-0.5 w-2 h-2 rounded-full border border-gray-900 ${isUserOnline(sender) ? 'bg-green-500' : 'bg-gray-500'}`} title={isUserOnline(sender) ? 'Online' : 'Offline'}></div>
+                                      <div className={`absolute bottom-1 -right-0.5 w-2 h-2 rounded-full border border-slate-950 ${isUserOnline(sender) ? 'bg-green-500' : 'bg-slate-500'}`} title={isUserOnline(sender) ? 'Online' : 'Offline'}></div>
                                     )}
                                   </div>
                                 ) : (
@@ -3258,7 +3345,7 @@ export default function App() {
                               </div>
                             )}
                             <div className={`group flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
-                              <div className={`rounded-2xl p-3 whitespace-pre-wrap break-words ${isMe ? 'bg-orange-500 text-white rounded-br-none' : 'bg-gray-800 text-white rounded-bl-none'}`}>
+                              <div className={`rounded-2xl p-3 whitespace-pre-wrap break-words border ${isMe ? 'bg-orange-500/20 border-orange-500/30 text-slate-100 rounded-br-none' : 'bg-slate-800/50 border-white/10 text-slate-100 rounded-bl-none backdrop-blur-sm'}`}>
                                 {msg.image_url && (
                                   <div className="mb-2 rounded-lg overflow-hidden border border-white/10 cursor-pointer" onClick={() => setExpandedImageUrl(msg.image_url)}>
                                     <img src={msg.image_url} alt="" className="w-full h-auto max-h-64 object-cover" referrerPolicy="no-referrer" />
@@ -3270,19 +3357,19 @@ export default function App() {
                                       users={users || []}
                                       value={editingDmContent} 
                                       onValueChange={setEditingDmContent}
-                                      className={`w-full border rounded p-2 text-white outline-none resize-none ${isMe ? 'bg-orange-600 border-orange-400 focus:border-white' : 'bg-gray-700 border-gray-600 focus:border-orange-500'}`}
+                                      className={`w-full border rounded p-2 text-white outline-none resize-none ${isMe ? 'bg-orange-600 border-orange-400 focus:border-white' : 'bg-slate-700 border-slate-600 focus:border-orange-500'}`}
                                       rows={3}
                                     />
                                     <div className="flex justify-end gap-2">
                                       <button onClick={() => setEditingDmId(null)} className="text-xs text-white/70 hover:text-white">Cancel</button>
-                                      <button onClick={() => handleEditDm(msg.id)} className={`text-xs px-2 py-1 rounded ${isMe ? 'bg-white text-orange-600 hover:bg-gray-100' : 'bg-orange-600 text-white hover:bg-orange-500'}`}>Save</button>
+                                      <button onClick={() => handleEditDm(msg.id)} className={`text-xs px-2 py-1 rounded ${isMe ? 'bg-white text-orange-600 hover:bg-slate-100' : 'bg-orange-600 text-white hover:bg-orange-500'}`}>Save</button>
                                     </div>
                                   </div>
                                 ) : (
                                   <>
                                     {(msg.content || '').trim()}
                                     {msg.internal_thought && (
-                                      <div className={`mt-2 p-2 rounded-lg text-xs italic relative overflow-hidden group ${isMe ? 'bg-orange-600/50 border-l-2 border-white/50 text-white/90' : 'bg-gray-700/50 border-l-2 border-orange-500 text-gray-300'}`}>
+                                      <div className={`mt-2 p-2 rounded-lg text-xs italic relative overflow-hidden group ${isMe ? 'bg-orange-600/50 border-l-2 border-white/50 text-white/90' : 'bg-slate-700/50 border-l-2 border-orange-500 text-slate-300'}`}>
                                         <div className="absolute -right-2 -top-2 opacity-5">
                                           <Brain size={32} />
                                         </div>
@@ -3302,13 +3389,13 @@ export default function App() {
                                   const originalMsg = chatMessages.find(m => m.id === originalId);
                                   setEditingDmId(msg.id); 
                                   setEditingDmContent(originalMsg ? originalMsg.content : msg.content); 
-                                }} className="text-xs text-gray-500 hover:text-white"><Edit2 size={12} /></button>
-                                <button onClick={() => handleDeleteDm(msg.id)} className="text-xs text-gray-500 hover:text-red-500"><Trash2 size={12} /></button>
+                                }} className="text-xs text-slate-500 hover:text-white"><Edit2 size={12} /></button>
+                                <button onClick={() => handleDeleteDm(msg.id)} className="text-xs text-slate-500 hover:text-red-500"><Trash2 size={12} /></button>
                               </div>
                             </div>
                           </div>
                           {isLastInSequence && (
-                            <span className="text-[10px] text-gray-500 px-2">
+                            <span className="text-[10px] text-slate-500 px-2">
                               {formatTimestamp(msg.created_at)}
                             </span>
                           )}
@@ -3319,13 +3406,13 @@ export default function App() {
                     {(typingUser || serverTypingUsers.length > 0) && (
                       <div className="flex flex-col gap-2 mb-4">
                         {serverTypingUsers.filter(u => u !== typingUser).map(u => (
-                          <div key={u} className="flex items-center gap-2 text-gray-400 text-xs italic ml-9">
+                          <div key={u} className="flex items-center gap-2 text-slate-400 text-xs italic ml-9">
                             <Loader2 size={12} className="animate-spin" />
                             {u} is typing...
                           </div>
                         ))}
                         {typingUser && (
-                          <div className="flex items-center gap-2 text-gray-400 text-xs italic ml-9">
+                          <div className="flex items-center gap-2 text-slate-400 text-xs italic ml-9">
                             <Loader2 size={12} className="animate-spin" />
                             {typingUser} is typing...
                           </div>
@@ -3335,7 +3422,7 @@ export default function App() {
                   </>
                 )}
               </div>
-                  <div className="p-4 border-t border-gray-800">
+                  <div className="p-4 border-t border-white/10 bg-slate-950/80 backdrop-blur-xl">
                     <ChatInputForm 
                       users={users} 
                       onSend={handleSendMsg} 
@@ -3349,57 +3436,57 @@ export default function App() {
 
           {activeTab === 'universes' && (
             <div className="p-6 max-w-4xl mx-auto">
-              <h2 className="text-2xl font-bold mb-6">Universes</h2>
+              <h2 className="text-2xl font-bold mb-6 text-slate-100">Universes</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div onClick={() => handleViewUniverse(-1)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition flex flex-col h-full">
+                <div onClick={() => handleViewUniverse(-1)} className="bg-slate-900/50 border border-white/10 rounded-2xl p-4 cursor-pointer hover:bg-slate-800/50 hover:border-orange-500/30 transition flex flex-col h-full backdrop-blur-sm group">
                   <div className="flex items-center gap-4 mb-3">
-                    <div className="w-16 h-16 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
-                      <Globe size={32} className="m-auto mt-4 text-gray-500" />
+                    <div className="w-16 h-16 bg-slate-800 rounded-full overflow-hidden flex-shrink-0 border border-white/10 group-hover:border-orange-500/50 transition-colors">
+                      <Globe size={32} className="m-auto mt-4 text-slate-500 group-hover:text-orange-400 transition-colors" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-lg">None</h3>
-                      <p className="text-sm text-gray-400">{universeCounts['none'] || 0} characters</p>
+                      <h3 className="font-bold text-lg text-slate-100 group-hover:text-orange-400 transition-colors">None</h3>
+                      <p className="text-sm text-slate-400">{universeCounts['none'] || 0} characters</p>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-300 line-clamp-2 mb-4 flex-1">Characters without an assigned universe.</p>
+                  <p className="text-sm text-slate-300 line-clamp-2 mb-4 flex-1">Characters without an assigned universe.</p>
                   <div className="flex -space-x-2 overflow-hidden mt-auto pt-2">
                     {(universeCharactersMap['none'] || []).slice(0, 7).map(char => (
                       <div key={char.id} className={`relative inline-block ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                         <img 
                           src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
                           alt={char.display_name} 
-                          className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-gray-900 object-cover bg-gray-800`} 
+                          className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-slate-950 object-cover bg-slate-800`} 
                           referrerPolicy="no-referrer" 
                         />
                         {char.is_active && isUserOnline(char, currentTimeInMinutes) && (
-                          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-gray-900 rounded-full"></div>
+                          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-slate-950 rounded-full shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>
                         )}
                       </div>
                     ))}
                     {(universeCharactersMap['none'] || []).length > 7 && (
-                      <div className="w-8 h-8 rounded-full border-2 border-gray-900 bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-400 z-10 relative">
+                      <div className="w-8 h-8 rounded-full border-2 border-slate-950 bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-400 z-10 relative">
                         +{(universeCharactersMap['none'] || []).length - 7}
                       </div>
                     )}
                   </div>
                 </div>
                 {universes.map(u => (
-                  <div key={u.id} onClick={() => handleViewUniverse(u.id)} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 cursor-pointer hover:bg-gray-800 transition flex flex-col h-full">
+                  <div key={u.id} onClick={() => handleViewUniverse(u.id)} className="bg-slate-900/50 border border-white/10 rounded-2xl p-4 cursor-pointer hover:bg-slate-800/50 hover:border-orange-500/30 transition flex flex-col h-full backdrop-blur-sm group">
                     <div className="flex items-center gap-4 mb-3">
-                      <div className="w-16 h-16 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
+                      <div className="w-16 h-16 bg-slate-800 rounded-full overflow-hidden flex-shrink-0 border border-white/10 group-hover:border-orange-500/50 transition-colors">
                         {u.image_url ? (
                           <img src={u.image_url} alt={u.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
-                          <Globe size={32} className="m-auto mt-4 text-gray-500" />
+                          <Globe size={32} className="m-auto mt-4 text-slate-500 group-hover:text-orange-400 transition-colors" />
                         )}
                       </div>
                       <div>
-                        <h3 className="font-bold text-lg">{u.name}</h3>
-                        <p className="text-sm text-gray-400">{universeCounts[u.id] || 0} characters</p>
+                        <h3 className="font-bold text-lg text-slate-100 group-hover:text-orange-400 transition-colors">{u.name}</h3>
+                        <p className="text-sm text-slate-400">{universeCounts[u.id] || 0} characters</p>
                       </div>
                     </div>
                     {u.description && (
-                      <p className="text-sm text-gray-300 line-clamp-2 mb-4 flex-1">{u.description}</p>
+                      <p className="text-sm text-slate-300 line-clamp-2 mb-4 flex-1">{u.description}</p>
                     )}
                     {!u.description && <div className="flex-1"></div>}
                     <div className="flex -space-x-2 overflow-hidden mt-auto pt-2">
@@ -3408,16 +3495,16 @@ export default function App() {
                           <img 
                             src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} 
                             alt={char.display_name} 
-                            className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-gray-900 object-cover bg-gray-800`} 
+                            className={`w-8 h-8 ${getAvatarShape(char.account_type)} border-2 border-slate-950 object-cover bg-slate-800`} 
                             referrerPolicy="no-referrer" 
                           />
                           {char.is_active && isUserOnline(char, currentTimeInMinutes) && (
-                            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-gray-900 rounded-full"></div>
+                            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-slate-950 rounded-full shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>
                           )}
                         </div>
                       ))}
                       {(universeCharactersMap[u.id] || []).length > 7 && (
-                        <div className="w-8 h-8 rounded-full border-2 border-gray-900 bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-400 z-10 relative">
+                        <div className="w-8 h-8 rounded-full border-2 border-slate-950 bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-400 z-10 relative">
                           +{(universeCharactersMap[u.id] || []).length - 7}
                         </div>
                       )}
@@ -3425,7 +3512,7 @@ export default function App() {
                   </div>
                 ))}
                 {universes.length === 0 && (
-                  <div className="col-span-full p-8 text-center text-gray-500">
+                  <div className="col-span-full p-8 text-center text-slate-500">
                     <p>No universes created yet. You can create one when adding or editing a character.</p>
                   </div>
                 )}
@@ -3436,51 +3523,51 @@ export default function App() {
           {activeTab === 'universe_details' && viewingUniverse && (
             <div className="p-6 max-w-4xl mx-auto">
               <div className="flex justify-between items-center mb-6">
-                <button onClick={() => setActiveTab('universes')} className="flex items-center gap-2 text-gray-400 hover:text-white">
+                <button onClick={() => setActiveTab('universes')} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
                   <ArrowLeft size={20} /> Back to Universes
                 </button>
                 {!isEditingUniverse && viewingUniverse.id !== -1 && (
                   <button 
                     onClick={() => setIsEditingUniverse(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition"
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition"
                   >
                     <Settings size={18} /> Edit Universe
                   </button>
                 )}
               </div>
               
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8">
+              <div className="bg-slate-900/50 border border-white/10 rounded-2xl p-6 mb-8 backdrop-blur-sm">
                 {isEditingUniverse ? (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Universe Image URL</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Universe Image URL</label>
                       <input
                         type="text"
                         value={editUniverseImageUrl}
                         onChange={(e) => setEditUniverseImageUrl(e.target.value)}
                         placeholder="https://example.com/image.jpg"
-                        className="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none"
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 focus:ring-2 focus:ring-orange-500 outline-none text-slate-100 placeholder-slate-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Lore / Description</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Lore / Description</label>
                       <textarea
                         value={editUniverseDescription}
                         onChange={(e) => setEditUniverseDescription(e.target.value)}
                         placeholder="Describe the lore and context of this universe..."
-                        className="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 h-32 focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 h-32 focus:ring-2 focus:ring-orange-500 outline-none resize-none text-slate-100 placeholder-slate-500"
                       />
                     </div>
                     <div className="flex gap-3 pt-2">
                       <button
                         onClick={handleUpdateUniverse}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-bold transition"
+                        className="flex-1 bg-orange-600 hover:bg-orange-500 py-3 rounded-xl font-bold transition text-white"
                       >
                         Save Changes
                       </button>
                       <button
                         onClick={() => setIsEditingUniverse(false)}
-                        className="flex-1 bg-gray-800 hover:bg-gray-700 py-3 rounded-xl font-bold transition"
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 py-3 rounded-xl font-bold transition text-slate-100"
                       >
                         Cancel
                       </button>
@@ -3488,20 +3575,20 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="flex flex-col md:flex-row gap-6 items-start">
-                    <div className="w-32 h-32 bg-gray-700 rounded-full overflow-hidden flex-shrink-0">
+                    <div className="w-32 h-32 bg-slate-800 rounded-full overflow-hidden flex-shrink-0 border border-white/10">
                       {viewingUniverse.image_url ? (
                         <img src={viewingUniverse.image_url} alt={viewingUniverse.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                       ) : (
-                        <Globe size={64} className="m-auto mt-8 text-gray-500" />
+                        <Globe size={64} className="m-auto mt-8 text-slate-500" />
                       )}
                     </div>
                     <div>
-                      <h2 className="text-3xl font-bold mb-2">{viewingUniverse.name}</h2>
-                      <p className="text-gray-400 mb-4">{viewingUniverseCharacters.length} characters</p>
+                      <h2 className="text-3xl font-bold mb-2 text-slate-100">{viewingUniverse.name}</h2>
+                      <p className="text-slate-400 mb-4">{viewingUniverseCharacters.length} characters</p>
                       {viewingUniverse.description ? (
-                        <p className="text-gray-300 whitespace-pre-wrap">{viewingUniverse.description}</p>
+                        <p className="text-slate-300 whitespace-pre-wrap">{viewingUniverse.description}</p>
                       ) : (
-                        <p className="text-gray-500 italic">No lore information added yet.</p>
+                        <p className="text-slate-500 italic">No lore information added yet.</p>
                       )}
                     </div>
                   </div>
@@ -3509,40 +3596,40 @@ export default function App() {
               </div>
 
               <div className="flex justify-between items-center mb-4">
-                <div className="flex gap-6">
+                <div className="flex gap-6 border-b border-white/10 w-full">
                   <button 
                     onClick={() => setUniverseActiveTab('characters')}
-                    className={`pb-2 font-bold transition-colors ${universeActiveTab === 'characters' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                    className={`pb-2 font-bold transition-colors ${universeActiveTab === 'characters' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-slate-500 hover:text-slate-300'}`}
                   >
                     Characters
                   </button>
                   <button 
                     onClick={() => setUniverseActiveTab('arcs')}
-                    className={`pb-2 font-bold transition-colors ${universeActiveTab === 'arcs' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                    className={`pb-2 font-bold transition-colors ${universeActiveTab === 'arcs' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-slate-500 hover:text-slate-300'}`}
                   >
                     Universe Arcs
                   </button>
                 </div>
-                {universeActiveTab === 'characters' && viewingUniverseCharacters.length > 0 && (
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => handleFollowAllInUniverse(viewingUniverseCharacters)}
-                      className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold transition"
-                    >
-                      Follow All
-                    </button>
-                    <button 
-                      onClick={() => handleUnfollowAllInUniverse(viewingUniverseCharacters)}
-                      className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg font-bold transition"
-                    >
-                      Unfollow All
-                    </button>
-                  </div>
-                )}
               </div>
+              {universeActiveTab === 'characters' && viewingUniverseCharacters.length > 0 && (
+                <div className="flex gap-2 mb-4">
+                  <button 
+                    onClick={() => handleFollowAllInUniverse(viewingUniverseCharacters)}
+                    className="text-xs bg-orange-600/20 hover:bg-orange-600/30 text-orange-500 border border-orange-500/30 px-3 py-1.5 rounded-lg font-bold transition"
+                  >
+                    Follow All
+                  </button>
+                  <button 
+                    onClick={() => handleUnfollowAllInUniverse(viewingUniverseCharacters)}
+                    className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-white/10 px-3 py-1.5 rounded-lg font-bold transition"
+                  >
+                    Unfollow All
+                  </button>
+                </div>
+              )}
 
               {isFetchingUniverseData ? (
-                <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                <div className="flex flex-col items-center justify-center py-12 text-slate-500">
                   <Loader2 className="animate-spin mb-2" size={32} />
                   <p>Loading universe data...</p>
                 </div>
@@ -3551,24 +3638,24 @@ export default function App() {
                   {universeActiveTab === 'characters' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {viewingUniverseCharacters.map(char => (
-                    <div key={char.id} onClick={() => handleViewProfile(char.id)} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
+                    <div key={char.id} onClick={() => handleViewProfile(char.id)} className={`bg-slate-900/50 border border-white/10 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 hover:border-orange-500/30 transition backdrop-blur-sm group ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                       <div className="relative">
-                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className={`w-12 h-12 ${getAvatarShape(char.account_type)} object-cover`} referrerPolicy="no-referrer" />
+                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className={`w-12 h-12 ${getAvatarShape(char.account_type)} object-cover border border-white/10 group-hover:border-orange-500/50 transition-colors`} referrerPolicy="no-referrer" />
                         {char.is_active && isUserOnline(char) && (
-                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
+                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-slate-950 rounded-full shadow-[0_0_6px_rgba(34,197,94,0.6)]" title="Online"></div>
                         )}
                       </div>
                       <div className="overflow-hidden flex-1">
-                        <p className="font-bold truncate flex items-center gap-2">
+                        <p className="font-bold truncate flex items-center gap-2 text-slate-100 group-hover:text-orange-400 transition-colors">
                           {char.display_name}
-                          {!char.is_active && <span className="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-400">Inactive</span>}
+                          {!char.is_active && <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 border border-white/10">Inactive</span>}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">@{char.username}</p>
+                        <p className="text-xs text-slate-500 truncate">@{char.username}</p>
                       </div>
                     </div>
                   ))}
                   {viewingUniverseCharacters.length === 0 && (
-                    <p className="text-gray-500 col-span-full">No characters found in this universe.</p>
+                    <p className="text-slate-500 col-span-full">No characters found in this universe.</p>
                   )}
                 </div>
               ) : (
@@ -3577,59 +3664,59 @@ export default function App() {
                     <div className="flex gap-2 mb-4">
                       <button 
                         onClick={() => handleAddArc('universe', viewingUniverse.id)}
-                        className="flex items-center gap-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold transition"
+                        className="flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-100 border border-white/10 px-3 py-1.5 rounded-lg font-bold transition"
                       >
                         <Plus size={14} /> Add Manual Arc
                       </button>
                       <button 
                         onClick={() => handleGenerateArc('universe', viewingUniverse.id)}
                         disabled={isGeneratingArc}
-                        className="flex items-center gap-2 text-xs bg-orange-600 hover:bg-orange-500 text-white px-3 py-1.5 rounded-lg font-bold transition disabled:opacity-50"
+                        className="flex items-center gap-2 text-xs bg-orange-600/20 hover:bg-orange-600/30 text-orange-500 border border-orange-500/30 px-3 py-1.5 rounded-lg font-bold transition disabled:opacity-50"
                       >
                         <Sparkles size={14} /> {isGeneratingArc ? 'Generating...' : 'Generate AI Arc'}
                       </button>
                     </div>
                   )}
                   {viewingUniverseArcs.length === 0 ? (
-                    <p className="text-center text-gray-500 py-4">No universe arcs yet.</p>
+                    <p className="text-center text-slate-500 py-4">No universe arcs yet.</p>
                   ) : (
                     viewingUniverseArcs.map(arc => (
-                      <div key={arc.id} className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                      <div key={arc.id} className="bg-slate-900/50 border border-white/10 rounded-xl p-6 backdrop-blur-sm">
                         <div className="flex justify-between items-start mb-4">
-                          <h3 className="font-bold text-xl text-white">{arc.title}</h3>
+                          <h3 className="font-bold text-xl text-slate-100">{arc.title}</h3>
                           <div className="flex items-center gap-3">
                             {loggedInUser?.role === 'admin' && (
                               <div className="flex gap-2 mr-2">
                                 <button 
                                   onClick={() => handleEditArc(arc)}
-                                  className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-blue-400 transition"
+                                  className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-blue-400 transition"
                                   title="Edit Arc"
                                 >
                                   <Edit2 size={16} />
                                 </button>
                                 <button 
                                   onClick={() => handleDeleteArc(arc)}
-                                  className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-red-400 transition"
+                                  className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-red-400 transition"
                                   title="Delete Arc"
                                 >
                                   <Trash2 size={16} />
                                 </button>
                               </div>
                             )}
-                            <span className={`text-xs font-bold px-3 py-1 rounded-full ${arc.status === 'active' ? 'bg-green-500/20 text-green-500 border border-green-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                            <span className={`text-xs font-bold px-3 py-1 rounded-full ${arc.status === 'active' ? 'bg-green-500/20 text-green-500 border border-green-500/30' : 'bg-slate-800 text-slate-400 border border-white/10'}`}>
                               {arc.status.toUpperCase()}
                             </span>
                           </div>
                         </div>
                         
                         <div className="mb-4">
-                          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Overall Premise</p>
-                          <p className="text-gray-300 text-sm whitespace-pre-wrap">{arc.description}</p>
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Overall Premise</p>
+                          <p className="text-slate-300 text-sm whitespace-pre-wrap">{arc.description}</p>
                         </div>
 
-                        <div className="mb-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                        <div className="mb-4 p-4 bg-slate-800/50 rounded-lg border border-white/10">
                           <p className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">Current Status / Latest Developments</p>
-                          <p className="text-gray-200 text-sm whitespace-pre-wrap">{arc.current_status_text}</p>
+                          <p className="text-slate-200 text-sm whitespace-pre-wrap">{arc.current_status_text}</p>
                         </div>
 
                         {arc.status === 'completed' && arc.completion_summary && (
@@ -3639,7 +3726,7 @@ export default function App() {
                           </div>
                         )}
                         
-                        <div className="flex gap-6 text-xs text-gray-500 border-t border-gray-800 pt-4 mt-4">
+                        <div className="flex gap-6 text-xs text-slate-500 border-t border-white/10 pt-4 mt-4">
                           <span>Started: {new Date(arc.start_date).toLocaleDateString()}</span>
                           <span>Target End: {new Date(arc.target_end_date).toLocaleDateString()}</span>
                           <span>Last Updated: {new Date(arc.last_update_date).toLocaleDateString()}</span>
@@ -3657,34 +3744,34 @@ export default function App() {
 
           {activeTab === 'following' && (
             <div className="p-6 max-w-4xl mx-auto">
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 text-slate-100">
                 <UserCheck className="text-orange-500" />
                 Following
               </h2>
-              <p className="text-gray-400 mb-6">
+              <p className="text-slate-400 mb-6">
                 Manage the characters you are currently following.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {followedUsers.map(char => (
-                  <div key={char.id} className={`bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-3 hover:bg-gray-800 transition ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
+                  <div key={char.id} className={`bg-slate-900/50 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-3 hover:bg-slate-800/50 hover:border-orange-500/30 transition backdrop-blur-sm group ${!char.is_active ? 'opacity-50 grayscale' : ''}`}>
                     <div className="flex items-center gap-3 cursor-pointer overflow-hidden flex-1" onClick={() => handleViewProfile(char.id)}>
                       <div className="relative flex-shrink-0">
-                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className={`w-12 h-12 ${getAvatarShape(char.account_type)} object-cover`} referrerPolicy="no-referrer" />
+                        <img src={char.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`} alt={char.display_name} className={`w-12 h-12 ${getAvatarShape(char.account_type)} object-cover border border-white/10 group-hover:border-orange-500/50 transition-colors`} referrerPolicy="no-referrer" />
                         {char.is_active && isUserOnline(char, currentTimeInMinutes) && (
-                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-gray-900 rounded-full" title="Online"></div>
+                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-slate-950 rounded-full shadow-[0_0_6px_rgba(34,197,94,0.6)]" title="Online"></div>
                         )}
                       </div>
                       <div className="overflow-hidden">
-                        <p className="font-bold truncate flex items-center gap-2">
+                        <p className="font-bold truncate flex items-center gap-2 text-slate-100 group-hover:text-orange-400 transition-colors">
                           {char.display_name}
-                          {!char.is_active && <span className="text-[10px] bg-gray-800 px-2 py-0.5 rounded text-gray-400">Inactive</span>}
+                          {!char.is_active && <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 border border-white/10">Inactive</span>}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">@{char.username}</p>
+                        <p className="text-xs text-slate-500 truncate">@{char.username}</p>
                       </div>
                     </div>
                     <button 
                       onClick={(e) => { e.stopPropagation(); handleFollow(char.id); }}
-                      className="p-2 bg-gray-800 hover:bg-red-500/20 text-gray-400 hover:text-red-500 rounded-full transition flex-shrink-0"
+                      className="p-2 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-500 rounded-full transition flex-shrink-0 border border-white/10"
                       title="Unfollow"
                     >
                       <UserCheck size={18} />
@@ -3692,7 +3779,7 @@ export default function App() {
                   </div>
                 ))}
                 {followedUsers.length === 0 && (
-                  <div className="col-span-full text-center py-12 text-gray-500">
+                  <div className="col-span-full text-center py-12 text-slate-500">
                     <UserCheck size={48} className="mx-auto mb-4 opacity-20" />
                     <p>You are not following any characters yet.</p>
                   </div>
@@ -3703,35 +3790,35 @@ export default function App() {
 
           {activeTab === 'arcs' && (
             <div className="p-6 max-w-4xl mx-auto">
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 text-slate-100">
                 <BookOpen className="text-orange-500" />
                 Ongoing Arcs
               </h2>
-              <p className="text-gray-400 mb-6">
+              <p className="text-slate-400 mb-6">
                 This tab shows all active and recently completed arcs for characters and universes.
               </p>
               
               <div className="space-y-4">
                 {arcs.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
+                  <div className="text-center py-12 text-slate-500">
                     <BookOpen size={48} className="mx-auto mb-4 opacity-20" />
                     <p>No arcs have been generated yet.</p>
                   </div>
                 ) : (
                   arcs.map((arc: any) => (
-                    <div key={`${arc.arc_type}-${arc.id}`} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-4 relative group">
+                    <div key={`${arc.arc_type}-${arc.id}`} className="bg-slate-900/50 border border-white/10 rounded-2xl p-5 flex flex-col gap-4 relative group backdrop-blur-sm">
                       {loggedInUser?.role === 'admin' && (
                         <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition">
                           <button 
                             onClick={() => handleEditArc(arc)}
-                            className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-blue-400 transition"
+                            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-blue-400 transition border border-white/10"
                             title="Edit Arc"
                           >
                             <Edit2 size={16} />
                           </button>
                           <button 
                             onClick={() => handleDeleteArc(arc)}
-                            className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-red-400 transition"
+                            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-red-400 transition border border-white/10"
                             title="Delete Arc"
                           >
                             <Trash2 size={16} />
@@ -3741,41 +3828,41 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           {arc.entity_image ? (
-                            <img src={arc.entity_image} alt={arc.entity_name} className={`w-10 h-10 ${getAvatarShape(arc.entity_account_type)} object-cover bg-gray-800`} referrerPolicy="no-referrer" />
+                            <img src={arc.entity_image} alt={arc.entity_name} className={`w-10 h-10 ${getAvatarShape(arc.entity_account_type)} object-cover border border-white/10 bg-slate-800`} referrerPolicy="no-referrer" />
                           ) : (
-                            <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-gray-500">
+                            <div className="w-10 h-10 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center text-slate-500">
                               {arc.arc_type === 'universe' ? <Globe size={20} /> : <User size={20} />}
                             </div>
                           )}
                           <div>
-                            <h3 className="font-bold text-lg leading-tight">{arc.title}</h3>
-                            <p className="text-xs text-gray-500">
+                            <h3 className="font-bold text-lg leading-tight text-slate-100">{arc.title}</h3>
+                            <p className="text-xs text-slate-500">
                               {arc.entity_name} {arc.entity_handle ? `(@${arc.entity_handle})` : ''} • {new Date(arc.last_update_date || arc.created_at).toLocaleString()}
                             </p>
                           </div>
                         </div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${arc.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${arc.status === 'completed' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
                           {arc.status === 'completed' ? 'Completed' : 'Active'}
                         </div>
                       </div>
                       
-                      <div className="bg-black/30 rounded-xl p-4 text-sm space-y-3">
+                      <div className="bg-slate-950/50 rounded-xl p-4 text-sm space-y-3 border border-white/5">
                         <div>
-                          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Description</span>
-                          <p className="text-gray-300 mt-1">{arc.description}</p>
+                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description</span>
+                          <p className="text-slate-300 mt-1">{arc.description}</p>
                         </div>
                         
                         {arc.arc_type === 'universe' && arc.current_status_text && (
                           <div>
-                            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Current Status</span>
-                            <p className="text-gray-300 mt-1 italic">"{arc.current_status_text}"</p>
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Current Status</span>
+                            <p className="text-slate-300 mt-1 italic">"{arc.current_status_text}"</p>
                           </div>
                         )}
 
                         {arc.status === 'completed' && arc.completion_summary && (
-                          <div className="pt-2 border-t border-gray-800/50">
+                          <div className="pt-2 border-t border-white/10">
                             <span className="text-xs font-bold text-green-500 uppercase tracking-wider">Conclusion</span>
-                            <p className="text-gray-300 mt-1">{arc.completion_summary}</p>
+                            <p className="text-slate-300 mt-1">{arc.completion_summary}</p>
                           </div>
                         )}
                         {renderArcHistory(arc)}
@@ -3787,7 +3874,7 @@ export default function App() {
                 {hasMoreArcs && arcs.length > 0 && (
                   <button 
                     onClick={() => fetchArcs(false)}
-                    className="w-full py-4 text-center text-gray-400 hover:text-white bg-gray-900 hover:bg-gray-800 rounded-xl transition font-bold mt-4"
+                    className="w-full py-4 text-center text-slate-400 hover:text-white bg-slate-900/50 hover:bg-slate-800/50 border border-white/10 rounded-xl transition font-bold mt-4 backdrop-blur-sm"
                   >
                     Load More Arcs
                   </button>
@@ -3798,49 +3885,49 @@ export default function App() {
 
           {activeTab === 'relationships' && loggedInUser?.role === 'admin' && (
             <div className="p-6 max-w-4xl mx-auto">
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2 text-slate-100">
                 <Users className="text-orange-500" />
                 Dynamic Relationships
               </h2>
-              <p className="text-gray-400 mb-6">
+              <p className="text-slate-400 mb-6">
                 This tab shows all the times the AI evaluated whether two characters formed a meaningful relationship based on their interactions.
               </p>
               
               <div className="space-y-4">
                 {relationshipChecks.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
+                  <div className="text-center py-12 text-slate-500">
                     <Users size={48} className="mx-auto mb-4 opacity-20" />
                     <p>No relationship checks have occurred yet.</p>
                     <p className="text-sm mt-2">Characters need to interact more (comments or DMs) to trigger a check.</p>
                   </div>
                 ) : (
                   relationshipChecks.map((check: any) => (
-                    <div key={check.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-4">
+                    <div key={check.id} className="bg-slate-900/50 border border-white/10 rounded-2xl p-5 flex flex-col gap-4 backdrop-blur-sm">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className="flex -space-x-4">
-                            <img src={check.user1_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user1_name}`} alt={check.user1_name} className={`w-12 h-12 ${getAvatarShape(check.user1_account_type)} border-2 border-gray-900 object-cover bg-gray-800`} referrerPolicy="no-referrer" />
-                            <img src={check.user2_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user2_name}`} alt={check.user2_name} className={`w-12 h-12 ${getAvatarShape(check.user2_account_type)} border-2 border-gray-900 object-cover bg-gray-800`} referrerPolicy="no-referrer" />
+                            <img src={check.user1_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user1_name}`} alt={check.user1_name} className={`w-12 h-12 ${getAvatarShape(check.user1_account_type)} border-2 border-slate-950 object-cover bg-slate-800`} referrerPolicy="no-referrer" />
+                            <img src={check.user2_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user2_name}`} alt={check.user2_name} className={`w-12 h-12 ${getAvatarShape(check.user2_account_type)} border-2 border-slate-950 object-cover bg-slate-800`} referrerPolicy="no-referrer" />
                           </div>
                           <div>
-                            <h3 className="font-bold text-lg">{check.user1_name} & {check.user2_name}</h3>
-                            <p className="text-xs text-gray-500">{new Date(check.created_at).toLocaleString()}</p>
+                            <h3 className="font-bold text-lg text-slate-100">{check.user1_name} & {check.user2_name}</h3>
+                            <p className="text-xs text-slate-500">{new Date(check.created_at).toLocaleString()}</p>
                           </div>
                         </div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${check.result ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${check.result ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
                           {check.result ? (check.is_update ? 'Relationship Updated' : 'Relationship Formed') : (check.is_update ? 'No Update Needed' : 'No Relationship')}
                         </div>
                       </div>
                       
-                      <div className="bg-black/30 rounded-xl p-4 text-sm">
-                        <div className="flex items-center gap-2 mb-2 text-gray-400">
-                          <span className="font-mono text-xs bg-gray-800 px-2 py-0.5 rounded">Threshold: {check.interaction_threshold}</span>
-                          {check.is_update ? <span className="font-mono text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">Update Check</span> : <span className="font-mono text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">New Check</span>}
+                      <div className="bg-slate-950/50 rounded-xl p-4 text-sm border border-white/5">
+                        <div className="flex items-center gap-2 mb-2 text-slate-400">
+                          <span className="font-mono text-xs bg-slate-800 px-2 py-0.5 rounded border border-white/10">Threshold: {check.interaction_threshold}</span>
+                          {check.is_update ? <span className="font-mono text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded border border-blue-500/30">Update Check</span> : <span className="font-mono text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded border border-purple-500/30">New Check</span>}
                         </div>
                         {check.description ? (
-                          <p className="text-gray-300 italic">"{check.description}"</p>
+                          <p className="text-slate-300 italic">"{check.description}"</p>
                         ) : (
-                          <p className="text-gray-500 italic">The AI determined their interactions were not significant enough to {check.is_update ? 'update their existing relationship' : 'form a hard-coded relationship'}.</p>
+                          <p className="text-slate-500 italic">The AI determined their interactions were not significant enough to {check.is_update ? 'update their existing relationship' : 'form a hard-coded relationship'}.</p>
                         )}
                       </div>
                     </div>
@@ -3850,7 +3937,7 @@ export default function App() {
                 {hasMoreRelationshipChecks && relationshipChecks.length > 0 && (
                   <button 
                     onClick={() => fetchRelationshipChecks(false)}
-                    className="w-full py-4 text-center text-gray-400 hover:text-white bg-gray-900 hover:bg-gray-800 rounded-xl transition font-bold mt-4"
+                    className="w-full py-4 text-center text-slate-400 hover:text-white bg-slate-900/50 hover:bg-slate-800/50 border border-white/10 rounded-xl transition font-bold mt-4 backdrop-blur-sm"
                   >
                     Load More Checks
                   </button>
@@ -3865,22 +3952,22 @@ export default function App() {
 
           {activeTab === 'settings' && (
             <div className="p-6 max-w-2xl mx-auto">
-              <h2 className="text-2xl font-bold mb-6">Settings</h2>
+              <h2 className="text-2xl font-bold mb-6 text-slate-100">Settings</h2>
               <div className="space-y-8">
-                <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                <section className="bg-slate-900/50 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-100">
                     <Lock size={20} className="text-orange-500" />
                     Security
                   </h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Update Login PIN</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Update Login PIN</label>
                       <div className="flex gap-2">
                         <input 
                           type="password" 
                           maxLength={4}
                           placeholder="New 4-digit PIN"
-                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 placeholder-slate-500" 
                           id="settings-pin-input"
                         />
                         <button 
@@ -3910,23 +3997,23 @@ export default function App() {
                           Update
                         </button>
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">Leave empty to remove PIN. Only 4-digit numeric PINs are supported.</p>
+                      <p className="text-xs text-slate-500 mt-2">Leave empty to remove PIN. Only 4-digit numeric PINs are supported.</p>
                     </div>
                   </div>
                 </section>
 
-                <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                <section className="bg-slate-900/50 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-100">
                     <Globe size={20} className="text-orange-500" />
                     Localization
                   </h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Timezone</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Timezone</label>
                       <select 
                         value={timezone} 
                         onChange={e => handleUpdateSettings({ timezone: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"
+                        className="w-full bg-slate-950 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500"
                       >
                         <option value="UTC">UTC</option>
                         <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
@@ -3939,12 +4026,12 @@ export default function App() {
                 </section>
 
                 {loggedInUser?.role === 'admin' && (
-                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                  <section className="bg-slate-900/50 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-100">
                       <Users size={20} className="text-orange-500" />
                       User Management
                     </h3>
-                    <p className="text-sm text-gray-400 mb-4">Add new real users to the platform. They will have their own profile, timeline, and messages.</p>
+                    <p className="text-sm text-slate-400 mb-4">Add new real users to the platform. They will have their own profile, timeline, and messages.</p>
                     
                     <form onSubmit={async (e) => {
                       e.preventDefault();
@@ -3970,44 +4057,44 @@ export default function App() {
                       } catch (err) {
                         showToast("Error adding user");
                       }
-                    }} className="space-y-4 border border-gray-800 p-4 rounded-xl">
-                      <h4 className="font-bold text-sm">Add New User</h4>
+                    }} className="space-y-4 border border-white/10 p-4 rounded-xl bg-slate-950/50">
+                      <h4 className="font-bold text-sm text-slate-100">Add New User</h4>
                       <div>
-                        <label className="block text-xs font-medium text-gray-400 mb-1">Username (Required)</label>
-                        <input name="username" required type="text" className="w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm" />
+                        <label className="block text-xs font-medium text-slate-400 mb-1">Username (Required)</label>
+                        <input name="username" required type="text" className="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 text-sm placeholder-slate-500" />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-400 mb-1">Display Name</label>
-                        <input name="display_name" type="text" className="w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm" />
+                        <label className="block text-xs font-medium text-slate-400 mb-1">Display Name</label>
+                        <input name="display_name" type="text" className="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 text-sm placeholder-slate-500" />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-400 mb-1">PIN (Optional, 4 digits recommended)</label>
-                        <input name="pin" type="password" className="w-full bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm" />
+                        <label className="block text-xs font-medium text-slate-400 mb-1">PIN (Optional, 4 digits recommended)</label>
+                        <input name="pin" type="password" className="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 text-sm placeholder-slate-500" />
                       </div>
-                      <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm flex items-center gap-2">
+                      <button type="submit" className="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition text-sm flex items-center gap-2">
                         <UserPlus size={16} /> Add User
                       </button>
                     </form>
 
                     <div className="mt-6">
-                      <h4 className="font-bold text-sm mb-2">Existing Real Users</h4>
+                      <h4 className="font-bold text-sm mb-2 text-slate-100">Existing Real Users</h4>
                       <div className="space-y-2">
                         {realUsers.map(u => (
-                          <div key={u.id} className="flex items-center justify-between bg-gray-950 p-3 rounded-lg border border-gray-800">
+                          <div key={u.id} className="flex items-center justify-between bg-slate-950/50 p-3 rounded-lg border border-white/10">
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gray-800 overflow-hidden">
-                                {u.avatar_url ? <img src={u.avatar_url} className="w-full h-full object-cover" /> : <User size={16} className="m-2 text-gray-500" />}
+                              <div className="w-8 h-8 rounded-full bg-slate-800 overflow-hidden border border-white/10">
+                                {u.avatar_url ? <img src={u.avatar_url} className="w-full h-full object-cover" /> : <User size={16} className="m-2 text-slate-500" />}
                               </div>
                               <div>
-                                <div className="font-bold text-sm">{u.display_name} {u.role === 'admin' && <span className="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded ml-1">ADMIN</span>}</div>
-                                <div className="text-xs text-gray-500">@{u.username}</div>
+                                <div className="font-bold text-sm text-slate-100">{u.display_name} {u.role === 'admin' && <span className="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded ml-1">ADMIN</span>}</div>
+                                <div className="text-xs text-slate-500">@{u.username}</div>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
                               {u.has_pin && <span className="text-xs text-green-500 flex items-center gap-1"><UserCheck size={12} /> PIN Set</span>}
                               <button 
                                 onClick={() => handleEditProfile(u)}
-                                className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition"
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition border border-white/10"
                                 title="Edit User"
                               >
                                 <Settings size={14} />
@@ -4021,19 +4108,19 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'admin' && (
-                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
-                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                  <section className="bg-slate-900/50 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-100">
                       <Settings size={20} className="text-orange-500" />
                       AI Generation
                     </h3>
                     <div className="flex items-center justify-between mb-6">
                       <div>
-                        <p className="font-medium">Enable AI Background Worker</p>
-                        <p className="text-sm text-gray-500 mt-1">When enabled, AI characters will automatically post, comment, and send DMs.</p>
+                        <p className="font-medium text-slate-100">Enable AI Background Worker</p>
+                        <p className="text-sm text-slate-500 mt-1">When enabled, AI characters will automatically post, comment, and send DMs.</p>
                       </div>
                       <button 
                         onClick={toggleAiEnabled}
-                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${aiEnabled ? 'bg-orange-500' : 'bg-gray-700'}`}
+                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${aiEnabled ? 'bg-orange-500' : 'bg-slate-700'}`}
                       >
                         <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${aiEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
@@ -4041,12 +4128,12 @@ export default function App() {
 
                     <div className="flex items-center justify-between mb-6">
                       <div>
-                        <p className="font-medium">Allow NSFW Content</p>
-                        <p className="text-sm text-gray-500 mt-1">When enabled, AI characters may generate explicit language and mature themes.</p>
+                        <p className="font-medium text-slate-100">Allow NSFW Content</p>
+                        <p className="text-sm text-slate-500 mt-1">When enabled, AI characters may generate explicit language and mature themes.</p>
                       </div>
                       <button 
                         onClick={toggleNsfw}
-                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${allowNsfw ? 'bg-orange-500' : 'bg-gray-700'}`}
+                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${allowNsfw ? 'bg-orange-500' : 'bg-slate-700'}`}
                       >
                         <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${allowNsfw ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
@@ -4054,40 +4141,40 @@ export default function App() {
 
                     <div className="flex items-center justify-between mb-6">
                       <div>
-                        <p className="font-medium">Enable Performance Logging</p>
-                        <p className="text-sm text-gray-500 mt-1">When enabled, a detailed log file will be generated in the backend to help diagnose performance issues.</p>
+                        <p className="font-medium text-slate-100">Enable Performance Logging</p>
+                        <p className="text-sm text-slate-500 mt-1">When enabled, a detailed log file will be generated in the backend to help diagnose performance issues.</p>
                       </div>
                       <button 
                         onClick={togglePerformanceLogging}
-                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${enablePerformanceLogging ? 'bg-orange-500' : 'bg-gray-700'}`}
+                        className={`w-14 h-8 rounded-full p-1 transition-colors duration-200 ease-in-out ${enablePerformanceLogging ? 'bg-orange-500' : 'bg-slate-700'}`}
                       >
                         <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${enablePerformanceLogging ? 'translate-x-6' : 'translate-x-0'}`} />
                       </button>
                     </div>
 
                     <div className="mb-6">
-                      <label className="block text-sm font-medium text-gray-400 mb-1">NanoGPT API Key</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">NanoGPT API Key</label>
                       <div className="flex gap-2">
                         <input 
                           type="password" 
                           value={apiKey}
                           onChange={e => setApiKey(e.target.value)}
                           placeholder="sk-nano-..."
-                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 placeholder-slate-500" 
                         />
-                        <button onClick={saveApiKey} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                        <button onClick={saveApiKey} className="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition">
                           Save
                         </button>
                       </div>
                     </div>
 
                     <div className="mb-6">
-                      <h4 className="text-md font-bold mb-2">AI Activity Probabilities (per Day)</h4>
-                      <p className="text-sm text-gray-400 mb-4">Adjust how often AI characters perform actions on average per day.</p>
+                      <h4 className="text-md font-bold mb-2 text-slate-100">AI Activity Probabilities (per Day)</h4>
+                      <p className="text-sm text-slate-400 mb-4">Adjust how often AI characters perform actions on average per day.</p>
                       
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Posts ({probPost}/day)</label>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Posts ({probPost}/day)</label>
                           <input 
                             type="range" min="0" max="500" value={probPost} 
                             onChange={e => handleUpdateSettings({ prob_post: parseInt(e.target.value) })}
@@ -4095,7 +4182,7 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Comments ({probComment}/day)</label>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Comments ({probComment}/day)</label>
                           <input 
                             type="range" min="0" max="2000" value={probComment} 
                             onChange={e => handleUpdateSettings({ prob_comment: parseInt(e.target.value) })}
@@ -4103,7 +4190,7 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Direct Messages ({probMessage}/day)</label>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Direct Messages ({probMessage}/day)</label>
                           <input 
                             type="range" min="0" max="50" value={probMessage} 
                             onChange={e => handleUpdateSettings({ prob_message: parseInt(e.target.value) })}
@@ -4111,8 +4198,8 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Favorite DM Chance ({probFavoriteDm}%)</label>
-                          <p className="text-xs text-gray-500 mb-2">Probability that a DM will be sent to a favorited conversation vs a random character.</p>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Favorite DM Chance ({probFavoriteDm}%)</label>
+                          <p className="text-xs text-slate-500 mb-2">Probability that a DM will be sent to a favorited conversation vs a random character.</p>
                           <input 
                             type="range" min="0" max="100" value={probFavoriteDm} 
                             onChange={e => handleUpdateSettings({ prob_favorite_dm: parseInt(e.target.value) })}
@@ -4120,22 +4207,22 @@ export default function App() {
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Cross-Universe Interaction ({crossUniverseProb}%)</label>
-                          <p className="text-xs text-gray-500 mb-2">Probability that a character will interact with someone from a different universe.</p>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Cross-Universe Interaction ({crossUniverseProb}%)</label>
+                          <p className="text-xs text-slate-500 mb-2">Probability that a character will interact with someone from a different universe.</p>
                           <input 
                             type="range" min="0" max="100" value={crossUniverseProb} 
                             onChange={e => handleUpdateSettings({ cross_universe_prob: parseInt(e.target.value) })}
                             className="w-full accent-orange-500" 
                           />
                         </div>
-                        <div className="flex items-center justify-between p-3 bg-gray-900 rounded-lg border border-gray-800">
+                        <div className="flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-white/10">
                           <div>
-                            <p className="font-bold text-sm">Show Internal Thoughts</p>
-                            <p className="text-xs text-gray-500">Reveal the private thoughts of AI characters on their posts and messages.</p>
+                            <p className="font-bold text-sm text-slate-100">Show Internal Thoughts</p>
+                            <p className="text-xs text-slate-500">Reveal the private thoughts of AI characters on their posts and messages.</p>
                           </div>
                           <button 
                             onClick={() => handleUpdateSettings({ show_internal_thoughts: showInternalThoughts ? 0 : 1 })}
-                            className={`w-12 h-6 rounded-full transition-colors relative ${showInternalThoughts ? 'bg-orange-500' : 'bg-gray-700'}`}
+                            className={`w-12 h-6 rounded-full transition-colors relative ${showInternalThoughts ? 'bg-orange-500' : 'bg-slate-700'}`}
                           >
                             <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${showInternalThoughts ? 'left-7' : 'left-1'}`} />
                           </button>
@@ -4144,12 +4231,12 @@ export default function App() {
                     </div>
 
                     <div className="mb-6">
-                      <h4 className="text-md font-bold mb-2">Post Archetype Probabilities</h4>
-                      <p className="text-sm text-gray-400 mb-4">Adjust the relative likelihood of each post type when an AI decides to post.</p>
+                      <h4 className="text-md font-bold mb-2 text-slate-100">Post Archetype Probabilities</h4>
+                      <p className="text-sm text-slate-400 mb-4">Adjust the relative likelihood of each post type when an AI decides to post.</p>
                       <div className="space-y-4">
                         {archetypes.map((arch, index) => (
                           <div key={arch.id}>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">{arch.name} ({arch.probability})</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{arch.name} ({arch.probability})</label>
                             <input 
                               type="range" min="0" max="100" value={arch.probability} 
                               onChange={e => {
@@ -4159,52 +4246,52 @@ export default function App() {
                               }}
                               className="w-full accent-orange-500" 
                             />
-                            <p className="text-xs text-gray-500 mt-1">{arch.description}</p>
+                            <p className="text-xs text-slate-500 mt-1">{arch.description}</p>
                           </div>
                         ))}
                       </div>
                     </div>
 
                     <div className="mb-6">
-                      <label className="block text-sm font-medium text-gray-400 mb-1">LLM Model (NanoGPT)</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">LLM Model (NanoGPT)</label>
                       <div className="flex gap-2">
                         <input 
                           type="text" 
                           value={modelName}
                           onChange={e => setModelName(e.target.value)}
-                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500" 
                         />
-                        <button onClick={saveModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                        <button onClick={saveModelName} className="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition">
                           Save
                         </button>
                       </div>
                     </div>
                     
                     <div className="mb-6">
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Image Model (NanoGPT)</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Image Model (NanoGPT)</label>
                       <div className="flex gap-2">
                         <input 
                           type="text" 
                           value={imageModelName}
                           onChange={e => setImageModelName(e.target.value)}
-                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500" 
                         />
-                        <button onClick={saveImageModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                        <button onClick={saveImageModelName} className="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition">
                           Save
                         </button>
                       </div>
                     </div>
 
                     <div className="mb-6">
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Vision Model (for user image uploads)</label>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Vision Model (for user image uploads)</label>
                       <div className="flex gap-2">
                         <input 
                           type="text" 
                           value={visionModelName}
                           onChange={e => setVisionModelName(e.target.value)}
-                          className="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" 
+                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500" 
                         />
-                        <button onClick={saveVisionModelName} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                        <button onClick={saveVisionModelName} className="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition">
                           Save
                         </button>
                       </div>
@@ -4214,16 +4301,16 @@ export default function App() {
                       <button 
                         onClick={handleTestApi}
                         disabled={isTestingApi}
-                        className="bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2"
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold py-2 px-4 rounded-lg transition flex items-center gap-2 border border-white/10"
                       >
                         {isTestingApi && <Loader2 size={16} className="animate-spin" />}
                         Test Connection
                       </button>
-                      <button onClick={fetchApiLogs} className="text-sm text-gray-500 hover:text-orange-500 transition">Refresh Logs</button>
+                      <button onClick={fetchApiLogs} className="text-sm text-slate-500 hover:text-orange-500 transition">Refresh Logs</button>
                     </div>
 
                     {testResult && (
-                      <div className={`mt-4 p-4 rounded-lg ${testResult.success ? 'bg-green-900/30 text-green-400 border border-green-900' : 'bg-red-900/30 text-red-400 border border-red-900'}`}>
+                      <div className={`mt-4 p-4 rounded-lg ${testResult.success ? 'bg-green-500/10 text-green-400 border border-green-500/30' : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
                         {testResult.success ? (
                           <p className="text-sm">Connection Successful! {testResult.message}</p>
                         ) : (
@@ -4235,12 +4322,12 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'admin' && (
-                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                  <section className="bg-slate-900/50 border border-red-500/30 p-6 rounded-2xl backdrop-blur-sm">
                     <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-500">
                       <Trash2 size={20} />
                       Danger Zone
                     </h3>
-                    <p className="text-sm text-gray-400 mb-4">Resetting the database will delete data. This action cannot be undone.</p>
+                    <p className="text-sm text-slate-400 mb-4">Resetting the database will delete data. This action cannot be undone.</p>
                     <div className="flex gap-4">
                       <button 
                         onClick={() => setShowResetConfirm('content')}
@@ -4259,12 +4346,12 @@ export default function App() {
                 )}
 
                 {showResetConfirm && (
-                  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6 text-center">
+                  <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-md p-6 text-center shadow-2xl">
                       <h3 className="text-xl font-bold mb-4 text-red-500 flex items-center justify-center gap-2">
                         <AlertTriangle size={24} /> Reset Database
                       </h3>
-                      <p className="text-gray-400 mb-6">
+                      <p className="text-slate-400 mb-6">
                         {showResetConfirm === 'all' 
                           ? "Are you sure you want to delete all data? This will reset the simulation and cannot be undone."
                           : "Are you sure you want to delete all posts, comments, and messages? Characters will be kept. This cannot be undone."}
@@ -4272,13 +4359,13 @@ export default function App() {
                       <div className="flex gap-4">
                         <button 
                           onClick={() => setShowResetConfirm(null)}
-                          className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition"
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold py-3 rounded-xl transition border border-white/10"
                         >
                           Cancel
                         </button>
                         <button 
                           onClick={showResetConfirm === 'all' ? handleResetDb : handleResetContent}
-                          className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition"
+                          className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition"
                         >
                           Yes, Delete
                         </button>
@@ -4288,12 +4375,12 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'admin' && (
-                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                  <section className="bg-slate-900/50 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
                     <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-orange-400">
                       <Zap size={20} />
                       AI Controls
                     </h3>
-                    <p className="text-sm text-gray-400 mb-4">Force a random AI character to generate a new post immediately.</p>
+                    <p className="text-sm text-slate-400 mb-4">Force a random AI character to generate a new post immediately.</p>
                     <div className="flex gap-4">
                       <button 
                         onClick={async () => {
@@ -4303,7 +4390,7 @@ export default function App() {
                           await handleForcePost('text', randomUser.id);
                         }}
                         disabled={isForcingPost}
-                        className="bg-gray-800 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-700 transition disabled:opacity-50"
+                        className="bg-slate-800 text-slate-100 px-6 py-3 rounded-xl font-bold hover:bg-slate-700 transition disabled:opacity-50 border border-white/10"
                       >
                         Force Random Text Post
                       </button>
@@ -4315,7 +4402,7 @@ export default function App() {
                           await handleForcePost('image', randomUser.id);
                         }}
                         disabled={isForcingPost}
-                        className="bg-gray-800 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-700 transition disabled:opacity-50"
+                        className="bg-slate-800 text-slate-100 px-6 py-3 rounded-xl font-bold hover:bg-slate-700 transition disabled:opacity-50 border border-white/10"
                       >
                         Force Random Image Post
                       </button>
@@ -4324,20 +4411,20 @@ export default function App() {
                 )}
 
                 {loggedInUser?.role === 'admin' && (
-                  <section className="bg-gray-900 border border-gray-800 p-6 rounded-2xl">
+                  <section className="bg-slate-900/50 border border-white/10 p-6 rounded-2xl backdrop-blur-sm">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold flex items-center gap-2 text-blue-400">
                         <MessageSquare size={20} />
                         API Logs
                       </h3>
                     </div>
-                    <p className="text-sm text-gray-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
+                    <p className="text-sm text-slate-500 mb-4">View recent API calls to NanoGPT for troubleshooting.</p>
                     <button 
                       onClick={() => {
                         fetchApiLogs();
                         setShowApiLogsModal(true);
                       }}
-                      className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors w-full"
+                      className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-4 py-2 rounded-lg text-sm transition-colors w-full font-bold"
                     >
                       Open API Logs Viewer
                     </button>
@@ -4349,39 +4436,39 @@ export default function App() {
 
           {activeTab === 'profile' && editingProfile && (
             <div className="p-6 max-w-2xl mx-auto">
-              <h2 className="text-2xl font-bold mb-6">Edit Profile: {editingProfile.display_name}</h2>
+              <h2 className="text-2xl font-bold mb-6 text-slate-100">Edit Profile: {editingProfile.display_name}</h2>
               <form onSubmit={handleSaveProfile} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Display Name</label>
-                  <input required value={profileName} onChange={e => setProfileName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Display Name</label>
+                  <input required value={profileName} onChange={e => setProfileName(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Username</label>
-                  <input required value={profileUsername} onChange={e => setProfileUsername(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Username</label>
+                  <input required value={profileUsername} onChange={e => setProfileUsername(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm" />
                 </div>
                 {editingProfile.is_ai === 0 && (
                   <>
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">Login PIN (Optional)</label>
-                      <input value={profilePin} onChange={e => setProfilePin(e.target.value)} type="password" maxLength={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="4-digit PIN" />
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Login PIN (Optional)</label>
+                      <input value={profilePin} onChange={e => setProfilePin(e.target.value)} type="password" maxLength={4} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm placeholder-slate-500" placeholder="4-digit PIN" />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-1">DM Frequency from AI Characters</label>
-                      <select value={profileDmFrequency} onChange={e => setProfileDmFrequency(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500">
+                      <label className="block text-sm font-medium text-slate-400 mb-1">DM Frequency from AI Characters</label>
+                      <select value={profileDmFrequency} onChange={e => setProfileDmFrequency(e.target.value)} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm">
                         <option value="never">Never (0%)</option>
                         <option value="low">Low (20%)</option>
                         <option value="medium">Medium (100%)</option>
                         <option value="high">High (300%)</option>
                       </select>
-                      <p className="text-xs text-gray-500 mt-1">Controls how often AI characters you follow will initiate DMs with you.</p>
+                      <p className="text-xs text-slate-500 mt-1">Controls how often AI characters you follow will initiate DMs with you.</p>
                     </div>
                   </>
                 )}
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Profile Picture (URL or Upload)</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Profile Picture (URL or Upload)</label>
                   <div className="flex gap-2">
-                    <input value={profileAvatar} onChange={e => setProfileAvatar(e.target.value)} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" placeholder="https://..." />
-                    <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-3 rounded-lg cursor-pointer flex items-center gap-2">
+                    <input value={profileAvatar} onChange={e => setProfileAvatar(e.target.value)} type="text" className="flex-1 bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm placeholder-slate-500" placeholder="https://..." />
+                    <label className="bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-3 rounded-lg cursor-pointer flex items-center gap-2 border border-white/10 transition-colors">
                       <UserPlus size={18} />
                       Upload
                       <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, setProfileAvatar)} />
@@ -4389,7 +4476,7 @@ export default function App() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Reference Images (Overrides Profile Pic for Image Gen)</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Reference Images (Overrides Profile Pic for Image Gen)</label>
                   <div className="flex flex-col gap-2">
                     {profileReferenceImages.map((img, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
@@ -4398,15 +4485,15 @@ export default function App() {
                           const newImgs = [...profileReferenceImages];
                           newImgs[idx] = e.target.value;
                           setProfileReferenceImages(newImgs);
-                        }} type="text" className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500" placeholder="Image URL..." />
+                        }} type="text" className="flex-1 bg-slate-900/50 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm placeholder-slate-500" placeholder="Image URL..." />
                         <button type="button" onClick={() => setProfileReferenceImages(profileReferenceImages.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-400 p-2"><X size={16} /></button>
                       </div>
                     ))}
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => setProfileReferenceImages([...profileReferenceImages, ''])} className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                      <button type="button" onClick={() => setProfileReferenceImages([...profileReferenceImages, ''])} className="bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg flex items-center gap-2 text-sm border border-white/10 transition-colors">
                         <Plus size={16} /> Add URL
                       </button>
-                      <label className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer flex items-center gap-2 text-sm">
+                      <label className="bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg cursor-pointer flex items-center gap-2 text-sm border border-white/10 transition-colors">
                         <Upload size={16} /> Upload Image
                         <input type="file" className="hidden" accept="image/*" onChange={e => handleFileUpload(e, (base64) => setProfileReferenceImages([...profileReferenceImages, base64]))} />
                       </label>
@@ -4414,63 +4501,63 @@ export default function App() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Public Bio</label>
-                  <textarea value={profileBio} onChange={e => setProfileBio(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Public Bio</label>
+                  <textarea value={profileBio} onChange={e => setProfileBio(e.target.value)} rows={3} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                 </div>
                 
                 {editingProfile.is_ai === 1 && (
-                  <div className="mt-8 pt-6 border-t border-gray-800">
+                  <div className="mt-8 pt-6 border-t border-white/10">
                     <h3 className="text-lg font-bold mb-4 text-orange-500">AI Account Settings (Private)</h3>
                     <div className="space-y-4">
                       <div className="flex gap-4 mb-6">
                         <button
                           type="button"
                           onClick={() => setProfileAccountType('character')}
-                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'character' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'character' ? 'bg-orange-500 text-white' : 'bg-slate-900/50 text-slate-400 hover:bg-slate-800/50 border border-white/10'}`}
                         >
                           Character
                         </button>
                         <button
                           type="button"
                           onClick={() => setProfileAccountType('company')}
-                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'company' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'company' ? 'bg-orange-500 text-white' : 'bg-slate-900/50 text-slate-400 hover:bg-slate-800/50 border border-white/10'}`}
                         >
                           Company Account
                         </button>
                         <button
                           type="button"
                           onClick={() => setProfileAccountType('news')}
-                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'news' ? 'bg-orange-500 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-800'}`}
+                          className={`flex-1 py-2 rounded-lg font-bold transition-colors ${profileAccountType === 'news' ? 'bg-orange-500 text-white' : 'bg-slate-900/50 text-slate-400 hover:bg-slate-800/50 border border-white/10'}`}
                         >
                           News Account
                         </button>
                       </div>
 
                       {profileAccountType === 'company' && (
-                        <div className="space-y-4 bg-gray-900/50 p-4 rounded-xl border border-gray-800 mb-6">
+                        <div className="space-y-4 bg-slate-950/50 p-4 rounded-xl border border-white/10 mb-6">
                           <h4 className="font-bold text-orange-400 mb-2 flex items-center gap-2"><Briefcase size={16} /> Company Details</h4>
                           <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Company / Brand Name</label>
-                            <input value={profileCompanyName} onChange={e => setProfileCompanyName(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Company / Brand Name</label>
+                            <input value={profileCompanyName} onChange={e => setProfileCompanyName(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm" />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Brand Identity</label>
-                            <textarea value={profileBrandIdentity} onChange={e => setProfileBrandIdentity(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Brand Identity</label>
+                            <textarea value={profileBrandIdentity} onChange={e => setProfileBrandIdentity(e.target.value)} rows={2} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Products / Services</label>
-                            <textarea value={profileProductsServices} onChange={e => setProfileProductsServices(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Products / Services</label>
+                            <textarea value={profileProductsServices} onChange={e => setProfileProductsServices(e.target.value)} rows={2} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Target Audience</label>
-                            <input value={profileTargetAudience} onChange={e => setProfileTargetAudience(e.target.value)} type="text" className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500" />
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Target Audience</label>
+                            <input value={profileTargetAudience} onChange={e => setProfileTargetAudience(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm" />
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Run By Character (Optional)</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Run By Character (Optional)</label>
                             <select 
                               value={profileRunByCharacterId || ''} 
                               onChange={e => setProfileRunByCharacterId(e.target.value ? parseInt(e.target.value) : null)}
-                              className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"
+                              className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"
                             >
                               <option value="">Nameless Employee</option>
                               {users.filter(u => u.is_ai && u.id !== editingProfile.id).map(u => (
@@ -4482,48 +4569,48 @@ export default function App() {
                       )}
 
                       {profileAccountType === 'news' && (
-                        <div className="space-y-4 bg-gray-900/50 p-4 rounded-xl border border-gray-800 mb-6">
+                        <div className="space-y-4 bg-slate-950/50 p-4 rounded-xl border border-white/10 mb-6">
                           <h4 className="font-bold text-orange-400 mb-2 flex items-center gap-2"><Globe size={16} /> News Account Details</h4>
-                          <p className="text-sm text-gray-400">News accounts post daily summaries of events in their universe. They do not form relationships or comment on posts.</p>
+                          <p className="text-sm text-slate-400">News accounts post daily summaries of events in their universe. They do not form relationships or comment on posts.</p>
                         </div>
                       )}
 
                       {profileAccountType !== 'news' && (
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">General Description</label>
-                          <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">General Description</label>
+                          <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                         </div>
                       )}
                       {profileAccountType === 'news' && (
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Background / Focus</label>
-                          <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Background / Focus</label>
+                          <textarea value={profileDescription} onChange={e => setProfileDescription(e.target.value)} rows={4} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                         </div>
                       )}
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Writing Style</label>
-                        <textarea value={profileWritingStyle} onChange={e => setProfileWritingStyle(e.target.value)} rows={3} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Writing Style</label>
+                        <textarea value={profileWritingStyle} onChange={e => setProfileWritingStyle(e.target.value)} rows={3} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                       </div>
                       {profileAccountType === 'character' && (
                         <>
                           <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Physical Appearance</label>
-                            <textarea value={profilePhysicalAppearance} onChange={e => setProfilePhysicalAppearance(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Physical Appearance</label>
+                            <textarea value={profilePhysicalAppearance} onChange={e => setProfilePhysicalAppearance(e.target.value)} rows={2} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Clothing Style</label>
-                            <textarea value={profileClothingStyle} onChange={e => setProfileClothingStyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Clothing Style</label>
+                            <textarea value={profileClothingStyle} onChange={e => setProfileClothingStyle(e.target.value)} rows={2} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                           </div>
                         </>
                       )}
                       {profileAccountType !== 'news' && (
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-1">Artstyle</label>
-                          <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500"></textarea>
+                          <label className="block text-sm font-medium text-slate-400 mb-1">Artstyle</label>
+                          <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                         </div>
                       )}
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Universe</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Universe</label>
                         <SearchableDropdown
                           options={universes.map(u => ({ id: u.id, name: u.name }))}
                           value={profileUniverseId}
@@ -4543,8 +4630,8 @@ export default function App() {
                         )}
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-2">Online Time (Optional - Default: Always Online)</label>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-900/50 p-4 rounded-xl border border-gray-800">
+                        <label className="block text-sm font-medium text-slate-400 mb-2">Online Time (Optional - Default: Always Online)</label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-slate-950/50 p-4 rounded-xl border border-white/10">
                           {ONLINE_TIME_WINDOWS.map(window => (
                             <label key={window.value} className="flex items-center gap-2 cursor-pointer group">
                               <input 
@@ -4557,17 +4644,17 @@ export default function App() {
                                     setProfileOnlineTimes(prev => prev.filter(t => t !== window.value));
                                   }
                                 }}
-                                className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-orange-500 focus:ring-orange-500 focus:ring-offset-gray-900"
+                                className="w-4 h-4 rounded border-white/10 bg-slate-900 text-orange-500 focus:ring-orange-500 focus:ring-offset-slate-950"
                               />
-                              <span className="text-sm text-gray-300 group-hover:text-white transition">{window.label}</span>
+                              <span className="text-sm text-slate-300 group-hover:text-white transition-colors">{window.label}</span>
                             </label>
                           ))}
                         </div>
-                        <p className="text-xs text-gray-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
+                        <p className="text-xs text-slate-500 mt-2 italic">If no window is selected, the character is online 24/7.</p>
                       </div>
                       {profileAccountType !== 'news' && (
                         <div>
-                          <label className="block text-sm font-medium text-gray-400 mb-2">Activity Level (1-10)</label>
+                          <label className="block text-sm font-medium text-slate-400 mb-2">Activity Level (1-10)</label>
                           <div className="flex items-center gap-4">
                             <input 
                               type="range" 
@@ -4578,23 +4665,23 @@ export default function App() {
                             />
                             <span className="text-white font-bold w-6 text-center">{profileActivityLevel}</span>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
+                          <p className="text-xs text-slate-500 mt-1">Dictates how often this character creates posts, comments, and DMs.</p>
                         </div>
                       )}
                     </div>
                   </div>
                 )}
                 
-                <div className="pt-6 border-t border-gray-800">
-                  <h3 className="text-lg font-bold mb-4">Relationships</h3>
+                <div className="pt-6 border-t border-white/10">
+                  <h3 className="text-lg font-bold mb-4 text-slate-100">Relationships</h3>
                   <div className="space-y-3 mb-4">
                     {profileRelationships.map(rel => (
-                      <div key={rel.id} className="bg-gray-900 p-3 rounded-lg border border-gray-800 flex justify-between items-center">
+                      <div key={rel.id} className="bg-slate-900/50 p-3 rounded-lg border border-white/10 flex justify-between items-center backdrop-blur-sm">
                         <div className="flex items-center gap-3">
-                          <img src={rel.other_avatar} alt="" className={`w-8 h-8 ${getAvatarShape(rel.other_account_type)} object-cover`} />
+                          <img src={rel.other_avatar} alt="" className={`w-8 h-8 ${getAvatarShape(rel.other_account_type)} object-cover border border-white/10`} />
                           <div>
-                            <p className="font-bold text-sm">{rel.other_name}</p>
-                            <p className="text-xs text-gray-400">{rel.description}</p>
+                            <p className="font-bold text-sm text-slate-100">{rel.other_name}</p>
+                            <p className="text-xs text-slate-400">{rel.description}</p>
                           </div>
                         </div>
                         <button type="button" onClick={() => handleDeleteRelationship(rel.user_id_2)} className="text-red-500 hover:text-red-400">
@@ -4603,27 +4690,27 @@ export default function App() {
                       </div>
                     ))}
                     {profileRelationships.length === 0 && (
-                      <p className="text-sm text-gray-500">No relationships added yet.</p>
+                      <p className="text-sm text-slate-500">No relationships added yet.</p>
                     )}
                   </div>
                   
                   <div className="flex flex-col gap-2 mb-2">
-                    <label className="block text-xs font-medium text-gray-400">Search Character</label>
+                    <label className="block text-xs font-medium text-slate-400">Search Character</label>
                     <input 
                       type="text" 
                       value={relSearch} 
                       onChange={e => setRelSearch(e.target.value)}
                       placeholder="Search by name or username..."
-                      className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
+                      className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm placeholder-slate-500"
                     />
                   </div>
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
-                      <label className="block text-xs font-medium text-gray-400 mb-1">Character</label>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Character</label>
                       <select 
                         value={newRelUserId} 
                         onChange={e => setNewRelUserId(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
+                        className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"
                       >
                         <option value="">Select character...</option>
                         {users.filter(u => {
@@ -4643,19 +4730,19 @@ export default function App() {
                       </select>
                     </div>
                     <div className="flex-[2]">
-                      <label className="block text-xs font-medium text-gray-400 mb-1">Description (e.g. "is best friends with")</label>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Description (e.g. "is best friends with")</label>
                       <input 
                         type="text" 
                         value={newRelDesc} 
                         onChange={e => setNewRelDesc(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
+                        className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"
                       />
                     </div>
                     <button 
                       type="button" 
                       onClick={handleAddRelationship}
                       disabled={!newRelUserId || !newRelDesc}
-                      className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white font-bold py-2 px-4 rounded-lg transition"
+                      className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-100 font-bold py-2 px-4 rounded-lg transition-colors border border-white/10"
                     >
                       Add
                     </button>
@@ -4664,14 +4751,14 @@ export default function App() {
 
                 <div className="flex gap-4 pt-4">
                   {editingProfile.is_ai === 1 && (
-                    <button type="button" onClick={handleDeleteCharacter} className="flex-1 bg-red-600 text-white font-bold py-3 rounded-full hover:bg-red-700 transition">
+                    <button type="button" onClick={handleDeleteCharacter} className="flex-1 bg-red-600/20 text-red-500 border border-red-500/30 font-bold py-3 rounded-full hover:bg-red-600/30 transition-colors">
                       Delete Character
                     </button>
                   )}
-                  <button type="button" onClick={() => { setActiveTab('home'); setEditingProfile(null); }} className="flex-1 bg-gray-800 text-white font-bold py-3 rounded-full hover:bg-gray-700 transition">
+                  <button type="button" onClick={() => { setActiveTab('home'); setEditingProfile(null); }} className="flex-1 bg-slate-800 text-slate-100 font-bold py-3 rounded-full hover:bg-slate-700 transition-colors border border-white/10">
                     Cancel
                   </button>
-                  <button type="submit" className="flex-1 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold py-3 rounded-full hover:from-orange-600 hover:to-yellow-600 transition shadow-lg">
+                  <button type="submit" className="flex-1 bg-orange-600 text-white font-bold py-3 rounded-full hover:bg-orange-500 transition-colors shadow-lg shadow-orange-500/20">
                     Save Profile
                   </button>
                 </div>
@@ -4680,6 +4767,101 @@ export default function App() {
           )}
 
         </div>
+
+        {/* Mobile Bottom Navigation */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-xl border-t border-white/10 z-40 flex justify-around items-center p-2 pb-safe">
+          <button onClick={() => setActiveTab('home')} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+            <Home size={20} />
+            <span className="text-[10px] font-medium">Nexus</span>
+          </button>
+          <button onClick={() => setActiveTab('fauxpics')} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${activeTab === 'fauxpics' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+            <Camera size={20} />
+            <span className="text-[10px] font-medium">FauxPics</span>
+          </button>
+          <button onClick={() => { setActiveTab('notifications'); markNotificationsRead(); }} className={`p-2 rounded-xl flex flex-col items-center gap-1 relative ${activeTab === 'notifications' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+            <div className="relative">
+              <Bell size={20} />
+              {unreadNotifs > 0 && (
+                <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {unreadNotifs}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] font-medium">Notifs</span>
+          </button>
+          <button onClick={() => setActiveTab('messages')} className={`p-2 rounded-xl flex flex-col items-center gap-1 relative ${activeTab === 'messages' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+            <div className="relative">
+              <MessageSquare size={20} />
+              {unreadMessages > 0 && (
+                <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {unreadMessages}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] font-medium">Comms</span>
+          </button>
+          <button onClick={() => setShowMobileMenu(true)} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${['universes', 'following', 'explore', 'arcs', 'relationships', 'fauxpast', 'settings'].includes(activeTab) ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+            <Menu size={20} />
+            <span className="text-[10px] font-medium">More</span>
+          </button>
+        </div>
+
+        {/* Mobile Menu Drawer */}
+        {showMobileMenu && (
+          <div className="md:hidden fixed inset-0 z-50 flex">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMobileMenu(false)} />
+            <div className="relative w-64 bg-slate-950 border-r border-white/10 h-full flex flex-col animate-in slide-in-from-left duration-200">
+              <div className="p-4 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center">
+                  <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-12 w-auto object-contain" referrerPolicy="no-referrer" />
+                </div>
+                <button onClick={() => setShowMobileMenu(false)} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/10">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
+                <NavItem icon={<Search />} label="Search" active={activeTab === 'search'} onClick={() => { setActiveTab('search'); setShowMobileMenu(false); }} />
+                <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); setShowMobileMenu(false); }} />
+                <NavItem icon={<UserCheck />} label="Following" active={activeTab === 'following'} onClick={() => { setActiveTab('following'); setShowMobileMenu(false); }} />
+                <NavItem icon={<UserPlus />} label="Add Character" active={activeTab === 'explore'} onClick={() => { setActiveTab('explore'); setShowMobileMenu(false); }} />
+                <NavItem icon={<BookOpen />} label="Arcs" active={activeTab === 'arcs'} onClick={() => { setActiveTab('arcs'); fetchArcs(true); setShowMobileMenu(false); }} />
+                {loggedInUser?.role === 'admin' && (
+                  <NavItem icon={<Users />} label="Relationships" active={activeTab === 'relationships'} onClick={() => { setActiveTab('relationships'); fetchRelationshipChecks(true); setShowMobileMenu(false); }} />
+                )}
+                <NavItem icon={<Calendar />} label="FauxPast" active={activeTab === 'fauxpast'} onClick={() => { setActiveTab('fauxpast'); setShowMobileMenu(false); }} />
+                <NavItem icon={<Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); fetchApiLogs(); setShowMobileMenu(false); }} />
+              </div>
+              <div className="p-4 border-t border-white/10">
+                <div 
+                  onClick={() => { handleEditProfile(loggedInUser); setShowMobileMenu(false); }}
+                  className="flex items-center gap-3 p-2 hover:bg-white/10 rounded-xl cursor-pointer transition duration-200 mb-4"
+                >
+                  <div className={`w-10 h-10 bg-slate-800 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden border border-white/10`}>
+                    {loggedInUser?.avatar_url ? (
+                      <img src={loggedInUser.avatar_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      loggedInUser?.display_name?.[0] || 'Y'
+                    )}
+                  </div>
+                  <div className="overflow-hidden">
+                    <p className="font-bold text-sm truncate text-slate-200">{loggedInUser?.display_name || 'You'}</p>
+                    <p className="text-slate-500 text-xs truncate">@{loggedInUser?.username || 'real_user'}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setLoggedInUser(null);
+                    localStorage.removeItem(SESSION_KEY);
+                    setShowMobileMenu(false);
+                  }}
+                  className="w-full py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition font-medium border border-red-500/20"
+                >
+                  Log out
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Right Sidebar */}
         <CharacterSidebar 
@@ -4704,9 +4886,9 @@ export default function App() {
 
         {/* Viewing Post Modal */}
         {viewingPostData && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-gray-900 border border-gray-800 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative">
-              <button onClick={() => setViewingPostData(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white transition z-10">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative shadow-2xl">
+              <button onClick={() => setViewingPostData(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors z-10 bg-slate-800/50 p-2 rounded-full backdrop-blur-sm border border-white/10">
                 <X size={24} />
               </button>
               <div className="p-6 pt-12">
@@ -4730,38 +4912,40 @@ export default function App() {
 
         {/* Viewing Profile Modal */}
         {viewingProfile && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-gray-900 border border-gray-800 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative">
-              <button onClick={() => setViewingProfile(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white transition">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative shadow-2xl">
+              <button onClick={() => setViewingProfile(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors z-10 bg-slate-800/50 p-2 rounded-full backdrop-blur-sm border border-white/10">
                 <X size={24} />
               </button>
               
-              <div className="h-32 bg-gradient-to-r from-orange-500 to-yellow-500"></div>
+              <div className="h-32 bg-gradient-to-r from-orange-500 to-yellow-500 relative overflow-hidden">
+                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-20 mix-blend-overlay"></div>
+              </div>
               <div className="px-6 pb-6">
                 <div className="relative -mt-12 mb-4">
-                  <div className={`relative w-24 h-24 ${getAvatarShape(viewingProfile.account_type)} border-4 border-gray-900 bg-gray-800 overflow-hidden`}>
-                    {viewingProfile.avatar_url ? <img src={viewingProfile.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={48} className="m-auto mt-4" />}
+                  <div className={`relative w-24 h-24 ${getAvatarShape(viewingProfile.account_type)} border-4 border-slate-900 bg-slate-800 overflow-hidden shadow-xl`}>
+                    {viewingProfile.avatar_url ? <img src={viewingProfile.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={48} className="m-auto mt-4 text-slate-500" />}
                   </div>
                   {viewingProfile.is_ai === 1 && (
-                    <div className={`absolute bottom-1 left-1 w-6 h-6 rounded-full border-4 border-gray-900 ${isUserOnline(viewingProfile) ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.8)]' : 'bg-gray-500'}`} title={isUserOnline(viewingProfile) ? 'Online' : 'Offline'}></div>
+                    <div className={`absolute bottom-1 left-1 w-6 h-6 rounded-full border-4 border-slate-900 ${isUserOnline(viewingProfile) ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.8)]' : 'bg-slate-500'}`} title={isUserOnline(viewingProfile) ? 'Online' : 'Offline'}></div>
                   )}
                 </div>
                 
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 className="text-2xl font-bold">{viewingProfile.display_name}</h2>
+                      <h2 className="text-2xl font-bold text-slate-100">{viewingProfile.display_name}</h2>
                       {viewingProfile.is_ai === 1 && (
-                        <span className={`text-[10px] uppercase tracking-widest font-black px-2 py-0.5 rounded-full ${isUserOnline(viewingProfile) ? 'bg-green-500/20 text-green-500 border border-green-500/30' : 'bg-gray-500/20 text-gray-500 border border-gray-500/30'}`}>
+                        <span className={`text-[10px] uppercase tracking-widest font-black px-2 py-0.5 rounded-full ${isUserOnline(viewingProfile) ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'}`}>
                           {isUserOnline(viewingProfile) ? 'Online' : 'Offline'}
                         </span>
                       )}
                     </div>
-                    <p className="text-gray-500">@{viewingProfile.username}</p>
+                    <p className="text-slate-500">@{viewingProfile.username}</p>
                     {viewingProfile.universe_id && universes.find(u => u.id === viewingProfile.universe_id) && (
                       <div 
                         onClick={() => handleViewUniverse(viewingProfile.universe_id)}
-                        className="flex items-center gap-2 mt-2 text-sm text-orange-400 hover:text-orange-300 cursor-pointer w-fit bg-orange-500/10 px-3 py-1 rounded-full"
+                        className="flex items-center gap-2 mt-2 text-sm text-orange-400 hover:text-orange-300 cursor-pointer w-fit bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20 transition-colors"
                       >
                         <Globe size={14} />
                         {universes.find(u => u.id === viewingProfile.universe_id)?.name}
@@ -4776,14 +4960,14 @@ export default function App() {
                             setViewingProfile(null);
                             handleEditProfile(viewingProfile);
                           }}
-                          className="font-bold px-4 py-2 rounded-full transition bg-gray-800 text-white hover:bg-gray-700 flex items-center gap-2"
+                          className="font-bold px-4 py-2 rounded-full transition-colors bg-slate-800 text-slate-100 hover:bg-slate-700 flex items-center gap-2 border border-white/10"
                         >
                           <Settings size={16} /> Edit
                         </button>
                       )}
                       <button 
                         onClick={() => handleFollow(viewingProfile.id)}
-                        className={`font-bold px-6 py-2 rounded-full transition ${viewingProfile.is_followed ? 'bg-gray-800 text-white' : 'bg-white text-black'}`}
+                        className={`font-bold px-6 py-2 rounded-full transition-colors border ${viewingProfile.is_followed ? 'bg-slate-800 text-slate-100 border-white/10 hover:bg-slate-700' : 'bg-slate-100 text-slate-900 border-transparent hover:bg-slate-200'}`}
                       >
                         {viewingProfile.is_followed ? 'Following' : 'Follow'}
                       </button>
@@ -4802,7 +4986,7 @@ export default function App() {
                             setChatMessages([]);
                           }
                         }}
-                        className="bg-gray-800 hover:bg-gray-700 text-white font-bold px-6 py-2 rounded-full transition"
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold px-6 py-2 rounded-full transition-colors border border-white/10"
                       >
                         Message
                       </button>
@@ -4810,27 +4994,27 @@ export default function App() {
                   )}
                 </div>
                 
-                <p className="mb-4 whitespace-pre-wrap">{viewingProfile.bio}</p>
+                <p className="mb-4 whitespace-pre-wrap text-slate-300">{viewingProfile.bio}</p>
                 
                 {viewingProfile.account_type === 'company' && (
-                  <div className="mb-4 space-y-2 text-sm bg-gray-950 p-4 rounded-xl border border-gray-800">
+                  <div className="mb-4 space-y-2 text-sm bg-slate-950/50 p-4 rounded-xl border border-white/10">
                     <div className="flex items-center gap-2 text-orange-400 font-bold mb-2">
                       <Briefcase size={16} /> Company Account
                     </div>
                     {viewingProfile.brand_identity && (
-                      <p><span className="text-gray-500">Brand Identity:</span> {viewingProfile.brand_identity}</p>
+                      <p><span className="text-slate-500">Brand Identity:</span> <span className="text-slate-300">{viewingProfile.brand_identity}</span></p>
                     )}
                     {viewingProfile.products_services && (
-                      <p><span className="text-gray-500">Products/Services:</span> {viewingProfile.products_services}</p>
+                      <p><span className="text-slate-500">Products/Services:</span> <span className="text-slate-300">{viewingProfile.products_services}</span></p>
                     )}
                     {viewingProfile.target_audience && (
-                      <p><span className="text-gray-500">Target Audience:</span> {viewingProfile.target_audience}</p>
+                      <p><span className="text-slate-500">Target Audience:</span> <span className="text-slate-300">{viewingProfile.target_audience}</span></p>
                     )}
                     {viewingProfile.run_by_character_id && users.find(u => u.id === viewingProfile.run_by_character_id) && (
-                      <p className="mt-2 pt-2 border-t border-gray-800">
-                        <span className="text-gray-500">Run by:</span>{' '}
+                      <p className="mt-2 pt-2 border-t border-white/10">
+                        <span className="text-slate-500">Run by:</span>{' '}
                         <span 
-                          className="text-orange-400 hover:underline cursor-pointer"
+                          className="text-orange-400 hover:text-orange-300 hover:underline cursor-pointer transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleViewProfile(viewingProfile.run_by_character_id);
@@ -4844,11 +5028,11 @@ export default function App() {
                 )}
                 
                 {(viewingProfile.account_type === 'news' || viewingProfile.account_type === 'faux_news') && (
-                  <div className="mb-4 space-y-2 text-sm bg-gray-950 p-4 rounded-xl border border-gray-800">
+                  <div className="mb-4 space-y-2 text-sm bg-slate-950/50 p-4 rounded-xl border border-white/10">
                     <div className="flex items-center gap-2 text-orange-400 font-bold mb-2">
                       <Globe size={16} /> {viewingProfile.account_type === 'faux_news' ? 'Platform News Account' : 'Universe News Account'}
                     </div>
-                    <p className="text-gray-400">
+                    <p className="text-slate-400">
                       {viewingProfile.account_type === 'faux_news' 
                         ? 'This account provides platform-wide news recaps thrice daily.' 
                         : 'This account provides daily news updates for its universe.'}
@@ -4856,39 +5040,39 @@ export default function App() {
                   </div>
                 )}
                 
-                <div className="flex gap-4 text-sm text-gray-500 mb-6">
+                <div className="flex gap-4 text-sm text-slate-500 mb-6">
                   <span 
-                    className="cursor-pointer hover:underline"
+                    className="cursor-pointer hover:text-slate-300 transition-colors"
                     onClick={async () => {
                       const res = await apiFetch(`/api/users/${viewingProfile.id}/following`);
                       const data = await res.json();
                       setFollowersModal({ users: data, title: 'Following' });
                     }}
                   >
-                    <strong className="text-white">{viewingProfile.following_count || 0}</strong> Following
+                    <strong className="text-slate-100">{viewingProfile.following_count || 0}</strong> Following
                   </span>
                   <span 
-                    className="cursor-pointer hover:underline"
+                    className="cursor-pointer hover:text-slate-300 transition-colors"
                     onClick={async () => {
                       const res = await apiFetch(`/api/users/${viewingProfile.id}/followers`);
                       const data = await res.json();
                       setFollowersModal({ users: data, title: 'Followers' });
                     }}
                   >
-                    <strong className="text-white">{viewingProfile.follower_count || 0}</strong> Followers
+                    <strong className="text-slate-100">{viewingProfile.follower_count || 0}</strong> Followers
                   </span>
                 </div>
 
                 {viewingProfile.is_ai === 1 && (
-                  <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-800">
-                    <h4 className="text-sm font-bold text-gray-400 mb-3 flex items-center gap-2">
+                  <div className="mb-6 p-4 bg-slate-900/50 rounded-xl border border-white/10 backdrop-blur-sm">
+                    <h4 className="text-sm font-bold text-slate-400 mb-3 flex items-center gap-2">
                       <Sparkles size={14} /> AI Controls
                     </h4>
                     <div className="flex gap-3">
                       <button 
                         onClick={() => handleForcePost('text')}
                         disabled={isForcingPost}
-                        className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-bold py-2 rounded-lg transition flex items-center justify-center gap-2"
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-100 text-sm font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2 border border-white/10"
                       >
                         {isForcingPost ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />}
                         {(viewingProfile.account_type === 'news' || viewingProfile.account_type === 'faux_news') ? 'Force Recap' : 'Force Text Post'}
@@ -4897,7 +5081,7 @@ export default function App() {
                         <button 
                           onClick={() => handleForcePost('image')}
                           disabled={isForcingPost}
-                          className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-bold py-2 rounded-lg transition flex items-center justify-center gap-2"
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-100 text-sm font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2 border border-white/10"
                         >
                           {isForcingPost ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
                           Force Image Post
@@ -4907,17 +5091,23 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="border-b border-gray-800 mb-4 flex gap-6">
+                <div className="border-b border-white/10 mb-4 flex gap-6">
                   <button 
                     onClick={() => setProfileActiveTab('posts')}
-                    className={`pb-2 font-bold transition-colors ${profileActiveTab === 'posts' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                    className={`pb-2 font-bold transition-colors ${profileActiveTab === 'posts' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-slate-500 hover:text-slate-300'}`}
                   >
                     Posts
+                  </button>
+                  <button 
+                    onClick={() => setProfileActiveTab('images')}
+                    className={`pb-2 font-bold transition-colors ${profileActiveTab === 'images' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-slate-500 hover:text-slate-300'}`}
+                  >
+                    Images
                   </button>
                   {viewingProfile.is_ai === 1 && viewingProfile.account_type !== 'news' && (
                     <button 
                       onClick={() => setProfileActiveTab('arcs')}
-                      className={`pb-2 font-bold transition-colors ${profileActiveTab === 'arcs' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-500 hover:text-gray-300'}`}
+                      className={`pb-2 font-bold transition-colors ${profileActiveTab === 'arcs' ? 'text-orange-500 border-b-2 border-orange-500' : 'text-slate-500 hover:text-slate-300'}`}
                     >
                       Character Arcs
                     </button>
@@ -4928,7 +5118,7 @@ export default function App() {
                   {profileActiveTab === 'posts' ? (
                     <div className="space-y-4">
                       {isFetchingProfileData ? (
-                        <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                        <div className="flex flex-col items-center justify-center py-12 text-slate-500">
                           <Loader2 className="animate-spin mb-2" size={32} />
                           <p>Loading posts...</p>
                         </div>
@@ -4957,13 +5147,44 @@ export default function App() {
                             <div className="flex justify-center py-4">
                               <button 
                                 onClick={() => setVisibleProfilePosts(prev => prev + 30)}
-                                className="bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 px-4 rounded-full transition"
+                                className="bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold py-2 px-4 rounded-full transition-colors border border-white/10"
                               >
                                 Load More
                               </button>
                             </div>
                           )}
-                          {viewingProfilePosts.length === 0 && <p className="text-center text-gray-500 py-4">No posts yet.</p>}
+                          {viewingProfilePosts.length === 0 && <p className="text-center text-slate-500 py-4">No posts yet.</p>}
+                        </>
+                      )}
+                    </div>
+                  ) : profileActiveTab === 'images' ? (
+                    <div className="space-y-4">
+                      {isFetchingProfileData ? (
+                        <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                          <Loader2 className="animate-spin mb-2" size={32} />
+                          <p>Loading images...</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                            {viewingProfilePosts.filter(p => p.post_type === 'image_post' && p.image_url).map(post => (
+                              <div key={post.id} className="aspect-square bg-slate-900 rounded-lg overflow-hidden border border-white/10 cursor-pointer group relative" onClick={() => handleViewPost(post.id)}>
+                                <img src={post.image_url} alt="Post image" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" referrerPolicy="no-referrer" />
+                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <div className="flex gap-4 text-white font-bold">
+                                    <span className="flex items-center gap-1"><Heart size={16} className={post.is_liked ? "fill-orange-500 text-orange-500" : ""} /> {post.like_count || 0}</span>
+                                    <span className="flex items-center gap-1"><MessageCircle size={16} /> {post.comment_count || 0}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {viewingProfilePosts.filter(p => p.post_type === 'image_post' && p.image_url).length === 0 && (
+                            <div className="text-center py-12 text-slate-500">
+                              <Camera size={48} className="mx-auto mb-4 opacity-20" />
+                              <p>No images posted yet.</p>
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
@@ -4973,58 +5194,58 @@ export default function App() {
                         <div className="flex gap-2 mb-4">
                           <button 
                             onClick={() => handleAddArc('character', viewingProfile.id)}
-                            className="flex items-center gap-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold transition"
+                            className="flex items-center gap-2 text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg font-bold transition-colors"
                           >
                             <Plus size={14} /> Add Manual Arc
                           </button>
                           <button 
                             onClick={() => handleGenerateArc('character', viewingProfile.id)}
                             disabled={isGeneratingArc}
-                            className="flex items-center gap-2 text-xs bg-orange-600 hover:bg-orange-500 text-white px-3 py-1.5 rounded-lg font-bold transition disabled:opacity-50"
+                            className="flex items-center gap-2 text-xs bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 border border-orange-500/30 px-3 py-1.5 rounded-lg font-bold transition-colors disabled:opacity-50"
                           >
                             <Sparkles size={14} /> {isGeneratingArc ? 'Generating...' : 'Generate AI Arc'}
                           </button>
                         </div>
                       )}
                       {viewingProfileArcs.length === 0 ? (
-                        <p className="text-center text-gray-500 py-4">No arcs yet.</p>
+                        <p className="text-center text-slate-500 py-4">No arcs yet.</p>
                       ) : (
                         viewingProfileArcs.map(arc => (
-                          <div key={arc.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                          <div key={arc.id} className="bg-slate-900/50 border border-white/10 rounded-xl p-4 backdrop-blur-sm">
                             <div className="flex justify-between items-start mb-2">
-                              <h3 className="font-bold text-lg text-white">{arc.title}</h3>
+                              <h3 className="font-bold text-lg text-slate-100">{arc.title}</h3>
                               <div className="flex items-center gap-2">
                                 {loggedInUser?.role === 'admin' && (
                                   <div className="flex gap-1 mr-2">
                                     <button 
                                       onClick={() => handleEditArc(arc)}
-                                      className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded text-blue-400 transition"
+                                      className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-blue-400 transition-colors border border-white/10"
                                       title="Edit Arc"
                                     >
                                       <Edit2 size={14} />
                                     </button>
                                     <button 
                                       onClick={() => handleDeleteArc(arc)}
-                                      className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded text-red-400 transition"
+                                      className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-red-400 transition-colors border border-white/10"
                                       title="Delete Arc"
                                     >
                                       <Trash2 size={14} />
                                     </button>
                                   </div>
                                 )}
-                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${arc.status === 'active' ? 'bg-green-500/20 text-green-500 border border-green-500/30' : 'bg-gray-800 text-gray-400'}`}>
+                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${arc.status === 'active' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-slate-800 text-slate-400 border border-white/10'}`}>
                                   {arc.status.toUpperCase()}
                                 </span>
                               </div>
                             </div>
-                            <p className="text-gray-400 text-sm mb-4 whitespace-pre-wrap">{arc.description}</p>
+                            <p className="text-slate-400 text-sm mb-4 whitespace-pre-wrap">{arc.description}</p>
                             {arc.status === 'completed' && arc.completion_summary && (
-                              <div className="mt-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+                              <div className="mt-4 p-3 bg-slate-950/50 rounded-lg border border-white/10">
                                 <p className="text-xs font-bold text-orange-500 mb-1">Conclusion</p>
-                                <p className="text-sm text-gray-300">{arc.completion_summary}</p>
+                                <p className="text-sm text-slate-300">{arc.completion_summary}</p>
                               </div>
                             )}
-                            <div className="mt-4 flex gap-4 text-xs text-gray-500">
+                            <div className="mt-4 flex gap-4 text-xs text-slate-500">
                               <span>Started: {new Date(arc.start_date).toLocaleDateString()}</span>
                               <span>Target End: {new Date(arc.target_end_date).toLocaleDateString()}</span>
                             </div>
@@ -5042,25 +5263,25 @@ export default function App() {
 
         {/* Likers Modal */}
         {likersModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[70vh]">
-              <div className="p-4 border-b border-gray-800 flex justify-between items-center">
-                <h3 className="font-bold">Liked by</h3>
-                <button onClick={() => setLikersModal(null)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[70vh] shadow-2xl">
+              <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-900/80 backdrop-blur-md">
+                <h3 className="font-bold text-slate-100">Liked by</h3>
+                <button onClick={() => setLikersModal(null)} className="text-slate-400 hover:text-white transition-colors"><X size={20} /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-2">
                 {likersModal.users.map(u => (
-                  <div key={u.id} className="flex items-center gap-3 p-3 hover:bg-gray-800 rounded-xl cursor-pointer" onClick={() => { handleViewProfile(u.id); setLikersModal(null); }}>
-                    <div className={`w-10 h-10 bg-gray-700 ${getAvatarShape(u.account_type)} overflow-hidden`}>
-                      {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="m-auto mt-2" />}
+                  <div key={u.id} className="flex items-center gap-3 p-3 hover:bg-slate-800/50 rounded-xl cursor-pointer transition-colors" onClick={() => { handleViewProfile(u.id); setLikersModal(null); }}>
+                    <div className={`w-10 h-10 bg-slate-800 ${getAvatarShape(u.account_type)} overflow-hidden border border-white/10`}>
+                      {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="m-auto mt-2 text-slate-500" />}
                     </div>
                     <div>
-                      <p className="font-bold text-sm">{u.display_name}</p>
-                      <p className="text-gray-500 text-xs">@{u.username}</p>
+                      <p className="font-bold text-sm text-slate-100">{u.display_name}</p>
+                      <p className="text-slate-500 text-xs">@{u.username}</p>
                     </div>
                   </div>
                 ))}
-                {likersModal.users.length === 0 && <p className="text-center text-gray-500 py-8">No likes yet.</p>}
+                {likersModal.users.length === 0 && <p className="text-center text-slate-500 py-8">No likes yet.</p>}
               </div>
             </div>
           </div>
@@ -5068,25 +5289,25 @@ export default function App() {
 
         {/* Followers/Following Modal */}
         {followersModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[70vh]">
-              <div className="p-4 border-b border-gray-800 flex justify-between items-center">
-                <h3 className="font-bold">{followersModal.title}</h3>
-                <button onClick={() => setFollowersModal(null)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[70vh] shadow-2xl">
+              <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-900/80 backdrop-blur-md">
+                <h3 className="font-bold text-slate-100">{followersModal.title}</h3>
+                <button onClick={() => setFollowersModal(null)} className="text-slate-400 hover:text-white transition-colors"><X size={20} /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-2">
                 {followersModal.users.map(u => (
-                  <div key={u.id} className="flex items-center gap-3 p-3 hover:bg-gray-800 rounded-xl cursor-pointer" onClick={() => { handleViewProfile(u.id); setFollowersModal(null); }}>
-                    <div className={`w-10 h-10 bg-gray-700 ${getAvatarShape(u.account_type)} overflow-hidden`}>
-                      {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="m-auto mt-2" />}
+                  <div key={u.id} className="flex items-center gap-3 p-3 hover:bg-slate-800/50 rounded-xl cursor-pointer transition-colors" onClick={() => { handleViewProfile(u.id); setFollowersModal(null); }}>
+                    <div className={`w-10 h-10 bg-slate-800 ${getAvatarShape(u.account_type)} overflow-hidden border border-white/10`}>
+                      {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="m-auto mt-2 text-slate-500" />}
                     </div>
                     <div>
-                      <p className="font-bold text-sm">{u.display_name}</p>
-                      <p className="text-gray-500 text-xs">@{u.username}</p>
+                      <p className="font-bold text-sm text-slate-100">{u.display_name}</p>
+                      <p className="text-slate-500 text-xs">@{u.username}</p>
                     </div>
                   </div>
                 ))}
-                {followersModal.users.length === 0 && <p className="text-center text-gray-500 py-8">No users found.</p>}
+                {followersModal.users.length === 0 && <p className="text-center text-slate-500 py-8">No users found.</p>}
               </div>
             </div>
           </div>
@@ -5094,8 +5315,8 @@ export default function App() {
 
         {/* API Logs Modal */}
       {showApiLogsModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold flex items-center gap-2 text-blue-400">
                 <MessageSquare size={24} />
@@ -5104,11 +5325,11 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => fetchApiLogs(apiLogSearch)}
-                  className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1 rounded-lg transition-colors"
+                  className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1 rounded-lg transition-colors border border-white/10"
                 >
                   Refresh Logs
                 </button>
-                <button onClick={() => setShowApiLogsModal(false)} className="text-gray-400 hover:text-white"><X size={24} /></button>
+                <button onClick={() => setShowApiLogsModal(false)} className="text-slate-400 hover:text-white transition-colors"><X size={24} /></button>
               </div>
             </div>
             
@@ -5119,11 +5340,11 @@ export default function App() {
                 onChange={(e) => setApiLogSearch(e.target.value)} 
                 onKeyDown={(e) => e.key === 'Enter' && fetchApiLogs(apiLogSearch)}
                 placeholder="Search logs by content..." 
-                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                className="flex-1 bg-slate-900/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500 backdrop-blur-sm placeholder-slate-500"
               />
               <button 
                 onClick={() => fetchApiLogs(apiLogSearch)}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors shadow-lg shadow-blue-500/20"
               >
                 Search
               </button>
@@ -5133,14 +5354,14 @@ export default function App() {
                   setApiLogShowErrorsOnly(newErrorOnly);
                   fetchApiLogs(apiLogSearch, newErrorOnly);
                 }}
-                className={`${apiLogShowErrorsOnly ? 'bg-red-600 hover:bg-red-500' : 'bg-gray-700 hover:bg-gray-600'} text-white px-4 py-2 rounded-lg text-sm transition-colors`}
+                className={`${apiLogShowErrorsOnly ? 'bg-red-600 hover:bg-red-500 shadow-lg shadow-red-500/20' : 'bg-slate-800 hover:bg-slate-700 border border-white/10'} text-white px-4 py-2 rounded-lg text-sm transition-colors`}
               >
                 Errors Only
               </button>
               {apiLogSearch && (
                 <button 
                   onClick={() => { setApiLogSearch(''); fetchApiLogs(''); }}
-                  className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg text-sm transition-colors border border-white/10"
                 >
                   Clear
                 </button>
@@ -5149,7 +5370,7 @@ export default function App() {
 
             <div className="space-y-4 overflow-y-auto flex-1 pr-2">
               {apiLogs.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">No API logs found.</div>
+                <div className="text-center text-slate-500 py-8">No API logs found.</div>
               ) : (
                 apiLogs.map((log: any) => {
                   let requestObj: any = {};
@@ -5166,47 +5387,47 @@ export default function App() {
                   const isExpanded = !!expandedLogs[log.id];
                   
                   return (
-                    <div key={log.id} className={`bg-gray-800 rounded-xl text-xs font-mono border ${isError ? 'border-red-500/50' : 'border-green-500/50'} overflow-hidden transition-colors`}>
+                    <div key={log.id} className={`bg-slate-900/50 rounded-xl text-xs font-mono border ${isError ? 'border-red-500/30' : 'border-green-500/30'} overflow-hidden transition-colors backdrop-blur-sm`}>
                       <div 
-                        className={`p-3 flex justify-between items-center cursor-pointer ${isError ? 'bg-red-900/20 hover:bg-red-900/30' : 'bg-green-900/20 hover:bg-green-900/30'}`}
+                        className={`p-3 flex justify-between items-center cursor-pointer transition-colors ${isError ? 'bg-red-500/10 hover:bg-red-500/20' : 'bg-green-500/10 hover:bg-green-500/20'}`}
                         onClick={() => toggleLogExpansion(log.id)}
                       >
                         <div className="flex items-center gap-3">
                           {log.user_profile_picture ? (
-                            <img src={log.user_profile_picture} alt={log.user_display_name} className={`w-8 h-8 ${getAvatarShape(log.user_account_type)} object-cover`} />
+                            <img src={log.user_profile_picture} alt={log.user_display_name} className={`w-8 h-8 ${getAvatarShape(log.user_account_type)} object-cover border border-white/10`} />
                           ) : (
-                            <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-gray-400">
+                            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 border border-white/10">
                               <User size={16} />
                             </div>
                           )}
                           <div>
-                            <div className="font-bold text-white text-sm flex items-center gap-2">
+                            <div className="font-bold text-slate-100 text-sm flex items-center gap-2">
                               {log.endpoint}
-                              {isError && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">Error</span>}
+                              {isError && <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">Error</span>}
                             </div>
-                            <div className="text-gray-400 text-[10px]">{log.user_display_name || 'System'}</div>
+                            <div className="text-slate-400 text-[10px]">{log.user_display_name || 'System'}</div>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
-                          <span className="text-[10px] opacity-60 text-gray-400">{formatTimestamp(log.created_at)}</span>
-                          <span className="text-gray-500">{isExpanded ? '▼' : '▶'}</span>
+                          <span className="text-[10px] opacity-60 text-slate-400">{formatTimestamp(log.created_at)}</span>
+                          <span className="text-slate-500">{isExpanded ? '▼' : '▶'}</span>
                         </div>
                       </div>
                       
                       {isExpanded && (
-                        <div className="p-4 border-t border-gray-700">
+                        <div className="p-4 border-t border-white/10 bg-slate-950/50">
                           <div className="mb-3 space-y-1">
-                            <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Request Details</div>
+                            <div className="text-slate-500 uppercase text-[9px] tracking-wider font-bold">Request Details</div>
                             <div className="bg-black/30 p-2 rounded border border-white/5 overflow-x-auto whitespace-pre-wrap">
                               {Object.entries(requestObj).map(([key, val]) => (
                                 <div key={key} className="mb-1 last:mb-0">
-                                  <span className="text-orange-400">{key}:</span> <span className="text-gray-300">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+                                  <span className="text-orange-400">{key}:</span> <span className="text-slate-300">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
                                 </div>
                               ))}
                             </div>
                           </div>
                           <div className="space-y-1">
-                            <div className="text-gray-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
+                            <div className="text-slate-500 uppercase text-[9px] tracking-wider font-bold">Response</div>
                             {(() => {
                               try {
                                 const resObj = JSON.parse(log.response_payload);
@@ -5215,7 +5436,7 @@ export default function App() {
                                     {resObj.reasoning && (
                                       <div className="bg-blue-900/10 border border-blue-500/20 p-2 rounded">
                                         <div className="text-[10px] text-blue-400 font-bold mb-1 uppercase tracking-tighter">Thinking / Reasoning</div>
-                                        <div className="text-gray-400 italic">{resObj.reasoning}</div>
+                                        <div className="text-slate-400 italic">{resObj.reasoning}</div>
                                       </div>
                                     )}
                                     <div className={`p-2 rounded border ${!resObj.content ? 'bg-red-900/20 border-red-500/30 text-red-200' : 'bg-green-900/20 border-green-500/30 text-green-200'} whitespace-pre-wrap overflow-x-auto`}>
@@ -5245,37 +5466,37 @@ export default function App() {
       )}
 
       {showCreateGroupModal && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold">Create Group Chat</h3>
-                <button onClick={() => setShowCreateGroupModal(false)} className="text-gray-500 hover:text-white">
+                <h3 className="text-xl font-bold text-slate-100">Create Group Chat</h3>
+                <button onClick={() => setShowCreateGroupModal(false)} className="text-slate-500 hover:text-white transition-colors">
                   <X size={24} />
                 </button>
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">Group Name</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">Group Name</label>
                   <input 
                     type="text" 
                     value={newGroupName}
                     onChange={e => setNewGroupName(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-orange-500"
+                    className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-orange-500 backdrop-blur-sm placeholder-slate-500 text-slate-100"
                     placeholder="Enter group name"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Select Members</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Select Members</label>
                   <input
                     type="text"
                     value={groupSearchQuery}
                     onChange={e => setGroupSearchQuery(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 mb-2 outline-none focus:border-orange-500 text-sm"
+                    className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-2 mb-2 outline-none focus:border-orange-500 text-sm backdrop-blur-sm placeholder-slate-500 text-slate-100"
                     placeholder="Search characters..."
                   />
-                  <div className="max-h-60 overflow-y-auto space-y-2 border border-gray-800 rounded-xl p-2">
+                  <div className="max-h-60 overflow-y-auto space-y-2 border border-white/10 rounded-xl p-2 bg-slate-950/50">
                     {users.filter(u => u.id !== loggedInUser?.id && u.display_name.toLowerCase().includes(groupSearchQuery.toLowerCase())).map(user => (
-                      <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer">
+                      <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-slate-800/50 rounded-lg cursor-pointer transition-colors">
                         <input 
                           type="checkbox" 
                           checked={selectedGroupMembers.includes(user.id)}
@@ -5286,17 +5507,17 @@ export default function App() {
                               setSelectedGroupMembers(prev => prev.filter(id => id !== user.id));
                             }
                           }}
-                          className="w-5 h-5 rounded border-gray-700 text-orange-500 focus:ring-orange-500 bg-gray-900"
+                          className="w-5 h-5 rounded border-white/10 text-orange-500 focus:ring-orange-500 bg-slate-900"
                         />
-                        <div className={`relative w-8 h-8 bg-gray-700 ${getAvatarShape(user.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden`}>
-                          {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
+                        <div className={`relative w-8 h-8 bg-slate-800 ${getAvatarShape(user.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden border border-white/10`}>
+                          {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} className="text-slate-500" />}
                           {user.is_ai === 1 ? (
-                            <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-gray-900 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-gray-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>
+                            <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-slate-900 ${isUserOnline(user) ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]' : 'bg-slate-500'}`} title={isUserOnline(user) ? 'Online' : 'Offline'}></div>
                           ) : (
-                            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-gray-900 bg-blue-500" title="Real User"></div>
+                            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-slate-900 bg-blue-500" title="Real User"></div>
                           )}
                         </div>
-                        <span className="font-medium">{user.display_name}</span>
+                        <span className="font-medium text-slate-100">{user.display_name}</span>
                       </label>
                     ))}
                   </div>
@@ -5304,7 +5525,7 @@ export default function App() {
                 <button 
                   onClick={handleCreateGroupChat}
                   disabled={!newGroupName.trim() || selectedGroupMembers.length === 0}
-                  className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold py-3 rounded-xl transition"
+                  className="w-full bg-orange-600 hover:bg-orange-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border disabled:border-white/10 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-orange-500/20 disabled:shadow-none"
                 >
                   Create Group
                 </button>
@@ -5315,18 +5536,18 @@ export default function App() {
 
         {expandedImageUrl && (
           <div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
             onClick={() => setExpandedImageUrl(null)}
           >
             <img 
               src={expandedImageUrl} 
               alt="Expanded image" 
-              className="max-w-full max-h-full object-contain rounded-lg" 
+              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
               referrerPolicy="no-referrer" 
               onClick={(e) => e.stopPropagation()}
             />
             <button 
-              className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition"
+              className="absolute top-4 right-4 text-white bg-slate-900/50 hover:bg-slate-800/80 rounded-full p-2 transition-colors border border-white/10 backdrop-blur-sm"
               onClick={() => setExpandedImageUrl(null)}
             >
               <X size={24} />
@@ -5335,21 +5556,21 @@ export default function App() {
         )}
 
         {showGallery && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-4xl max-h-[80vh] flex flex-col">
-              <div className="flex justify-between items-center p-4 border-b border-gray-800">
-                <h3 className="font-bold text-xl flex items-center gap-2"><Image size={24} /> Gallery</h3>
-                <button onClick={() => setShowGallery(false)} className="text-gray-400 hover:text-white"><X size={24} /></button>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-4xl max-h-[80vh] flex flex-col shadow-2xl">
+              <div className="flex justify-between items-center p-4 border-b border-white/10 bg-slate-900/80 backdrop-blur-md">
+                <h3 className="font-bold text-xl flex items-center gap-2 text-slate-100"><Image size={24} /> Gallery</h3>
+                <button onClick={() => setShowGallery(false)} className="text-slate-400 hover:text-white transition-colors"><X size={24} /></button>
               </div>
               <div className="p-4 overflow-y-auto flex-1">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {chatMessages.filter(msg => msg.image_url).map((msg, idx) => (
-                    <div key={idx} className="aspect-square rounded-lg overflow-hidden border border-gray-800 cursor-pointer hover:border-orange-500 transition" onClick={() => setExpandedImageUrl(msg.image_url)}>
+                    <div key={idx} className="aspect-square rounded-lg overflow-hidden border border-white/10 cursor-pointer hover:border-orange-500 transition-colors shadow-lg" onClick={() => setExpandedImageUrl(msg.image_url)}>
                       <img src={msg.image_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
                   ))}
                   {chatMessages.filter(msg => msg.image_url).length === 0 && (
-                    <div className="col-span-full text-center text-gray-500 py-8">No images in this chat yet.</div>
+                    <div className="col-span-full text-center text-slate-500 py-8">No images in this chat yet.</div>
                   )}
                 </div>
               </div>
@@ -5366,7 +5587,7 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
   return (
     <div 
       onClick={onClick}
-      className={`flex items-center gap-4 p-3 rounded-full cursor-pointer transition duration-200 w-fit xl:w-full ${active ? 'font-bold' : 'hover:bg-gray-900'}`}
+      className={`flex items-center gap-4 p-3 rounded-full cursor-pointer transition-colors duration-200 w-fit xl:w-full ${active ? 'font-bold text-orange-500 bg-orange-500/10' : 'hover:bg-slate-900/50 text-slate-300 hover:text-slate-100'}`}
     >
       <div className="text-2xl">{icon}</div>
       <span className="text-xl hidden xl:block">{label}</span>
@@ -5390,7 +5611,7 @@ function renderContentWithTags(content: string, users: any[] | undefined, onView
           <span 
             key={i} 
             onClick={(e) => { e.stopPropagation(); onViewProfile(user.id); }} 
-            className="text-orange-500 hover:underline cursor-pointer font-bold"
+            className="text-orange-500 hover:underline cursor-pointer font-bold transition-colors"
           >
             {part}
           </span>
@@ -5528,12 +5749,12 @@ const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfil
   const rootComments = comments.filter(c => !c.parent_id);
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl">
-      <div className="p-4 flex items-center gap-3 cursor-pointer" onClick={() => onViewProfile(post.user_id)}>
-        <img src={post.avatar_url} alt="" className={`w-8 h-8 ${getAvatarShape(post.account_type)} object-cover`} />
-        <span className="font-bold text-sm hover:underline">{post.display_name}</span>
+    <div className="bg-slate-900/80 border border-white/10 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm">
+      <div className="p-4 flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 transition-colors" onClick={() => onViewProfile(post.user_id)}>
+        <img src={post.avatar_url} alt="" className={`w-8 h-8 ${getAvatarShape(post.account_type)} object-cover border border-white/10`} />
+        <span className="font-bold text-sm hover:underline text-slate-100">{post.display_name}</span>
       </div>
-      <div className="bg-black flex items-center justify-center min-h-[300px]">
+      <div className="bg-slate-950 flex items-center justify-center min-h-[300px] border-y border-white/5">
         <img 
           src={post.image_url || post.content.match(/\((.*?)\)/)?.[1] || `https://picsum.photos/seed/${post.id}/800/800`} 
           alt="FauxPic" 
@@ -5544,36 +5765,36 @@ const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfil
       <div className="p-4">
         <div className="flex gap-4 mb-3 items-center">
           <div className="flex items-center gap-2">
-            <button onClick={onLike} className="hover:scale-110 transition">
-              <Heart className={post.is_liked ? "fill-red-500 text-red-500" : "text-white"} size={24} />
+            <button onClick={onLike} className="hover:scale-110 transition-transform">
+              <Heart className={post.is_liked ? "fill-red-500 text-red-500" : "text-slate-300 hover:text-white"} size={24} />
             </button>
             {post.like_count > 0 && (
-              <button onClick={() => onShowLikers('post', post.id)} className="text-sm font-bold hover:underline">{post.like_count}</button>
+              <button onClick={() => onShowLikers('post', post.id)} className="text-sm font-bold hover:underline text-slate-300">{post.like_count}</button>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowComments(!showComments)} className="hover:scale-110 transition">
-              <MessageCircle size={24} className={showComments ? "text-orange-500" : "text-white"} />
+            <button onClick={() => setShowComments(!showComments)} className="hover:scale-110 transition-transform">
+              <MessageCircle size={24} className={showComments ? "text-orange-500" : "text-slate-300 hover:text-white"} />
             </button>
             {post.comment_count > 0 && (
-              <span className="text-sm font-bold">{post.comment_count}</span>
+              <span className="text-sm font-bold text-slate-300">{post.comment_count}</span>
             )}
           </div>
-          <Send size={24} />
+          <Send size={24} className="text-slate-300 hover:text-white cursor-pointer hover:scale-110 transition-transform" />
         </div>
-        <p className="text-sm">
-          <span className="font-bold mr-2 cursor-pointer hover:underline" onClick={() => onViewProfile(post.user_id)}>{post.display_name}</span>
+        <p className="text-sm text-slate-300">
+          <span className="font-bold mr-2 cursor-pointer hover:underline text-slate-100" onClick={() => onViewProfile(post.user_id)}>{post.display_name}</span>
           {renderContentWithTags(post.content.replace(/\(.*?\)/g, '').trim(), users, onViewProfile)}
         </p>
-        <p className="text-xs text-gray-500 mt-2 uppercase tracking-tighter">
+        <p className="text-xs text-slate-500 mt-2 uppercase tracking-tighter">
           {formatTimestamp(post.created_at)}
         </p>
 
         {showComments && (
-          <div className="mt-4 pt-4 border-t border-gray-800 space-y-4">
+          <div className="mt-4 pt-4 border-t border-white/10 space-y-4">
             <div className="max-h-[400px] overflow-y-auto space-y-4 pr-2">
               {rootComments.length === 0 ? (
-                <p className="text-gray-500 text-xs italic">No comments yet</p>
+                <p className="text-slate-500 text-xs italic">No comments yet</p>
               ) : (
                 rootComments.map(comment => (
                   <CommentItem 
@@ -5599,31 +5820,31 @@ const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfil
                 value={newComment}
                 onChange={e => setNewComment(e.target.value)}
                 placeholder="Add a comment..."
-                className="flex-1 bg-transparent border-b border-gray-800 py-1 text-sm outline-none focus:border-orange-500"
+                className="flex-1 bg-transparent border-b border-white/10 py-1 text-sm outline-none focus:border-orange-500 text-slate-100 placeholder-slate-500"
               />
-              <button type="submit" disabled={!newComment.trim()} className="text-orange-500 font-bold text-sm disabled:opacity-50">Post</button>
+              <button type="submit" disabled={!newComment.trim()} className="text-orange-500 font-bold text-sm disabled:opacity-50 hover:text-orange-400 transition-colors">Post</button>
             </form>
           </div>
         )}
       </div>
 
       {replyingTo && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
-            <h3 className="font-bold mb-4">Replying to @{replyingTo.name}</h3>
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <h3 className="font-bold mb-4 text-slate-100">Replying to @{replyingTo.name}</h3>
             <form onSubmit={handleAddReply}>
               <TagTextarea 
                 users={users || []}
                 autoFocus
                 value={replyContent}
                 onValueChange={setReplyContent}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-orange-500 mb-4"
+                className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 mb-4 backdrop-blur-sm placeholder-slate-500"
                 rows={4}
                 placeholder="Write your reply..."
               />
               <div className="flex justify-end gap-3">
-                <button type="button" onClick={() => setReplyingTo(null)} className="px-4 py-2 text-gray-400 hover:text-white transition">Cancel</button>
-                <button type="submit" disabled={!replyContent.trim() || isSendingReply} className="px-6 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-bold transition disabled:opacity-50">Reply</button>
+                <button type="button" onClick={() => setReplyingTo(null)} className="px-4 py-2 text-slate-400 hover:text-white transition-colors">Cancel</button>
+                <button type="submit" disabled={!replyContent.trim() || isSendingReply} className="px-6 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-bold transition-colors disabled:opacity-50 shadow-lg shadow-orange-500/20 disabled:shadow-none">Reply</button>
               </div>
             </form>
           </div>
@@ -5823,29 +6044,29 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
   return (
     <div 
       ref={postRef}
-      className={`border-b border-gray-800 p-4 hover:bg-gray-900/50 transition ${highlightedPostId === post.id && !highlightedCommentId ? 'bg-orange-900/20 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}`}
+      className={`border-b border-white/10 p-4 hover:bg-slate-900/50 transition-colors ${highlightedPostId === post.id && !highlightedCommentId ? 'bg-orange-900/20 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}`}
     >
       <div className="flex gap-4">
         <div 
           onClick={() => onViewProfile(post.user_id)}
-          className={`w-10 h-10 bg-gray-700 ${getAvatarShape(post.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer`}
+          className={`w-10 h-10 bg-slate-800 ${getAvatarShape(post.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer border border-white/10`}
         >
-          {post.avatar_url ? <img src={post.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} />}
+          {post.avatar_url ? <img src={post.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={20} className="text-slate-500" />}
         </div>
         <div className="flex-1">
           <div className="flex items-center justify-between relative">
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => onViewProfile(post.user_id)}>
-              <span className="font-bold hover:underline">{post.display_name}</span>
-              <span className="text-gray-500 text-sm">@{post.username}</span>
-              <span className="text-gray-500 text-sm">· {formatTimestamp(post.created_at)}</span>
+              <span className="font-bold hover:underline text-slate-100">{post.display_name}</span>
+              <span className="text-slate-500 text-sm">@{post.username}</span>
+              <span className="text-slate-500 text-sm">· {formatTimestamp(post.created_at)}</span>
             </div>
-            <button onClick={() => setShowMenu(!showMenu)} className="text-gray-500 hover:text-orange-500"><MoreHorizontal size={18} /></button>
+            <button onClick={() => setShowMenu(!showMenu)} className="text-slate-500 hover:text-orange-500 transition-colors"><MoreHorizontal size={18} /></button>
             {showMenu && (
-              <div className="absolute right-0 top-6 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 w-36 overflow-hidden">
-                <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 transition">Edit</button>
-                <button onClick={() => { handleDelete(); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-800 transition">Delete</button>
+              <div className="absolute right-0 top-6 bg-slate-900 border border-white/10 rounded-lg shadow-2xl z-10 w-36 overflow-hidden backdrop-blur-md">
+                <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-slate-800 transition-colors text-slate-300 hover:text-slate-100">Edit</button>
+                <button onClick={() => { handleDelete(); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors">Delete</button>
                 {loggedInUser?.role === 'admin' && onViewApiLogs && (
-                  <button onClick={() => { onViewApiLogs(post.content); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-blue-400 hover:bg-gray-800 transition border-t border-gray-800">View API Logs</button>
+                  <button onClick={() => { onViewApiLogs(post.content); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-blue-400 hover:bg-blue-500/10 transition-colors border-t border-white/10">View API Logs</button>
                 )}
               </div>
             )}
@@ -5856,17 +6077,17 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
                 users={users || []}
                 value={editContent} 
                 onValueChange={setEditContent} 
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500"
+                className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"
                 rows={3}
               />
               <div className="flex justify-end gap-2 mt-2">
-                <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-sm text-gray-400 hover:text-white">Cancel</button>
-                <button onClick={handleEdit} className="px-3 py-1 text-sm bg-orange-600 hover:bg-orange-500 text-white rounded-full">Save</button>
+                <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-sm text-slate-400 hover:text-white transition-colors">Cancel</button>
+                <button onClick={handleEdit} className="px-3 py-1 text-sm bg-orange-600 hover:bg-orange-500 text-white rounded-full transition-colors shadow-lg shadow-orange-500/20">Save</button>
               </div>
             </div>
           ) : (
             <div className="mt-1">
-              <p className="whitespace-pre-wrap">
+              <p className="whitespace-pre-wrap text-slate-300">
                 {renderContentWithTags(
                   post.content.length > 1500 && !isExpanded 
                     ? post.content.substring(0, 1000) 
@@ -5877,7 +6098,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
                 {post.content.length > 1500 && !isExpanded && (
                   <button 
                     onClick={() => setIsExpanded(true)}
-                    className="text-orange-500 hover:underline ml-1 font-bold text-sm"
+                    className="text-orange-500 hover:underline ml-1 font-bold text-sm transition-colors"
                   >
                     ... Read more
                   </button>
@@ -5887,7 +6108,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
           )}
 
           {post.internal_thought && (
-            <div className="mt-3 p-3 bg-gray-900/80 border-l-4 border-orange-500 rounded-r-lg text-sm italic text-gray-300 relative overflow-hidden group">
+            <div className="mt-3 p-3 bg-slate-900/80 border-l-4 border-orange-500 rounded-r-lg text-sm italic text-slate-300 relative overflow-hidden group backdrop-blur-sm">
               <div className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-opacity">
                 <Brain size={64} />
               </div>
@@ -5901,25 +6122,25 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
           {post.image_url && (
             <>
               <div 
-                className="mt-3 rounded-2xl overflow-hidden border border-gray-800 max-h-[500px] cursor-pointer"
+                className="mt-3 rounded-2xl overflow-hidden border border-white/10 max-h-[500px] cursor-pointer shadow-lg hover:border-orange-500/50 transition-colors"
                 onClick={() => setIsImageExpanded(true)}
               >
                 <img src={post.image_url} alt="Post image" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               </div>
               {isImageExpanded && (
                 <div 
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
                   onClick={() => setIsImageExpanded(false)}
                 >
                   <img 
                     src={post.image_url} 
                     alt="Expanded post image" 
-                    className="max-w-full max-h-full object-contain rounded-lg" 
+                    className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
                     referrerPolicy="no-referrer" 
                     onClick={(e) => e.stopPropagation()}
                   />
                   <button 
-                    className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition"
+                    className="absolute top-4 right-4 text-white bg-slate-900/50 hover:bg-slate-800/80 rounded-full p-2 transition-colors border border-white/10 backdrop-blur-sm"
                     onClick={() => setIsImageExpanded(false)}
                   >
                     <X size={24} />
@@ -5928,18 +6149,18 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
               )}
             </>
           )}
-          <div className="flex gap-12 mt-3 text-gray-500">
-            <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 hover:text-orange-500 transition">
+          <div className="flex gap-12 mt-3 text-slate-500">
+            <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 hover:text-orange-500 transition-colors">
               <MessageCircle size={18} />
               <span className="text-sm">{post.comment_count}</span>
             </button>
             <div className="flex items-center gap-1">
-              <button onClick={() => onLike(post.id)} className={`flex items-center gap-2 hover:text-pink-500 transition ${post.is_liked ? 'text-pink-500' : ''}`}>
+              <button onClick={() => onLike(post.id)} className={`flex items-center gap-2 hover:text-pink-500 transition-colors ${post.is_liked ? 'text-pink-500' : ''}`}>
                 <Heart size={18} fill={post.is_liked ? "currentColor" : "none"} />
                 <span className="text-sm">{post.like_count}</span>
               </button>
               {post.like_count > 0 && (
-                <button onClick={() => onShowLikers('post', post.id)} className="text-[10px] hover:underline">view</button>
+                <button onClick={() => onShowLikers('post', post.id)} className="text-[10px] hover:underline hover:text-slate-300 transition-colors">view</button>
               )}
             </div>
           </div>
@@ -5947,7 +6168,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
       </div>
       
       {showComments && (
-        <div className="mt-4 pl-10 space-y-4 border-l-2 border-gray-800 ml-5">
+        <div className="mt-4 pl-10 space-y-4 border-l-2 border-white/10 ml-5">
           {rootComments.map(comment => (
             <CommentItem 
               apiFetch={apiFetch}
@@ -5969,7 +6190,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
           ))}
           
           <form onSubmit={(e) => handleAddComment(e)} className="flex gap-2 mt-4 items-end">
-            <div className="w-8 h-8 bg-blue-900 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs mb-1 overflow-hidden">
+            <div className="w-8 h-8 bg-slate-800 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs mb-1 overflow-hidden border border-white/10">
               {loggedInUser?.avatar_url ? (
                 <img src={loggedInUser?.avatar_url} alt="" className="w-full h-full object-cover" />
               ) : (
@@ -5982,7 +6203,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
                 value={newComment}
                 onValueChange={setNewComment}
                 placeholder="Post your reply" 
-                className="w-full bg-transparent border-b border-gray-700 pb-1 outline-none focus:border-orange-500 text-sm resize-none"
+                className="w-full bg-transparent border-b border-white/10 pb-1 outline-none focus:border-orange-500 text-sm resize-none text-slate-100 placeholder-slate-500"
                 rows={1}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -5992,27 +6213,27 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
                 }}
               />
             </div>
-            <button type="submit" disabled={!newComment.trim()} className="text-orange-500 font-bold text-sm disabled:opacity-50 mb-1">Reply</button>
+            <button type="submit" disabled={!newComment.trim()} className="text-orange-500 font-bold text-sm disabled:opacity-50 mb-1 hover:text-orange-400 transition-colors">Reply</button>
           </form>
         </div>
       )}
 
       {replyingTo && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md p-6">
-            <h3 className="font-bold mb-4">Replying to @{replyingTo.name}</h3>
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <h3 className="font-bold mb-4 text-slate-100">Replying to @{replyingTo.name}</h3>
             <TagTextarea 
               users={users}
               autoFocus
               value={replyingTo.content}
               onValueChange={val => setReplyingTo({...replyingTo, content: val})}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 text-white outline-none focus:border-orange-500 mb-4"
+              className="w-full bg-slate-900/50 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 mb-4 backdrop-blur-sm placeholder-slate-500"
               placeholder="Write your reply..."
               rows={4}
             />
             <div className="flex gap-3">
-              <button onClick={() => setReplyingTo(null)} className="flex-1 bg-gray-800 text-white font-bold py-2 rounded-full">Cancel</button>
-              <button onClick={(e) => handleAddComment(e as any, replyingTo.id)} className="flex-1 bg-orange-500 text-white font-bold py-2 rounded-full">Reply</button>
+              <button onClick={() => setReplyingTo(null)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold py-2 rounded-full transition-colors border border-white/10">Cancel</button>
+              <button onClick={(e) => handleAddComment(e as any, replyingTo.id)} className="flex-1 bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 rounded-full transition-colors shadow-lg shadow-orange-500/20">Reply</button>
             </div>
           </div>
         </div>
@@ -6067,28 +6288,28 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
 
   return (
     <div className="space-y-3" ref={(el) => commentRef && commentRef(comment.id, el)}>
-      <div className={`flex gap-3 group p-2 -m-2 rounded-xl transition ${highlightedCommentId === comment.id ? 'bg-orange-900/20 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : ''}`}>
+      <div className={`flex gap-3 group p-2 -m-2 rounded-xl transition-colors ${highlightedCommentId === comment.id ? 'bg-orange-900/20 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'hover:bg-slate-900/30'}`}>
         <div 
           onClick={() => onViewProfile(comment.user_id)}
-          className={`w-8 h-8 bg-gray-700 ${getAvatarShape(comment.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer`}
+          className={`w-8 h-8 bg-slate-800 ${getAvatarShape(comment.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer border border-white/10`}
         >
-          {comment.avatar_url ? <img src={comment.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} />}
+          {comment.avatar_url ? <img src={comment.avatar_url} alt="" className="w-full h-full object-cover" /> : <User size={16} className="text-slate-500" />}
         </div>
         <div className="flex-1">
-          <div className="bg-gray-900 p-3 rounded-2xl rounded-tl-none border border-gray-800 group-hover:border-gray-700 transition">
+          <div className="bg-slate-900/50 p-3 rounded-2xl rounded-tl-none border border-white/10 group-hover:border-white/20 transition-colors backdrop-blur-sm">
             <div className="flex items-center justify-between mb-1 relative">
               <div className="flex items-center gap-2 cursor-pointer" onClick={() => onViewProfile(comment.user_id)}>
-                <span className="font-bold text-sm hover:underline">{comment.display_name}</span>
-                <span className="text-gray-500 text-xs">@{comment.username}</span>
-                <span className="text-gray-500 text-xs">· {formatTimestamp(comment.created_at)}</span>
+                <span className="font-bold text-sm hover:underline text-slate-100">{comment.display_name}</span>
+                <span className="text-slate-500 text-xs">@{comment.username}</span>
+                <span className="text-slate-500 text-xs">· {formatTimestamp(comment.created_at)}</span>
               </div>
-              <button onClick={() => setShowMenu(!showMenu)} className="text-gray-500 hover:text-orange-500"><MoreHorizontal size={14} /></button>
+              <button onClick={() => setShowMenu(!showMenu)} className="text-slate-500 hover:text-orange-500 transition-colors"><MoreHorizontal size={14} /></button>
               {showMenu && (
-                <div className="absolute right-0 top-5 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 w-36 overflow-hidden">
-                  <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 transition">Edit</button>
-                  <button onClick={() => { handleDelete(); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-800 transition">Delete</button>
+                <div className="absolute right-0 top-5 bg-slate-900 border border-white/10 rounded-lg shadow-2xl z-10 w-36 overflow-hidden backdrop-blur-md">
+                  <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-slate-800 transition-colors text-slate-300 hover:text-slate-100">Edit</button>
+                  <button onClick={() => { handleDelete(); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors">Delete</button>
                   {loggedInUser?.role === 'admin' && onViewApiLogs && (
-                    <button onClick={() => { onViewApiLogs(comment.content); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-blue-400 hover:bg-gray-800 transition border-t border-gray-800">View API Logs</button>
+                    <button onClick={() => { onViewApiLogs(comment.content); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-blue-400 hover:bg-blue-500/10 transition-colors border-t border-white/10">View API Logs</button>
                   )}
                 </div>
               )}
@@ -6099,19 +6320,19 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
                   users={users || []}
                   value={editContent} 
                   onValueChange={setEditContent} 
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-orange-500 text-sm"
+                  className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500 text-sm backdrop-blur-sm"
                   rows={2}
                 />
                 <div className="flex justify-end gap-2 mt-2">
-                  <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-xs text-gray-400 hover:text-white">Cancel</button>
-                  <button onClick={handleEdit} className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded-full">Save</button>
+                  <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-xs text-slate-400 hover:text-white transition-colors">Cancel</button>
+                  <button onClick={handleEdit} className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded-full transition-colors shadow-lg shadow-orange-500/20">Save</button>
                 </div>
               </div>
             ) : (
-              <p className="text-sm whitespace-pre-wrap">{renderContentWithTags(comment.content, users, onViewProfile)}</p>
+              <p className="text-sm whitespace-pre-wrap text-slate-300">{renderContentWithTags(comment.content, users, onViewProfile)}</p>
             )}
             {comment.internal_thought && (
-              <div className="mt-2 p-2 bg-gray-800/50 border-l-2 border-orange-500 rounded-r-lg text-xs italic text-gray-400 relative overflow-hidden group">
+              <div className="mt-2 p-2 bg-slate-800/50 border-l-2 border-orange-500 rounded-r-lg text-xs italic text-slate-400 relative overflow-hidden group backdrop-blur-sm">
                 <div className="absolute -right-2 -top-2 opacity-5">
                   <Brain size={32} />
                 </div>
@@ -6123,26 +6344,26 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
               </div>
             )}
           </div>
-          <div className="flex gap-6 mt-1 ml-2 text-gray-500">
+          <div className="flex gap-6 mt-1 ml-2 text-slate-500">
             <div className="flex items-center gap-1">
               <button 
                 onClick={() => onLike(comment.id)} 
-                className={`flex items-center gap-1 text-xs hover:text-pink-500 transition ${comment.is_liked ? 'text-pink-500' : ''}`}
+                className={`flex items-center gap-1 text-xs hover:text-pink-500 transition-colors ${comment.is_liked ? 'text-pink-500' : ''}`}
               >
                 <Heart size={12} fill={comment.is_liked ? "currentColor" : "none"} />
                 <span>{comment.like_count || 0}</span>
               </button>
               {comment.like_count > 0 && (
-                <button onClick={() => onShowLikers('comment', comment.id)} className="text-[9px] hover:underline">view</button>
+                <button onClick={() => onShowLikers('comment', comment.id)} className="text-[9px] hover:underline hover:text-slate-300 transition-colors">view</button>
               )}
             </div>
-            <button onClick={() => onReply(comment)} className="text-xs hover:text-orange-500 transition font-bold">Reply</button>
+            <button onClick={() => onReply(comment)} className="text-xs hover:text-orange-500 transition-colors font-bold">Reply</button>
           </div>
         </div>
       </div>
       
       {comment.replies && comment.replies.length > 0 && (
-        <div className="pl-6 space-y-3 border-l border-gray-800 ml-4">
+        <div className="pl-6 space-y-3 border-l-2 border-white/10 ml-4 mt-2">
           {comment.replies.map((reply: any) => (
             <CommentItem 
               apiFetch={apiFetch}

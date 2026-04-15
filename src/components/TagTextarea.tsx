@@ -13,7 +13,7 @@ interface TagTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElem
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
-export function TagTextarea({ users, value, onValueChange, className, ...props }: TagTextareaProps) {
+export function TagTextarea({ users, value, onValueChange, className, id, ...props }: TagTextareaProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [pickerPosition, setPickerPosition] = useState<'top' | 'bottom'>('top');
@@ -116,6 +116,7 @@ export function TagTextarea({ users, value, onValueChange, className, ...props }
     <div className={`relative ${isFlex1 ? 'flex-1' : 'w-full'}`} ref={containerRef}>
       <div className="relative w-full h-full flex flex-col">
         <textarea
+          id={id}
           ref={textareaRef}
           value={value}
           onChange={handleInput}

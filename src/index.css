@@ -23,6 +23,12 @@
   }
 }
 
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 1rem);
+  }
+}
+
 @theme inline {
   --animate-scroll: scroll 40s linear infinite;
 
