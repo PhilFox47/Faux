@@ -510,6 +510,13 @@ export function initDb() {
     db.exec("ALTER TABLE direct_messages ADD COLUMN image_prompt TEXT");
   } catch (e) {}
 
+  try {
+    db.prepare('SELECT is_paused FROM universes').get();
+  } catch (e) {
+    db.exec("ALTER TABLE universes ADD COLUMN is_paused INTEGER DEFAULT 0");
+    db.exec("ALTER TABLE universes ADD COLUMN paused_at DATETIME");
+  }
+
   // Handle schema migrations for users
   try {
     db.prepare('SELECT universe_id FROM users').get();
@@ -630,6 +637,12 @@ export function initDb() {
   }
 
   // Handle schema migrations for posts
+  try {
+    db.prepare('SELECT universe_id FROM posts').get();
+  } catch (e) {
+    db.exec("ALTER TABLE posts ADD COLUMN universe_id INTEGER REFERENCES universes(id)");
+  }
+
   try {
     db.prepare('SELECT image_url FROM posts').get();
   } catch (e) {

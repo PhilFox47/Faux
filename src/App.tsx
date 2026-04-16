@@ -395,6 +395,7 @@ export default function App() {
   const [newPostImage, setNewPostImage] = useState('');
   const [newPostType, setNewPostType] = useState('life_update');
   const [newPostUniverse, setNewPostUniverse] = useState<string>('');
+  const [timelineUniverseFilter, setTimelineUniverseFilter] = useState<string>('');
   const [isCreatingPost, setIsCreatingPost] = useState(false);
   const [isSendingMsg, setIsSendingMsg] = useState(false);
   const [isGroupChat, setIsGroupChat] = useState(false);
@@ -1461,6 +1462,31 @@ export default function App() {
     setActiveTab('universe_details');
   };
 
+  const handleToggleUniversePause = async () => {
+    if (!viewingUniverse) return;
+    const newPausedState = viewingUniverse.is_paused ? 0 : 1;
+    
+    // Optimistic update
+    const updatedUniverse = { ...viewingUniverse, is_paused: newPausedState };
+    setViewingUniverse(updatedUniverse);
+    setUniverses(prev => prev.map(u => u.id === viewingUniverse.id ? updatedUniverse : u));
+    
+    try {
+      await apiFetch(`/api/universes/${viewingUniverse.id}/pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_paused: newPausedState })
+      });
+      showToast(newPausedState ? "Universe Paused" : "Universe Resumed");
+      fetchUniverses();
+    } catch (e) {
+      // Revert on failure
+      setViewingUniverse(viewingUniverse);
+      setUniverses(prev => prev.map(u => u.id === viewingUniverse.id ? viewingUniverse : u));
+      showToast("Failed to update universe status");
+    }
+  };
+
   const handleUpdateUniverse = async () => {
     if (!viewingUniverse || isUpdatingUniverse) return;
     setIsUpdatingUniverse(true);
@@ -1777,7 +1803,7 @@ export default function App() {
       await apiFetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: content, post_type: type, image_url: image })
+        body: JSON.stringify({ content: content, post_type: type, image_url: image, universe_id: newPostUniverse ? parseInt(newPostUniverse) : null })
       });
       if (type === 'image_post' && !image) {
         showToast("Image is generating in the background. It will appear shortly.");
@@ -1785,9 +1811,11 @@ export default function App() {
         showToast("Post with image created.");
       }
       fetchPosts();
+      if (type === 'image_post') fetchFauxPics();
     } catch (e) {
       // Revert on failure
       fetchPosts();
+      fetchFauxPics();
     } finally {
       setIsCreatingPost(false);
     }
@@ -2204,13 +2232,23 @@ export default function App() {
   const visiblePostsRef = useRef(visiblePosts);
   const visibleFauxPicsRef = useRef(visibleFauxPics);
 
+  const timelineUniverseFilterRef = useRef(timelineUniverseFilter);
+
   const fetchPosts = useCallback(() => {
-    apiFetch(`/api/posts?limit=${visiblePostsRef.current + 1}`).then(r => r.json()).then(setPosts);
+    const universeParam = timelineUniverseFilterRef.current ? `&universe_id=${timelineUniverseFilterRef.current}` : '';
+    apiFetch(`/api/posts?limit=${visiblePostsRef.current + 1}${universeParam}`).then(r => r.json()).then(setPosts);
   }, [apiFetch]);
 
   const fetchFauxPics = useCallback(() => {
-    apiFetch(`/api/posts?type=image_post&limit=${visibleFauxPicsRef.current + 1}`).then(r => r.json()).then(setFauxPicsPosts);
+    const universeParam = timelineUniverseFilterRef.current ? `&universe_id=${timelineUniverseFilterRef.current}` : '';
+    apiFetch(`/api/posts?type=image_post&limit=${visibleFauxPicsRef.current + 1}${universeParam}`).then(r => r.json()).then(setFauxPicsPosts);
   }, [apiFetch]);
+
+  useEffect(() => {
+    timelineUniverseFilterRef.current = timelineUniverseFilter;
+    fetchPosts();
+    fetchFauxPics();
+  }, [timelineUniverseFilter, fetchPosts, fetchFauxPics]);
 
   useEffect(() => {
     if (visiblePostsRef.current !== visiblePosts) {
@@ -2260,12 +2298,7 @@ export default function App() {
   useEffect(() => {
     if (!loggedInUser) return;
     
-    const interval = setInterval(() => {
-      // Global updates (less frequent)
-      fetchConversations();
-      fetchGroupChats();
-      fetchNotifications();
-      
+    const fastInterval = setInterval(() => {
       // Tab-specific updates
       if (activeTab === 'home' || activeTab === 'fauxpics') {
         fetchPosts();
@@ -2276,8 +2309,19 @@ export default function App() {
       if (activeChat) {
         fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
       }
-    }, 20000); // Poll every 20s instead of 10s
-    return () => clearInterval(interval);
+    }, 10000); // Poll every 10s for active content
+
+    const slowInterval = setInterval(() => {
+      // Global updates (less frequent)
+      fetchConversations();
+      fetchGroupChats();
+      fetchNotifications();
+    }, 30000); // Poll every 30s for background content
+
+    return () => {
+      clearInterval(fastInterval);
+      clearInterval(slowInterval);
+    };
   }, [activeChat, isGroupChat, loggedInUser, activeTab, fetchPosts, fetchFauxPics, fetchConversations, fetchGroupChats, fetchNotifications, fetchChatMessages]);
 
   if (!loggedInUser) {
@@ -2536,7 +2580,7 @@ export default function App() {
       <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden">
         
         {/* Desktop Sidebar */}
-        <div className="hidden md:flex w-20 xl:w-64 border-r border-white/10 bg-white/5 backdrop-blur-md flex-col justify-between p-4 flex-shrink-0 z-20 relative">
+        <div className="hidden md:flex w-20 xl:w-64 border-r border-white/10 bg-white/5 backdrop-blur-md flex-col justify-between p-4 flex-shrink-0 z-20 relative overflow-y-auto custom-scrollbar">
           <div>
             <div className="flex items-center justify-center xl:justify-start mb-8 p-2">
               <img 
@@ -2547,8 +2591,8 @@ export default function App() {
               />
             </div>
             <nav className="space-y-2">
-              <NavItem icon={<Home />} label="Nexus" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-              <NavItem icon={<Camera />} label="FauxPics" active={activeTab === 'fauxpics'} onClick={() => setActiveTab('fauxpics')} />
+              <NavItem icon={<Home />} label="Nexus" active={activeTab === 'home'} onClick={() => { setActiveTab('home'); fetchPosts(); }} />
+              <NavItem icon={<Camera />} label="FauxPics" active={activeTab === 'fauxpics'} onClick={() => { setActiveTab('fauxpics'); fetchFauxPics(); }} />
               <NavItem 
                 icon={
                   <div className="relative">
@@ -2632,7 +2676,7 @@ export default function App() {
         </div>
 
         {/* Main Feed */}
-        <div className="flex-1 border-r border-white/10 overflow-y-auto relative pb-20 md:pb-0 scrollbar-hide">
+        <div className="flex-1 border-r border-white/10 overflow-y-auto relative pb-20 md:pb-0 custom-scrollbar">
           <div className="sticky top-0 bg-slate-950/80 backdrop-blur-xl border-b border-white/10 p-4 z-30 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button className="md:hidden text-slate-100 p-1 -ml-1 hover:bg-white/10 rounded-lg transition" onClick={() => setShowMobileMenu(true)}>
@@ -2641,6 +2685,18 @@ export default function App() {
               <h1 className="text-xl font-bold capitalize tracking-tight text-slate-100">
                 {activeTab === 'explore' ? 'Add Character' : activeTab === 'home' ? 'Nexus' : activeTab}
               </h1>
+              {(activeTab === 'home' || activeTab === 'fauxpics') && (
+                <select 
+                  value={timelineUniverseFilter} 
+                  onChange={(e) => setTimelineUniverseFilter(e.target.value)}
+                  className="ml-2 bg-slate-900 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none border border-white/10 focus:border-orange-500 transition max-w-[120px] truncate"
+                >
+                  <option value="">All Universes</option>
+                  {universes.map(u => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="md:hidden flex items-center gap-3">
               <button 
@@ -2793,7 +2849,7 @@ export default function App() {
 
           {activeTab === 'fauxpics' && (
             <div className="p-4">
-              <div className="grid grid-cols-1 gap-8 max-w-2xl mx-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-7xl mx-auto">
                 {fauxPicsPosts.length === 0 ? (
                   <div className="text-center py-20 text-slate-500">
                     <Camera size={64} className="mx-auto mb-4 opacity-20" />
@@ -2816,7 +2872,7 @@ export default function App() {
                   ))
                 )}
                 {fauxPicsPosts.length > visibleFauxPics && (
-                  <div className="flex justify-center mt-8">
+                  <div className="flex justify-center mt-8 md:col-span-2">
                     <button 
                       onClick={() => setVisibleFauxPics(prev => prev + 20)}
                       className="bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-3 px-8 rounded-xl transition border border-white/10"
@@ -3527,12 +3583,20 @@ export default function App() {
                   <ArrowLeft size={20} /> Back to Universes
                 </button>
                 {!isEditingUniverse && viewingUniverse.id !== -1 && (
-                  <button 
-                    onClick={() => setIsEditingUniverse(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition"
-                  >
-                    <Settings size={18} /> Edit Universe
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={handleToggleUniversePause}
+                      className={`flex items-center gap-2 px-4 py-2 ${viewingUniverse.is_paused ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'} text-white rounded-lg transition font-bold`}
+                    >
+                      {viewingUniverse.is_paused ? 'Resume Time' : 'Pause Time'}
+                    </button>
+                    <button 
+                      onClick={() => setIsEditingUniverse(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition"
+                    >
+                      <Settings size={18} /> Edit Universe
+                    </button>
+                  </div>
                 )}
               </div>
               
@@ -4770,11 +4834,11 @@ export default function App() {
 
         {/* Mobile Bottom Navigation */}
         <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-xl border-t border-white/10 z-40 flex justify-around items-center p-2 pb-safe">
-          <button onClick={() => setActiveTab('home')} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+          <button onClick={() => { setActiveTab('home'); fetchPosts(); }} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
             <Home size={20} />
             <span className="text-[10px] font-medium">Nexus</span>
           </button>
-          <button onClick={() => setActiveTab('fauxpics')} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${activeTab === 'fauxpics' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+          <button onClick={() => { setActiveTab('fauxpics'); fetchFauxPics(); }} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${activeTab === 'fauxpics' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
             <Camera size={20} />
             <span className="text-[10px] font-medium">FauxPics</span>
           </button>
@@ -4886,7 +4950,7 @@ export default function App() {
 
         {/* Viewing Post Modal */}
         {viewingPostData && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative shadow-2xl">
               <button onClick={() => setViewingPostData(null)} className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors z-10 bg-slate-800/50 p-2 rounded-full backdrop-blur-sm border border-white/10">
                 <X size={24} />
@@ -6122,10 +6186,10 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
           {post.image_url && (
             <>
               <div 
-                className="mt-3 rounded-2xl overflow-hidden border border-white/10 max-h-[500px] cursor-pointer shadow-lg hover:border-orange-500/50 transition-colors"
+                className="mt-3 rounded-2xl overflow-hidden border border-white/10 bg-slate-950/50 flex items-center justify-center cursor-pointer shadow-lg hover:border-orange-500/50 transition-colors"
                 onClick={() => setIsImageExpanded(true)}
               >
-                <img src={post.image_url} alt="Post image" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                <img src={post.image_url} alt="Post image" className="max-w-full max-h-[600px] object-contain" referrerPolicy="no-referrer" />
               </div>
               {isImageExpanded && (
                 <div 

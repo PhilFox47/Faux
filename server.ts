@@ -536,8 +536,15 @@ async function triggerPostComments(postId: number, postType: string, isForced: b
   const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
   const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
-  const postAuthor = db.prepare("SELECT u.is_ai FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
-  const isRealUserPost = postAuthor && postAuthor.is_ai === 0;
+  const postAuthor = db.prepare("SELECT u.is_ai, p.universe_id FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
+  if (!postAuthor) return;
+
+  if (postAuthor.universe_id) {
+    const universe = db.prepare("SELECT is_paused FROM universes WHERE id = ?").get(postAuthor.universe_id) as any;
+    if (universe && universe.is_paused) return; // Ignore if universe is paused
+  }
+
+  const isRealUserPost = postAuthor.is_ai === 0;
 
   const baseCount = (postType === 'question' || postType === 'discussion' || postType === 'seeking_advice') ? 5 : 3;
   let count = Math.max(0, Math.round((isRealUserPost ? 10 : baseCount) * onlineRatio));
@@ -576,6 +583,12 @@ async function triggerPostComments(postId: number, postType: string, isForced: b
       `;
       aiUsersParams = [post.user_id, post.user_id];
     }
+
+    if (post.universe_id) {
+      aiUsersQuery += post.is_ai === 0 ? ` AND u.universe_id = ?` : ` AND universe_id = ?`;
+      aiUsersParams.push(post.universe_id);
+    }
+
     const aiUsers = db.prepare(aiUsersQuery).all(...aiUsersParams) as any[];
     const existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(postId).map((r: any) => r.user_id);
     const availableAiUsers = aiUsers.filter(u => {
@@ -695,12 +708,20 @@ async function handleOPReplies() {
       const opUser = db.prepare("SELECT * FROM users WHERE id = ?").get(comment.target_op_id) as any;
       if (!opUser) continue;
 
+      if (opUser.universe_id) {
+        const universe = db.prepare("SELECT is_paused FROM universes WHERE id = ?").get(opUser.universe_id) as any;
+        if (universe && universe.is_paused) {
+          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+          continue;
+        }
+      }
+
       if (!isUserOnline(opUser, settings.timezone || 'UTC')) continue;
 
-      // News posts are strictly universe-locked
-      const post = db.prepare("SELECT u.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(comment.post_id) as any;
-      if (post?.account_type === 'news' || post?.post_type === 'news') {
-        // The AI replying must be from the same universe as the news post
+      // Universe locking
+      const post = db.prepare("SELECT p.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(comment.post_id) as any;
+      if (post?.universe_id) {
+        // The AI replying must be from the same universe as the post
         if (opUser.universe_id !== post.universe_id) {
           db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
           continue;
@@ -710,6 +731,20 @@ async function handleOPReplies() {
         if (commenter && commenter.universe_id !== post.universe_id) {
           db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
           continue;
+        }
+      } else if (post?.account_type === 'news' || post?.post_type === 'news') {
+        // Legacy fallback for news posts without universe_id on the post itself
+        const postAuthor = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.op_id) as any;
+        if (postAuthor?.universe_id) {
+          if (opUser.universe_id !== postAuthor.universe_id) {
+            db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+            continue;
+          }
+          const commenter = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.user_id) as any;
+          if (commenter && commenter.universe_id !== postAuthor.universe_id) {
+            db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+            continue;
+          }
         }
       }
 
@@ -798,7 +833,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       }
 
       if (newsContent) {
-        const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)").run(aiUser.id, newsContent.content, newsContent.internal_thought);
+        const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought, universe_id) VALUES (?, ?, 'news', ?, ?)").run(aiUser.id, newsContent.content, newsContent.internal_thought, aiUser.universe_id || null);
         const postId = info.lastInsertRowid as number;
         triggerPostComments(postId, 'news', forceType !== null);
         return true;
@@ -1018,7 +1053,7 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
 
   if (postContent) {
     const isVisible = archetype.id === 'image_post' ? 0 : 1;
-    const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, internal_thought) VALUES (?, ?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible, internalThought);
+    const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, internal_thought, universe_id) VALUES (?, ?, ?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible, internalThought, aiUser.universe_id || null);
     const postId = info.lastInsertRowid as number;
     console.log(`${aiUser.display_name} created a post (${archetype.id})`);
 
@@ -1510,12 +1545,11 @@ async function startServer() {
     const userId = user ? user.id : 0;
     const posts = db.prepare(`
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
-      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
-      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
-      l.id IS NOT NULL as is_liked
+      (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
+      (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
+      (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ? LIMIT 1) as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
-      LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = ?
       WHERE p.user_id = ? AND p.is_visible = 1
       ORDER BY p.created_at DESC
     `).all(userId, req.params.id) as any[];
@@ -1805,6 +1839,43 @@ async function startServer() {
     const { description, image_url } = req.body;
     try {
       db.prepare("UPDATE universes SET description = ?, image_url = ? WHERE id = ?").run(description || '', image_url || '', req.params.id);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/universes/:id/pause", (req, res) => {
+    const user = getRealUser(req);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+
+    const { is_paused } = req.body;
+    try {
+      if (is_paused) {
+        db.prepare("UPDATE universes SET is_paused = 1, paused_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+      } else {
+        const universe = db.prepare("SELECT paused_at FROM universes WHERE id = ?").get(req.params.id) as any;
+        if (universe && universe.paused_at) {
+          const pausedSeconds = Math.floor((Date.now() - new Date(universe.paused_at).getTime()) / 1000);
+          
+          // Adjust Universe Arcs
+          db.prepare(`
+            UPDATE universe_arcs 
+            SET target_end_date = datetime(target_end_date, '+' || ? || ' seconds'),
+                last_update_date = datetime(last_update_date, '+' || ? || ' seconds')
+            WHERE universe_id = ? AND status = 'active'
+          `).run(pausedSeconds, pausedSeconds, req.params.id);
+
+          // Adjust Character Arcs
+          db.prepare(`
+            UPDATE character_arcs 
+            SET target_end_date = datetime(target_end_date, '+' || ? || ' seconds'),
+                last_update_date = datetime(last_update_date, '+' || ? || ' seconds')
+            WHERE status = 'active' AND user_id IN (SELECT id FROM users WHERE universe_id = ?)
+          `).run(pausedSeconds, pausedSeconds, req.params.id);
+        }
+        db.prepare("UPDATE universes SET is_paused = 0, paused_at = NULL WHERE id = ?").run(req.params.id);
+      }
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
@@ -2126,15 +2197,15 @@ async function startServer() {
     const userId = user ? user.id : 0;
     const limit = parseInt(req.query.limit as string) || 50;
     const type = req.query.type as string;
+    const universeId = req.query.universe_id as string;
     
     let query = `
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
-      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
-      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
-      l.id IS NOT NULL as is_liked
+      (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
+      (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
+      (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ? LIMIT 1) as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
-      LEFT JOIN likes l ON l.post_id = p.id AND l.user_id = ?
       WHERE p.is_visible = 1
       AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)
     `;
@@ -2143,6 +2214,11 @@ async function startServer() {
     if (type) {
       query += ` AND p.post_type = ?`;
       params.push(type);
+    }
+
+    if (universeId) {
+      query += ` AND p.universe_id = ?`;
+      params.push(universeId);
     }
 
     query += ` ORDER BY p.created_at DESC LIMIT ?`;
@@ -2157,15 +2233,15 @@ async function startServer() {
   });
 
   app.post("/api/posts", async (req, res) => {
-    const { content, post_type, image_url } = req.body;
+    const { content, post_type, image_url, universe_id } = req.body;
     const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
 
     const isVisible = (post_type === 'image_post' && !finalImageUrl) ? 0 : 1;
-    const stmt = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, image_url) VALUES (?, ?, ?, ?, ?)");
-    const info = stmt.run(user.id, content, post_type || 'life_update', isVisible, finalImageUrl);
+    const stmt = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, image_url, universe_id) VALUES (?, ?, ?, ?, ?, ?)");
+    const info = stmt.run(user.id, content, post_type || 'life_update', isVisible, finalImageUrl, universe_id || null);
     const postId = info.lastInsertRowid;
     
     res.json({ id: postId });
@@ -2217,13 +2293,11 @@ async function startServer() {
 
     const comments = db.prepare(`
       SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type,
-      COUNT(cl.id) as like_count,
-      MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) as is_liked
+      (SELECT COUNT(id) FROM comment_likes WHERE comment_id = c.id) as like_count,
+      (SELECT 1 FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
       FROM comments c
       JOIN users u ON c.user_id = u.id
-      LEFT JOIN comment_likes cl ON cl.comment_id = c.id
       WHERE c.post_id = ?
-      GROUP BY c.id
       ORDER BY c.created_at ASC
     `).all(userId, req.params.id) as any[];
 
@@ -2281,8 +2355,8 @@ async function startServer() {
     const user = getRealUser(req);
     const post = db.prepare(`
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
-      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as likes,
-      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments,
+      (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as likes,
+      (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comments,
       EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
@@ -2951,8 +3025,10 @@ async function startServer() {
       const onlineUsers = allUsers.filter(u => isUserOnline(u, timezone, recentDmUserIds, precalculatedTime));
       const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
-      const allAiUsers = allUsers.filter(u => u.is_ai === 1);
-      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1 && u.account_type !== 'news');
+      const pausedUniverses = new Set(db.prepare("SELECT id FROM universes WHERE is_paused = 1").all().map((u: any) => u.id));
+
+      const allAiUsers = allUsers.filter(u => u.is_ai === 1 && (!u.universe_id || !pausedUniverses.has(u.universe_id)));
+      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1 && u.account_type !== 'news' && (!u.universe_id || !pausedUniverses.has(u.universe_id)));
       const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
       if (allAiUsers.length === 0) return;
 
@@ -3514,7 +3590,7 @@ async function startServer() {
             WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1
           `).all(group.id) as any[];
 
-          const onlineMembers = members.filter(m => isUserOnline(m, settings.timezone || 'UTC'));
+          const onlineMembers = members.filter(m => isUserOnline(m, settings.timezone || 'UTC') && (!m.universe_id || !pausedUniverses.has(m.universe_id)));
           
           if (onlineMembers.length > 0) {
             // Pick an AI to reply based on activity level
