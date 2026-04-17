@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, updateCharacterArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, updateDMSummaryAndFacts, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, updateCharacterArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
 import { logPerformance } from "./src/logger";
 
@@ -37,6 +37,7 @@ async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId
 
   const summaryRow = db.prepare("SELECT * FROM dm_summaries WHERE user_id_1 = ? AND user_id_2 = ?").get(minId, maxId) as any;
   let currentSummary = summaryRow ? summaryRow.summary : null;
+  let currentFacts = summaryRow ? summaryRow.facts : null;
   let lastMessageId = summaryRow ? summaryRow.last_message_id : 0;
 
   const newMessages = db.prepare(`
@@ -50,8 +51,11 @@ async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId
   let messagesToSummarize: any[] = [];
   let recentMessages: any[] = [];
 
-  if (newMessages.length >= 30) {
-    const splitIndex = newMessages.length - 10;
+  // Summarize batches to maintain context without overloading tokens.
+  // When we hit 100 unsummarized messages, we summarize the oldest 50
+  // and keep the newest 50 raw.
+  if (newMessages.length >= 100) {
+    const splitIndex = newMessages.length - 50;
     messagesToSummarize = newMessages.slice(0, splitIndex);
     recentMessages = newMessages.slice(splitIndex);
 
@@ -64,25 +68,36 @@ async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId
       created_at: msg.created_at
     }));
 
-    currentSummary = await summarizeDMHistory(currentSummary, formattedForSummary, char1, char2);
+    const updateResponse = await updateDMSummaryAndFacts(currentSummary, currentFacts, formattedForSummary, char1, char2);
+    currentSummary = updateResponse.summary;
+    currentFacts = updateResponse.facts;
     lastMessageId = messagesToSummarize[messagesToSummarize.length - 1].id;
 
     db.prepare(`
-      INSERT INTO dm_summaries (user_id_1, user_id_2, summary, last_message_id) 
-      VALUES (?, ?, ?, ?)
+      INSERT INTO dm_summaries (user_id_1, user_id_2, summary, facts, last_message_id) 
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(user_id_1, user_id_2) DO UPDATE SET 
         summary = excluded.summary, 
+        facts = excluded.facts,
         last_message_id = excluded.last_message_id
-    `).run(minId, maxId, currentSummary, lastMessageId);
+    `).run(minId, maxId, currentSummary, currentFacts, lastMessageId);
   } else {
     recentMessages = newMessages;
   }
 
   const formattedHistory: any[] = [];
+  
+  if (currentFacts) {
+    formattedHistory.push({
+      role: 'system',
+      content: `[PERMANENT RELATIONSHIP FACTS & MEMORIES]:\n${currentFacts}`
+    });
+  }
+
   if (currentSummary) {
     formattedHistory.push({
       role: 'system',
-      content: `[Summary of previous conversation]:\n${currentSummary}`
+      content: `[Summary of older conversation]:\n${currentSummary}`
     });
   }
 
@@ -1544,7 +1559,7 @@ async function startServer() {
     const user = getRealUser(req);
     const userId = user ? user.id : 0;
     const posts = db.prepare(`
-      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
+      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
       (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ? LIMIT 1) as is_liked
@@ -1563,7 +1578,7 @@ async function startServer() {
 
   app.get("/api/users/:id/followers", (req, res) => {
     const followers = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM follows f
       JOIN users u ON f.follower_id = u.id
       WHERE f.followed_id = ?
@@ -1573,7 +1588,7 @@ async function startServer() {
 
   app.get("/api/users/:id/following", (req, res) => {
     const following = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM follows f
       JOIN users u ON f.followed_id = u.id
       WHERE f.follower_id = ?
@@ -1699,7 +1714,7 @@ async function startServer() {
     const loggedInUser = getRealUser(req);
     
     const relationships = db.prepare(`
-      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar, u.account_type as other_account_type, u.role as other_role, u1.role as user1_role
+      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar, u.account_type as other_account_type, u.role as other_role, u1.role as user1_role, u.is_verified as other_is_verified
       FROM relationships r
       JOIN users u ON r.user_id_2 = u.id
       JOIN users u1 ON r.user_id_1 = u1.id
@@ -1852,11 +1867,13 @@ async function startServer() {
     const { is_paused } = req.body;
     try {
       if (is_paused) {
-        db.prepare("UPDATE universes SET is_paused = 1, paused_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+        db.prepare("UPDATE universes SET is_paused = 1, paused_at = ? WHERE id = ?").run(new Date().toISOString(), req.params.id);
       } else {
         const universe = db.prepare("SELECT paused_at FROM universes WHERE id = ?").get(req.params.id) as any;
         if (universe && universe.paused_at) {
-          const pausedSeconds = Math.floor((Date.now() - new Date(universe.paused_at).getTime()) / 1000);
+          // Javascript new Date() can parse ISO strings cleanly.
+          const pausedTimeMs = Date.now() - new Date(universe.paused_at).getTime();
+          const pausedSeconds = Math.max(0, Math.floor(pausedTimeMs / 1000));
           
           // Adjust Universe Arcs
           db.prepare(`
@@ -2063,16 +2080,16 @@ async function startServer() {
   });
 
   app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
+    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, is_verified } = req.body;
     try {
       const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
       const finalReferenceImages = reference_images ? reference_images.map((img: string) => saveBase64Image(img)) : [];
 
       db.prepare(`
         UPDATE users 
-        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency), reference_images = ?, account_type = COALESCE(?, account_type), company_name = ?, brand_identity = ?, products_services = ?, target_audience = ?, run_by_character_id = ?
+        SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency), reference_images = ?, account_type = COALESCE(?, account_type), company_name = ?, brand_identity = ?, products_services = ?, target_audience = ?, run_by_character_id = ?, is_verified = COALESCE(?, is_verified)
         WHERE id = ?
-      `).run(display_name, username, bio, finalAvatarUrl, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, JSON.stringify(finalReferenceImages), account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id || null, req.params.id);
+      `).run(display_name, username, bio, finalAvatarUrl, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, JSON.stringify(finalReferenceImages), account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id || null, is_verified === undefined ? null : is_verified ? 1 : 0, req.params.id);
 
       syncNewsFollowers(parseInt(req.params.id));
 
@@ -2100,7 +2117,7 @@ async function startServer() {
   });
 
   app.post("/api/users", (req, res) => {
-    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id } = req.body;
+    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, is_verified } = req.body;
     logApi(
       "ROUTE_ADD_USER",
       { username, display_name, universe_id, account_type },
@@ -2116,11 +2133,12 @@ async function startServer() {
       const finalReferenceImages = reference_images ? reference_images.map((img: string) => saveBase64Image(img)) : [];
 
       const stmt = db.prepare(`
-        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, is_active, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, created_at)
-        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO users (username, display_name, bio, avatar_url, is_ai, is_active, is_verified, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, created_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       `);
       const isActive = account_type === 'news' ? 1 : 0;
-      const info = stmt.run(username, display_name, bio, finalAvatarUrl, isActive, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, JSON.stringify(finalReferenceImages), account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
+      const verifiedInt = is_verified ? 1 : 0;
+      const info = stmt.run(username, display_name, bio, finalAvatarUrl, isActive, verifiedInt, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, JSON.stringify(finalReferenceImages), account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
       const userId = info.lastInsertRowid;
       
       // AI character follows real user by default, but real user does NOT follow AI character by default
@@ -2156,7 +2174,7 @@ async function startServer() {
     if (!user) return res.status(401).json({ error: "User not found" });
 
     const notifications = db.prepare(`
-      SELECT n.*, u.display_name as actor_name, u.avatar_url as actor_avatar, u.account_type as actor_account_type
+      SELECT n.*, u.display_name as actor_name, u.avatar_url as actor_avatar, u.account_type as actor_account_type, u.is_verified as actor_is_verified
       FROM notifications n
       JOIN users u ON n.actor_id = u.id
       WHERE n.user_id = ?
@@ -2200,7 +2218,7 @@ async function startServer() {
     const universeId = req.query.universe_id as string;
     
     let query = `
-      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
+      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
       (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ? LIMIT 1) as is_liked
@@ -2292,7 +2310,7 @@ async function startServer() {
     const userId = user ? user.id : 0;
 
     const comments = db.prepare(`
-      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type,
+      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comment_likes WHERE comment_id = c.id) as like_count,
       (SELECT 1 FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
       FROM comments c
@@ -2332,7 +2350,7 @@ async function startServer() {
 
   app.get("/api/posts/:id/likers", (req, res) => {
     const likers = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM likes l
       JOIN users u ON l.user_id = u.id
       WHERE l.post_id = ?
@@ -2342,7 +2360,7 @@ async function startServer() {
 
   app.get("/api/comments/:id/likers", (req, res) => {
     const likers = db.prepare(`
-      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type
+      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM comment_likes cl
       JOIN users u ON cl.user_id = u.id
       WHERE cl.comment_id = ?
@@ -2354,7 +2372,7 @@ async function startServer() {
   app.get("/api/posts/:id", (req, res) => {
     const user = getRealUser(req);
     const post = db.prepare(`
-      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type,
+      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as likes,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comments,
       EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
@@ -2401,7 +2419,7 @@ async function startServer() {
   // Delete and Edit Comments
   app.get("/api/comments/:id", (req, res) => {
     const comment = db.prepare(`
-      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type
+      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM comments c
       JOIN users u ON c.user_id = u.id
       WHERE c.id = ?
@@ -2484,7 +2502,7 @@ async function startServer() {
 
     for (const group of groups as any[]) {
       group.members = db.prepare(`
-        SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at
+        SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at
         FROM users u
         JOIN group_chat_members gcm ON u.id = gcm.user_id
         WHERE gcm.group_chat_id = ?
@@ -2526,7 +2544,7 @@ async function startServer() {
     const beforeId = req.query.before_id ? parseInt(req.query.before_id as string) : null;
 
     let query = `
-      SELECT m.*, u.display_name, u.username, u.avatar_url, u.account_type
+      SELECT m.*, u.display_name, u.username, u.avatar_url, u.account_type, u.is_verified
       FROM group_chat_messages m
       JOIN users u ON m.sender_id = u.id
       WHERE m.group_chat_id = ?
@@ -2715,7 +2733,7 @@ async function startServer() {
         GROUP BY sender_id
       )
       SELECT 
-        u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at,
+        u.id as other_user_id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at,
         dm.content as last_message, dm.created_at, dm.is_read,
         dm.sender_id,
         COALESCE(uc.count, 0) as unread_count
@@ -3278,7 +3296,7 @@ async function startServer() {
             WHERE f.follower_id = ? AND u.is_ai = 1 AND u.is_active = 1
           `).all(realUser.id) as any[];
           
-          const onlineFollowedAis = followedAis.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
+          const onlineFollowedAis = followedAis.filter(u => isUserOnline(u, settings.timezone || 'UTC') && (!u.universe_id || !pausedUniverses.has(u.universe_id)));
 
           if (onlineFollowedAis.length > 0) {
             const probFavoriteDm = (settings.prob_favorite_dm ?? 50.0) / 100;
@@ -3288,12 +3306,13 @@ async function startServer() {
               if (favorites.length > 0) {
                 const randomFav = favorites[Math.floor(Math.random() * favorites.length)];
                 if (randomFav.is_group) {
-                  const aiMembers = db.prepare(`
+                  let aiMembers = db.prepare(`
                     SELECT u.* FROM users u
                     JOIN group_chat_members gcm ON gcm.user_id = u.id
                     JOIN follows f ON f.followed_id = u.id
                     WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
                   `).all(randomFav.target_id, realUser.id) as any[];
+                  aiMembers = aiMembers.filter(u => (!u.universe_id || !pausedUniverses.has(u.universe_id)));
                   
                   if (aiMembers.length > 0) {
                     const randomAi = pickWeightedRandomUser(aiMembers);
@@ -3342,7 +3361,7 @@ async function startServer() {
                     JOIN follows f ON f.followed_id = u.id
                     WHERE u.id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
                   `).get(randomFav.target_id, realUser.id) as any;
-                  if (randomAi) {
+                  if (randomAi && (!randomAi.universe_id || !pausedUniverses.has(randomAi.universe_id))) {
                     const dmKey = `${randomAi.id}:${realUser.id}`;
                     if (!pendingDMs.has(dmKey)) {
                       pendingDMs.add(dmKey);

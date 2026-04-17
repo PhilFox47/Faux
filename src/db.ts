@@ -15,6 +15,7 @@ export function initDb() {
       avatar_url TEXT,
       is_ai BOOLEAN DEFAULT 1,
       is_active BOOLEAN DEFAULT 0,
+      is_verified BOOLEAN DEFAULT 0,
       ai_persona TEXT, -- Description of who they are impersonating
       universe_id INTEGER REFERENCES universes(id),
       account_type TEXT DEFAULT 'character',
@@ -273,6 +274,7 @@ export function initDb() {
       user_id_1 INTEGER NOT NULL,
       user_id_2 INTEGER NOT NULL,
       summary TEXT NOT NULL,
+      facts TEXT,
       last_message_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id_1, user_id_2)
@@ -355,6 +357,20 @@ export function initDb() {
   // Add image_description column to direct_messages if it doesn't exist
   try {
     db.exec("ALTER TABLE direct_messages ADD COLUMN image_description TEXT");
+  } catch (e) {
+    // Column might already exist
+  }
+
+  // Add facts column to dm_summaries if it doesn't exist
+  try {
+    db.exec("ALTER TABLE dm_summaries ADD COLUMN facts TEXT");
+  } catch (e) {
+    // Column might already exist
+  }
+
+  // Add is_verified column to users if it doesn't exist
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT 0");
   } catch (e) {
     // Column might already exist
   }

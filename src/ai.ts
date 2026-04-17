@@ -236,6 +236,7 @@ function buildCharacterPrompt(character: any) {
     }
   } else {
     prompt = `You are ${character.display_name}. `;
+    if (character.is_verified) prompt += `You are a verified public figure/celebrity on Faux. `;
     if (character.ai_persona) prompt += `${character.ai_persona} `;
     if (character.description) prompt += `\nYour personality and background: ${character.description}`;
     if (character.writing_style) prompt += `\nYour writing style: ${character.writing_style}`;
@@ -403,21 +404,33 @@ export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false,
 }
 
 function getOtherUserUniverseContext(character: any, otherUser: any): string {
-  if (!otherUser || !otherUser.universe_id) return '';
+  if (!otherUser) return '';
+  
+  let context = '';
+  
+  if (otherUser.account_type === 'company') {
+    context += `${otherUser.display_name} is a verified Company/Brand account on Faux.\n`;
+  } else if (otherUser.account_type === 'news') {
+    context += `${otherUser.display_name} is a verified News/Media account on Faux.\n`;
+  } else if (otherUser.account_type === 'character' && otherUser.is_verified) {
+    context += `${otherUser.display_name} is a verified public figure/celebrity on Faux.\n`;
+  }
+  
+  if (!otherUser.universe_id) return context;
   
   try {
     const otherUniverse = db.prepare("SELECT name FROM universes WHERE id = ?").get(otherUser.universe_id) as any;
     if (otherUniverse) {
       if (character.universe_id === otherUser.universe_id) {
-        return `You and ${otherUser.display_name} are from the same universe/franchise ("${otherUniverse.name}"). You likely know each other to some extent or share common knowledge of your world. You CAN interact with them in the "real world" (meet up, hang out, etc).\n`;
+        context += `You and ${otherUser.display_name} are from the same universe/franchise ("${otherUniverse.name}"). You likely know each other to some extent or share common knowledge of your world. You CAN interact with them in the "real world" (meet up, hang out, etc).\n`;
       } else {
-        return `${otherUser.display_name} is from a different universe/franchise ("${otherUniverse.name}"). You do not know them from your own world, and their background might seem strange or novel to you. CRITICAL RULE: You can ONLY interact with them digitally on this platform (e.g., chatting, video calls, online gaming). You CANNOT meet up with them in the "real world".\n`;
+        context += `${otherUser.display_name} is from a different universe/franchise ("${otherUniverse.name}"). You do not know them from your own world, and their background might seem strange or novel to you. CRITICAL RULE: You can ONLY interact with them digitally on this platform (e.g., chatting, video calls, online gaming). You CANNOT meet up with them in the "real world".\n`;
       }
     }
   } catch (e) {
     // ignore
   }
-  return '';
+  return context;
 }
 
 export async function generateImagePostData(character: any, context: string = '', relationships: string = '', availableUsernames: string = '') {
@@ -1135,6 +1148,7 @@ CRITICAL: Make it feel like a REALISTIC text message/DM.
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
+- CRITICAL: Natural conversations don't always end with a question or a call to action. It is okay (and often preferred) to just make a statement, share an observation, or drop a thought without forcing the other person to reply. Do NOT feel pressured to keep the conversation going at all costs. Let things end naturally.
 If there is previous history, you can pick up where you left off or start a new topic. 
 Notice the timestamps in the history to understand how much time has passed since the last message.
 ${context ? 'Use the provided context as the reason for reaching out.' : (recentActivity ? 'Give a good reason for reaching out (e.g., asking a casual question about their recent post or comment, sharing a quick thought, or checking in).' : 'Give a good reason for reaching out (e.g., sharing a quick thought, asking a random question, talking about your own life, or just checking in).')} 
@@ -1219,6 +1233,49 @@ Please provide a concise, updated summary of the entire conversation history, ca
   }
 }
 
+export async function updateDMSummaryAndFacts(currentSummary: string | null, currentFacts: string | null, newMessages: {role: string, content: string, created_at: string}[], character1: any, character2: any) {
+  const prompt = `You are an AI maintaining a memory log of a direct message conversation between ${character1.display_name} and ${character2.display_name}.
+
+${currentFacts ? `CURRENT PERMANENT FACTS LIST:\n${currentFacts}\n\n` : ''}${currentSummary ? `CURRENT CONVERSATION SUMMARY:\n${currentSummary}\n\n` : ''}
+Here are the latest messages to process:
+${newMessages.map(m => `(Sent at ${m.created_at}) ${m.role === 'user' ? character2.display_name : character1.display_name}: ${m.content}`).join('\n')}
+
+Your task is to return a JSON object with two fields:
+1. "summary": An updated conversational summary (max 3000 tokens long). Summarize the recent events, continuing from the old summary if one exists.
+2. "facts": An updated, bulleted list of PERMANENT FACTS about the characters learned during this chat (e.g., "- User has a dog named Rex", "- User hates coffee", "- They met at a coffee shop"). Maintain previous facts and add new ones. Overwrite outdated facts if you learn new information, but err on the side of keeping facts.
+
+Return strictly JSON format:
+{
+  "summary": "...",
+  "facts": "- Fact 1\\n- Fact 2"
+}
+`;
+
+  try {
+    const response = await getOpenAI().chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 5000,
+      temperature: 0.5,
+      response_format: { type: "json_object" }
+    });
+    
+    let rawContent = response.choices[0].message.content || "{}";
+    let json = JSON.parse(stripReasoning(rawContent));
+    
+    return {
+      summary: json.summary || currentSummary || "",
+      facts: json.facts || currentFacts || ""
+    };
+  } catch (error: any) {
+    console.error('Error updating DM summary and facts:', error);
+    return {
+      summary: currentSummary || "",
+      facts: currentFacts || ""
+    };
+  }
+}
+
 export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string, created_at: string}[], relationshipContext: string = '', otherUserId?: number, isDelayed: boolean = false, allowImageGen: boolean = false) {
   let otherUserInfo = '';
   if (otherUserId) {
@@ -1262,6 +1319,7 @@ CRITICAL: Make it feel like a REALISTIC text message/DM.
 - People text in short bursts. Keep it brief and conversational.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
 - Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
+- CRITICAL: Natural conversations don't always end with a question or a call to action. It is okay (and often preferred) to just make a statement, acknowledge what they said, or react without forcing them to reply. Do NOT feel pressured to keep the conversation going at all costs. Let things end naturally.
 Focus on the conversation topic.
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.
 
@@ -1365,6 +1423,7 @@ CRITICAL: Make it feel like a REALISTIC group chat message.
 - People text in short bursts. Keep it brief and conversational.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
 - Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
+- CRITICAL: Natural conversations don't always end with a question or a call to action. It is okay (and often preferred) to just make a statement, acknowledge what was said, or react without forcing someone to reply. Do NOT feel pressured to keep the conversation going at all costs. Let things end naturally.
 - IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.
 You can address specific people by name if you want.
 
@@ -1670,6 +1729,14 @@ export async function analyzeImage(imageUrl: string): Promise<string> {
   const prompt = "Describe this image in detail. Focus on the subjects, setting, actions, and any text visible. This description will be used by an AI character to understand what was posted.";
   
   try {
+    let finalUrl = imageUrl;
+    if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('http')) {
+       const base64 = await getBase64Image(imageUrl);
+       if (base64) {
+         finalUrl = base64;
+       }
+    }
+
     const response = await getOpenAI().chat.completions.create({
       model: getVisionModel(),
       messages: [
@@ -1677,7 +1744,7 @@ export async function analyzeImage(imageUrl: string): Promise<string> {
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: imageUrl } }
+            { type: 'image_url', image_url: { url: finalUrl } }
           ] as any
         }
       ],

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp, Brain, Menu } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, BadgeCheck, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp, Brain, Menu } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -8,6 +8,21 @@ import { FauxPast } from './components/FauxPast';
 
 const getAvatarShape = (accountType?: string) => {
   return accountType === 'company' || accountType === 'news' || accountType === 'faux_news' ? 'rounded-xl' : 'rounded-full';
+};
+
+export const VerifiedBadge = ({ user, size = 14 }: { user: any, size?: number }) => {
+  if (!user) return null;
+  
+  if (user.account_type === 'company') {
+    return <span title="Verified Company" className="inline-flex"><BadgeCheck size={size} className="text-yellow-500 fill-yellow-900 flex-shrink-0" /></span>;
+  }
+  if (user.account_type === 'news') {
+    return <span title="Verified News" className="inline-flex"><BadgeCheck size={size} className="text-red-500 fill-red-900 flex-shrink-0" /></span>;
+  }
+  if (user.account_type === 'character' && user.is_verified) {
+    return <span title="Verified Public Figure" className="inline-flex"><BadgeCheck size={size} className="text-blue-500 fill-blue-900 flex-shrink-0" /></span>;
+  }
+  return null;
 };
 
 const CharacterSidebarItem = React.memo(({ 
@@ -37,9 +52,12 @@ const CharacterSidebarItem = React.memo(({
       </div>
       <div 
         onClick={() => handleViewProfile(u.id)}
-        className="flex-1 overflow-hidden cursor-pointer"
+        className="flex-1 overflow-hidden cursor-pointer flex flex-col"
       >
-        <p className="font-bold truncate text-sm group-hover:underline">{u.display_name}</p>
+        <div className="flex items-center gap-1 min-w-0">
+          <p className="font-bold truncate text-sm group-hover:underline">{u.display_name}</p>
+          <VerifiedBadge user={u} />
+        </div>
         <p className="text-gray-500 text-xs truncate">@{u.username}</p>
       </div>
       <div className="flex flex-col gap-1 flex-shrink-0">
@@ -473,6 +491,7 @@ export default function App() {
   const [charProductsServices, setCharProductsServices] = useState('');
   const [charTargetAudience, setCharTargetAudience] = useState('');
   const [charRunByCharacterId, setCharRunByCharacterId] = useState<number | null>(null);
+  const [charIsVerified, setCharIsVerified] = useState(false);
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [universes, setUniverses] = useState<any[]>([]);
   const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
@@ -610,6 +629,7 @@ export default function App() {
   const [profileTargetAudience, setProfileTargetAudience] = useState('');
   const [profileRunByCharacterId, setProfileRunByCharacterId] = useState<number | null>(null);
   const [profileRelationships, setProfileRelationships] = useState<any[]>([]);
+  const [profileIsVerified, setProfileIsVerified] = useState(false);
   const [newRelUserId, setNewRelUserId] = useState('');
   const [newRelDesc, setNewRelDesc] = useState('');
   const [isAddingRelationship, setIsAddingRelationship] = useState(false);
@@ -855,6 +875,7 @@ export default function App() {
     setProfileProductsServices(user.products_services || '');
     setProfileTargetAudience(user.target_audience || '');
     setProfileRunByCharacterId(user.run_by_character_id || null);
+    setProfileIsVerified(user.is_verified === 1 || user.is_verified === true);
     
     let onlineTimes = [];
     try {
@@ -1141,7 +1162,8 @@ export default function App() {
           brand_identity: profileBrandIdentity,
           products_services: profileProductsServices,
           target_audience: profileTargetAudience,
-          run_by_character_id: profileRunByCharacterId
+          run_by_character_id: profileRunByCharacterId,
+          is_verified: profileIsVerified
         })
       });
       
@@ -1868,7 +1890,8 @@ export default function App() {
           brand_identity: charBrandIdentity,
           products_services: charProductsServices,
           target_audience: charTargetAudience,
-          run_by_character_id: charRunByCharacterId
+          run_by_character_id: charRunByCharacterId,
+          is_verified: charIsVerified
         })
       });
 
@@ -2970,6 +2993,17 @@ export default function App() {
                         <label className="block text-sm font-medium text-slate-400 mb-1">Additional Info (Franchise, Context, etc.)</label>
                         <textarea value={charPersona} onChange={e => setCharPersona(e.target.value)} rows={2} className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-slate-100 outline-none focus:border-orange-500 transition" placeholder="e.g. From The Witcher 3, currently looking for Ciri..."></textarea>
                       </div>
+                      <div>
+                        <label className="flex items-center gap-2 cursor-pointer mt-2">
+                          <input 
+                            type="checkbox" 
+                            checked={charIsVerified}
+                            onChange={(e) => setCharIsVerified(e.target.checked)}
+                            className="w-4 h-4 bg-slate-900 border border-white/10 rounded accent-orange-500"
+                          />
+                          <span className="text-sm font-medium text-slate-400 group-hover:text-slate-200 transition-colors">Verified Public Figure / Celebrity</span>
+                        </label>
+                      </div>
                     </>
                   ) : charAccountType === 'company' ? (
                     <>
@@ -3249,7 +3283,10 @@ export default function App() {
                           </div>
                           <div className="overflow-hidden flex-1">
                             <div className="flex justify-between items-center">
-                              <p className="font-bold truncate text-slate-200">{conv.display_name}</p>
+                              <p className="font-bold truncate text-slate-200 flex items-center gap-1">
+                                {conv.display_name}
+                                <VerifiedBadge user={conv} size={14} />
+                              </p>
                               {conv.unread_count > 0 && (
                                 <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-[0_0_8px_rgba(249,115,22,0.8)]">
                                   {conv.unread_count}
@@ -3710,8 +3747,9 @@ export default function App() {
                         )}
                       </div>
                       <div className="overflow-hidden flex-1">
-                        <p className="font-bold truncate flex items-center gap-2 text-slate-100 group-hover:text-orange-400 transition-colors">
+                        <p className="font-bold truncate flex items-center gap-1 text-slate-100 group-hover:text-orange-400 transition-colors flex-wrap">
                           {char.display_name}
+                          <VerifiedBadge user={char} size={14} />
                           {!char.is_active && <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 border border-white/10">Inactive</span>}
                         </p>
                         <p className="text-xs text-slate-500 truncate">@{char.username}</p>
@@ -3728,14 +3766,17 @@ export default function App() {
                     <div className="flex gap-2 mb-4">
                       <button 
                         onClick={() => handleAddArc('universe', viewingUniverse.id)}
-                        className="flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-100 border border-white/10 px-3 py-1.5 rounded-lg font-bold transition"
+                        disabled={viewingUniverse.is_paused}
+                        title={viewingUniverse.is_paused ? "Cannot add arcs to a paused universe" : ""}
+                        className="flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-100 border border-white/10 px-3 py-1.5 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Plus size={14} /> Add Manual Arc
                       </button>
                       <button 
                         onClick={() => handleGenerateArc('universe', viewingUniverse.id)}
-                        disabled={isGeneratingArc}
-                        className="flex items-center gap-2 text-xs bg-orange-600/20 hover:bg-orange-600/30 text-orange-500 border border-orange-500/30 px-3 py-1.5 rounded-lg font-bold transition disabled:opacity-50"
+                        disabled={isGeneratingArc || viewingUniverse.is_paused}
+                        title={viewingUniverse.is_paused ? "Cannot generate arcs for a paused universe" : ""}
+                        className="flex items-center gap-2 text-xs bg-orange-600/20 hover:bg-orange-600/30 text-orange-500 border border-orange-500/30 px-3 py-1.5 rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Sparkles size={14} /> {isGeneratingArc ? 'Generating...' : 'Generate AI Arc'}
                       </button>
@@ -4673,6 +4714,19 @@ export default function App() {
                           <textarea value={profileArtstyle} onChange={e => setProfileArtstyle(e.target.value)} rows={2} className="w-full bg-slate-900/50 border border-white/10 rounded-lg p-3 text-slate-100 outline-none focus:border-orange-500 backdrop-blur-sm"></textarea>
                         </div>
                       )}
+                      {profileAccountType === 'character' && (
+                        <div>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              checked={profileIsVerified}
+                              onChange={(e) => setProfileIsVerified(e.target.checked)}
+                              className="w-4 h-4 bg-slate-900 border border-white/10 rounded accent-orange-500"
+                            />
+                            <span className="text-sm font-medium text-slate-400 group-hover:text-slate-200 transition-colors">Verified Public Figure / Celebrity</span>
+                          </label>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-slate-400 mb-1">Universe</label>
                         <SearchableDropdown
@@ -4998,7 +5052,10 @@ export default function App() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 className="text-2xl font-bold text-slate-100">{viewingProfile.display_name}</h2>
+                      <h2 className="text-2xl font-bold text-slate-100 flex items-center gap-1">
+                        {viewingProfile.display_name}
+                        <VerifiedBadge user={viewingProfile} size={20} />
+                      </h2>
                       {viewingProfile.is_ai === 1 && (
                         <span className={`text-[10px] uppercase tracking-widest font-black px-2 py-0.5 rounded-full ${isUserOnline(viewingProfile) ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'}`}>
                           {isUserOnline(viewingProfile) ? 'Online' : 'Offline'}
@@ -5254,23 +5311,29 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {loggedInUser?.role === 'admin' && (
-                        <div className="flex gap-2 mb-4">
-                          <button 
-                            onClick={() => handleAddArc('character', viewingProfile.id)}
-                            className="flex items-center gap-2 text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg font-bold transition-colors"
-                          >
-                            <Plus size={14} /> Add Manual Arc
-                          </button>
-                          <button 
-                            onClick={() => handleGenerateArc('character', viewingProfile.id)}
-                            disabled={isGeneratingArc}
-                            className="flex items-center gap-2 text-xs bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 border border-orange-500/30 px-3 py-1.5 rounded-lg font-bold transition-colors disabled:opacity-50"
-                          >
-                            <Sparkles size={14} /> {isGeneratingArc ? 'Generating...' : 'Generate AI Arc'}
-                          </button>
-                        </div>
-                      )}
+                      {loggedInUser?.role === 'admin' && (() => {
+                        const isPaused = universes.find(u => u.id === viewingProfile?.universe_id)?.is_paused;
+                        return (
+                          <div className="flex gap-2 mb-4">
+                            <button 
+                              onClick={() => handleAddArc('character', viewingProfile.id)}
+                              disabled={isPaused}
+                              title={isPaused ? "Cannot add arcs to a character in a paused universe" : ""}
+                              className="flex items-center gap-2 text-xs bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Plus size={14} /> Add Manual Arc
+                            </button>
+                            <button 
+                              onClick={() => handleGenerateArc('character', viewingProfile.id)}
+                              disabled={isGeneratingArc || isPaused}
+                              title={isPaused ? "Cannot generate arcs for a character in a paused universe" : ""}
+                              className="flex items-center gap-2 text-xs bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 border border-orange-500/30 px-3 py-1.5 rounded-lg font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Sparkles size={14} /> {isGeneratingArc ? 'Generating...' : 'Generate AI Arc'}
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {viewingProfileArcs.length === 0 ? (
                         <p className="text-center text-slate-500 py-4">No arcs yet.</p>
                       ) : (
@@ -5816,7 +5879,10 @@ const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfil
     <div className="bg-slate-900/80 border border-white/10 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-sm">
       <div className="p-4 flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 transition-colors" onClick={() => onViewProfile(post.user_id)}>
         <img src={post.avatar_url} alt="" className={`w-8 h-8 ${getAvatarShape(post.account_type)} object-cover border border-white/10`} />
-        <span className="font-bold text-sm hover:underline text-slate-100">{post.display_name}</span>
+        <span className="font-bold text-sm hover:underline text-slate-100 flex items-center gap-1">
+          {post.display_name}
+          <VerifiedBadge user={post} size={14} />
+        </span>
       </div>
       <div className="bg-slate-950 flex items-center justify-center min-h-[300px] border-y border-white/5">
         <img 
@@ -6119,8 +6185,11 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
         </div>
         <div className="flex-1">
           <div className="flex items-center justify-between relative">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => onViewProfile(post.user_id)}>
-              <span className="font-bold hover:underline text-slate-100">{post.display_name}</span>
+            <div className="flex items-center gap-2 flex-wrap cursor-pointer" onClick={() => onViewProfile(post.user_id)}>
+              <span className="font-bold hover:underline text-slate-100 flex items-center gap-1">
+                {post.display_name}
+                <VerifiedBadge user={post} />
+              </span>
               <span className="text-slate-500 text-sm">@{post.username}</span>
               <span className="text-slate-500 text-sm">· {formatTimestamp(post.created_at)}</span>
             </div>
@@ -6362,8 +6431,11 @@ const CommentItem = React.memo(function CommentItem({ comment, onLike, onReply, 
         <div className="flex-1">
           <div className="bg-slate-900/50 p-3 rounded-2xl rounded-tl-none border border-white/10 group-hover:border-white/20 transition-colors backdrop-blur-sm">
             <div className="flex items-center justify-between mb-1 relative">
-              <div className="flex items-center gap-2 cursor-pointer" onClick={() => onViewProfile(comment.user_id)}>
-                <span className="font-bold text-sm hover:underline text-slate-100">{comment.display_name}</span>
+              <div className="flex items-center gap-2 cursor-pointer flex-wrap" onClick={() => onViewProfile(comment.user_id)}>
+                <span className="font-bold text-sm hover:underline text-slate-100 flex items-center gap-1">
+                  {comment.display_name}
+                  <VerifiedBadge user={comment} size={12} />
+                </span>
                 <span className="text-slate-500 text-xs">@{comment.username}</span>
                 <span className="text-slate-500 text-xs">· {formatTimestamp(comment.created_at)}</span>
               </div>
