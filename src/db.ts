@@ -30,6 +30,7 @@ export function initDb() {
       status_expires_at INTEGER DEFAULT 0,
       dm_frequency TEXT DEFAULT 'medium',
       next_scheduled_post TEXT, -- ISO string for scheduled news posts
+      forced_online_until DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -534,6 +535,10 @@ export function initDb() {
   }
 
   // Handle schema migrations for users
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN forced_online_until DATETIME");
+  } catch (e) {}
+
   try {
     db.prepare('SELECT universe_id FROM users').get();
   } catch (e) {

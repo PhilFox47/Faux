@@ -257,6 +257,11 @@ function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserI
 
   const now = Date.now();
   
+  if (user.forced_online_until) {
+    const forcedUntil = new Date(user.forced_online_until).getTime();
+    if (forcedUntil > now) return true;
+  }
+  
   // 1. Check for recent DMs from real users (Read-only)
   if (recentDmUserIds) {
     if (recentDmUserIds.has(userId)) return true;
@@ -448,7 +453,7 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
     const u1 = Math.min(user1Id, user2Id);
     const u2 = Math.max(user1Id, user2Id);
 
-    db.prepare("INSERT INTO relationship_checks (user_id_1, user_id_2, interaction_threshold, result, description, is_update) VALUES (?, ?, ?, ?, ?, ?)").run(
+    db.prepare("INSERT OR IGNORE INTO relationship_checks (user_id_1, user_id_2, interaction_threshold, result, description, is_update) VALUES (?, ?, ?, ?, ?, ?)").run(
       u1, u2, expectedChecks, result ? 1 : 0, description || null, existingRel ? 1 : 0
     );
 
@@ -457,7 +462,7 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
         db.prepare("UPDATE relationships SET description = ? WHERE id = ?").run(description, existingRel.id);
         console.log(`Dynamic relationship updated between ${user1.display_name} and ${user2.display_name}: ${description}`);
       } else {
-        db.prepare("INSERT INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(u1, u2, description);
+        db.prepare("INSERT OR IGNORE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(u1, u2, description);
         console.log(`Dynamic relationship formed between ${user1.display_name} and ${user2.display_name}: ${description}`);
       }
     } else {
@@ -1629,6 +1634,29 @@ async function startServer() {
     }
   });
 
+  app.post("/api/users/:id/poke", (req, res) => {
+    try {
+      const targetId = parseInt(req.params.id);
+      if (isNaN(targetId)) return res.status(400).json({ error: "Invalid user ID" });
+      
+      const forcedOnlineUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      const statusExpiresAt = Date.now() + 30 * 60 * 1000;
+      
+      db.prepare(`
+        UPDATE users 
+        SET forced_online_until = ?, 
+            current_online_status = 1, 
+            status_expires_at = ? 
+        WHERE id = ?
+      `).run(forcedOnlineUntil, statusExpiresAt, targetId);
+      
+      res.json({ success: true, forced_online_until: forcedOnlineUntil });
+    } catch (e: any) {
+      console.error("Error in /api/users/:id/poke:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/users", (req, res) => {
     try {
       const user = getRealUser(req);
@@ -2216,6 +2244,7 @@ async function startServer() {
     const limit = parseInt(req.query.limit as string) || 50;
     const type = req.query.type as string;
     const universeId = req.query.universe_id as string;
+    const accountType = req.query.account_type as string;
     
     let query = `
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
@@ -2237,6 +2266,15 @@ async function startServer() {
     if (universeId) {
       query += ` AND p.universe_id = ?`;
       params.push(universeId);
+    }
+    
+    if (accountType) {
+      if (accountType === 'news') {
+        query += ` AND u.account_type IN ('news', 'faux_news')`;
+      } else {
+        query += ` AND u.account_type = ?`;
+        params.push(accountType);
+      }
     }
 
     query += ` ORDER BY p.created_at DESC LIMIT ?`;
@@ -2778,6 +2816,44 @@ async function startServer() {
     db.prepare("UPDATE direct_messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0")
       .run(req.params.userId, user.id);
 
+    res.json(messages);
+  });
+
+  app.get("/api/dms/:userId/images", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    // Newest first
+    const query = `
+      SELECT image_url, created_at, id
+      FROM direct_messages
+      WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
+      AND image_url IS NOT NULL AND image_url != ''
+      ORDER BY id DESC
+    `;
+    const params = [user.id, req.params.userId, req.params.userId, user.id];
+    
+    const messages = db.prepare(query).all(...params);
+    res.json(messages);
+  });
+
+  app.get("/api/group-chats/:id/images", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    // Validate membership
+    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(req.params.id, user.id);
+    if (!isMember && user.role !== 'admin') {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    const query = `
+      SELECT image_url, created_at, id
+      FROM group_chat_messages
+      WHERE group_chat_id = ? AND image_url IS NOT NULL AND image_url != ''
+      ORDER BY id DESC
+    `;
+    const messages = db.prepare(query).all(req.params.id);
     res.json(messages);
   });
 

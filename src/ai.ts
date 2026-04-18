@@ -55,26 +55,89 @@ function cleanAiResponse(text: string): string {
   return cleaned.trim();
 }
 
+function sanitizeJSONString(str: string): string {
+  let isInsideString = false;
+  let isEscaped = false;
+  let result = '';
+  
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    
+    if (char === '"' && !isEscaped) {
+      isInsideString = !isInsideString;
+      result += char;
+      isEscaped = false;
+    } else if (char === '\\' && !isEscaped) {
+      isEscaped = true;
+      result += char;
+    } else {
+      if (isInsideString && char === '\n') {
+        result += '\\n';
+      } else if (isInsideString && char === '\r') {
+        result += '\\r';
+      } else if (isInsideString && char === '\t') {
+        result += '\\t';
+      } else {
+        result += char;
+      }
+      isEscaped = false;
+    }
+  }
+  return result;
+}
+
 function extractJSON(text: string): any {
   if (!text) return {};
+  
+  let jsonResult = {};
+  let success = false;
+  
   try {
     return JSON.parse(text);
-  } catch (e) {
-    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (match && match[1]) {
-      try {
-        return JSON.parse(match[1]);
-      } catch (e2) {}
-    }
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start !== -1 && end !== -1 && end > start) {
-      try {
-        return JSON.parse(text.substring(start, end + 1));
-      } catch (e3) {}
-    }
-    return {};
+  } catch (e) {}
+
+  try {
+    return JSON.parse(sanitizeJSONString(text));
+  } catch (e) {}
+  
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (match && match[1]) {
+    try {
+      return JSON.parse(match[1]);
+    } catch (e2) {}
+    try {
+      return JSON.parse(sanitizeJSONString(match[1]));
+    } catch (e2) {}
   }
+  
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    try {
+      return JSON.parse(text.substring(start, end + 1));
+    } catch (e3) {}
+    try {
+      return JSON.parse(sanitizeJSONString(text.substring(start, end + 1)));
+    } catch (e3) {}
+  }
+  
+  // Final fallback using regex specifically for content and internal_thought
+  let parsed: any = {};
+  const contentMatch = text.match(/"content"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"internal_thought"|\})/);
+  const internalThoughtMatch = text.match(/"internal_thought"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"|\})/);
+  
+  if (contentMatch && contentMatch[1]) {
+    parsed.content = contentMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  if (internalThoughtMatch && internalThoughtMatch[1]) {
+    parsed.internal_thought = internalThoughtMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  
+  if (parsed.content || parsed.internal_thought) {
+    return parsed;
+  }
+  
+  return {};
 }
 
 export function getModel() {

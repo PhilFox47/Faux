@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, BadgeCheck, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp, Brain, Menu } from 'lucide-react';
+import { Home, MessageSquare, Bell, User, Search, Settings, Heart, MessageCircle, Send, Loader2, Sparkles, UserPlus, UserCheck, Trash2, Globe, X, ArrowLeft, MoreHorizontal, AlertTriangle, Zap, Users, Plus, Lock, Star, Edit2, Upload, BadgeCheck, Image, Briefcase, BookOpen, Camera, Calendar, ChevronDown, ChevronUp, Brain, Menu, Newspaper, Hand } from 'lucide-react';
 import { TagTextarea } from './components/TagTextarea';
 import { SearchableDropdown } from './components/SearchableDropdown';
 import { WELCOME_TEXTS } from './welcomeTexts';
@@ -594,6 +594,8 @@ export default function App() {
   const [editingDmContent, setEditingDmContent] = useState('');
   const [expandedImageUrl, setExpandedImageUrl] = useState<string | null>(null);
   const [showGallery, setShowGallery] = useState(false);
+  const [galleryImages, setGalleryImages] = useState<any[]>([]);
+  const [isFetchingGallery, setIsFetchingGallery] = useState(false);
 
   // Profile Editing
   const [editingProfile, setEditingProfile] = useState<any>(null);
@@ -1791,6 +1793,41 @@ export default function App() {
     }
   };
 
+  const handlePoke = async () => {
+    if (!activeChat || isGroupChat) return;
+    
+    try {
+      const res = await apiFetch(`/api/users/${activeChat.id}/poke`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        showToast("Character poked! They are now online for 30 minutes.");
+        // We'll update the whole user list so the online dot changes
+        fetchUsers();
+      }
+    } catch (e) {
+      console.error("Error poking character:", e);
+    }
+  };
+
+  const handleOpenGallery = async () => {
+    if (!activeChat) return;
+    setShowGallery(true);
+    setIsFetchingGallery(true);
+    try {
+      const endpoint = isGroupChat ? `/api/group-chats/${activeChat.id}/images` : `/api/dms/${activeChat.id}/images`;
+      const res = await apiFetch(endpoint);
+      if (res.ok) {
+        const data = await res.json();
+        setGalleryImages(data);
+      }
+    } catch(e) {
+      console.error("Error fetching gallery images", e);
+    } finally {
+      setIsFetchingGallery(false);
+    }
+  };
+
   const handleCreatePost = async () => {
     if ((!newPostContent.trim() && !newPostImage) || isCreatingPost) return;
     setIsCreatingPost(true);
@@ -2251,27 +2288,51 @@ export default function App() {
   }, [characterSearch, fetchExploreUsers]);
   const [visiblePosts, setVisiblePosts] = useState(30);
   const [fauxPicsPosts, setFauxPicsPosts] = useState<any[]>([]);
+  const [newsPosts, setNewsPosts] = useState<any[]>([]);
+  const [isFetchingPosts, setIsFetchingPosts] = useState(false);
+  const [isFetchingFauxPics, setIsFetchingFauxPics] = useState(false);
+  const [isFetchingNews, setIsFetchingNews] = useState(false);
   const [visibleFauxPics, setVisibleFauxPics] = useState(20);
+  const [visibleNews, setVisibleNews] = useState(20);
   const visiblePostsRef = useRef(visiblePosts);
   const visibleFauxPicsRef = useRef(visibleFauxPics);
+  const visibleNewsRef = useRef(visibleNews);
 
   const timelineUniverseFilterRef = useRef(timelineUniverseFilter);
 
   const fetchPosts = useCallback(() => {
+    setIsFetchingPosts(true);
     const universeParam = timelineUniverseFilterRef.current ? `&universe_id=${timelineUniverseFilterRef.current}` : '';
-    apiFetch(`/api/posts?limit=${visiblePostsRef.current + 1}${universeParam}`).then(r => r.json()).then(setPosts);
+    apiFetch(`/api/posts?limit=${visiblePostsRef.current + 1}${universeParam}`)
+      .then(r => r.json())
+      .then(data => { setPosts(data); setIsFetchingPosts(false); })
+      .catch(() => setIsFetchingPosts(false));
   }, [apiFetch]);
 
   const fetchFauxPics = useCallback(() => {
+    setIsFetchingFauxPics(true);
     const universeParam = timelineUniverseFilterRef.current ? `&universe_id=${timelineUniverseFilterRef.current}` : '';
-    apiFetch(`/api/posts?type=image_post&limit=${visibleFauxPicsRef.current + 1}${universeParam}`).then(r => r.json()).then(setFauxPicsPosts);
+    apiFetch(`/api/posts?type=image_post&limit=${visibleFauxPicsRef.current + 1}${universeParam}`)
+      .then(r => r.json())
+      .then(data => { setFauxPicsPosts(data); setIsFetchingFauxPics(false); })
+      .catch(() => setIsFetchingFauxPics(false));
+  }, [apiFetch]);
+
+  const fetchNews = useCallback(() => {
+    setIsFetchingNews(true);
+    const universeParam = timelineUniverseFilterRef.current ? `&universe_id=${timelineUniverseFilterRef.current}` : '';
+    apiFetch(`/api/posts?account_type=news&limit=${visibleNewsRef.current + 1}${universeParam}`)
+      .then(r => r.json())
+      .then(data => { setNewsPosts(data); setIsFetchingNews(false); })
+      .catch(() => setIsFetchingNews(false));
   }, [apiFetch]);
 
   useEffect(() => {
     timelineUniverseFilterRef.current = timelineUniverseFilter;
     fetchPosts();
     fetchFauxPics();
-  }, [timelineUniverseFilter, fetchPosts, fetchFauxPics]);
+    fetchNews();
+  }, [timelineUniverseFilter, fetchPosts, fetchFauxPics, fetchNews]);
 
   useEffect(() => {
     if (visiblePostsRef.current !== visiblePosts) {
@@ -2288,10 +2349,18 @@ export default function App() {
   }, [visibleFauxPics, fetchFauxPics]);
 
   useEffect(() => {
+    if (visibleNewsRef.current !== visibleNews) {
+      visibleNewsRef.current = visibleNews;
+      fetchNews();
+    }
+  }, [visibleNews, fetchNews]);
+
+  useEffect(() => {
     if (loggedInUser) {
       fetchFauxPics();
+      fetchNews();
     }
-  }, [loggedInUser, fetchFauxPics]);
+  }, [loggedInUser, fetchFauxPics, fetchNews]);
 
   const [visibleProfilePosts, setVisibleProfilePosts] = useState(30);
   const initialLoadDone = useRef(false);
@@ -2323,9 +2392,10 @@ export default function App() {
     
     const fastInterval = setInterval(() => {
       // Tab-specific updates
-      if (activeTab === 'home' || activeTab === 'fauxpics') {
+      if (activeTab === 'home' || activeTab === 'fauxpics' || activeTab === 'news') {
         fetchPosts();
         if (activeTab === 'fauxpics') fetchFauxPics();
+        if (activeTab === 'news') fetchNews();
       }
       
       // Chat-specific updates
@@ -2345,7 +2415,7 @@ export default function App() {
       clearInterval(fastInterval);
       clearInterval(slowInterval);
     };
-  }, [activeChat, isGroupChat, loggedInUser, activeTab, fetchPosts, fetchFauxPics, fetchConversations, fetchGroupChats, fetchNotifications, fetchChatMessages]);
+  }, [activeChat, isGroupChat, loggedInUser, activeTab, fetchPosts, fetchFauxPics, fetchNews, fetchConversations, fetchGroupChats, fetchNotifications, fetchChatMessages]);
 
   if (!loggedInUser) {
     return (
@@ -2616,6 +2686,7 @@ export default function App() {
             <nav className="space-y-2">
               <NavItem icon={<Home />} label="Nexus" active={activeTab === 'home'} onClick={() => { setActiveTab('home'); fetchPosts(); }} />
               <NavItem icon={<Camera />} label="FauxPics" active={activeTab === 'fauxpics'} onClick={() => { setActiveTab('fauxpics'); fetchFauxPics(); }} />
+              <NavItem icon={<Newspaper />} label="News" active={activeTab === 'news'} onClick={() => { setActiveTab('news'); fetchNews(); }} />
               <NavItem 
                 icon={
                   <div className="relative">
@@ -2699,7 +2770,7 @@ export default function App() {
         </div>
 
         {/* Main Feed */}
-        <div className="flex-1 border-r border-white/10 overflow-y-auto relative pb-20 md:pb-0 custom-scrollbar">
+        <div className={`flex-1 border-r border-white/10 relative custom-scrollbar pb-20 md:pb-0 ${activeTab === 'messages' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'}`}>
           <div className="sticky top-0 bg-slate-950/80 backdrop-blur-xl border-b border-white/10 p-4 z-30 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button className="md:hidden text-slate-100 p-1 -ml-1 hover:bg-white/10 rounded-lg transition" onClick={() => setShowMobileMenu(true)}>
@@ -2708,7 +2779,7 @@ export default function App() {
               <h1 className="text-xl font-bold capitalize tracking-tight text-slate-100">
                 {activeTab === 'explore' ? 'Add Character' : activeTab === 'home' ? 'Nexus' : activeTab}
               </h1>
-              {(activeTab === 'home' || activeTab === 'fauxpics') && (
+              {(activeTab === 'home' || activeTab === 'fauxpics' || activeTab === 'news') && (
                 <select 
                   value={timelineUniverseFilter} 
                   onChange={(e) => setTimelineUniverseFilter(e.target.value)}
@@ -2860,7 +2931,12 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                {posts.length === 0 && (
+                {posts.length === 0 && isFetchingPosts ? (
+                  <div className="flex flex-col items-center justify-center p-12 text-gray-500">
+                    <Loader2 className="animate-spin mb-4 text-orange-500" size={40} />
+                    <p className="font-medium animate-pulse text-slate-400">Loading broadcasts...</p>
+                  </div>
+                ) : posts.length === 0 && (
                   <div className="p-8 text-center text-slate-500">
                     <p>The Nexus is currently quiet.</p>
                     <p className="text-sm mt-2">Add characters to see them broadcast!</p>
@@ -2873,8 +2949,13 @@ export default function App() {
           {activeTab === 'fauxpics' && (
             <div className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-7xl mx-auto">
-                {fauxPicsPosts.length === 0 ? (
-                  <div className="text-center py-20 text-slate-500">
+                {fauxPicsPosts.length === 0 && isFetchingFauxPics ? (
+                  <div className="text-center w-full py-20 text-slate-500 md:col-span-2 flex flex-col items-center justify-center">
+                    <Loader2 className="animate-spin mb-4 text-orange-500" size={40} />
+                    <p className="text-xl animate-pulse text-slate-400">Loading photos...</p>
+                  </div>
+                ) : fauxPicsPosts.length === 0 ? (
+                  <div className="text-center py-20 text-slate-500 md:col-span-2">
                     <Camera size={64} className="mx-auto mb-4 opacity-20" />
                     <p className="text-xl font-medium">No photos yet</p>
                   </div>
@@ -2902,6 +2983,56 @@ export default function App() {
                     >
                       Load More Images
                     </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'news' && (
+            <div className="p-4">
+              <div className="divide-y divide-white/5">
+                {newsPosts.slice(0, visibleNews).map(post => (
+                  <PostItem 
+                    apiFetch={apiFetch}
+                    loggedInUser={loggedInUser}
+                    key={post.id} 
+                    post={post} 
+                    onLike={handleLike} 
+                    onViewProfile={handleViewProfile}
+                    onShowLikers={handleShowLikers}
+                    formatTimestamp={formatTimestamp}
+                    onRefresh={fetchNews}
+                    onDelete={(id) => setNewsPosts(prev => prev.filter(p => p.id !== id))}
+                    highlightedPostId={highlightedPostId}
+                    highlightedCommentId={highlightedCommentId}
+                    onHighlightClear={() => {
+                      setHighlightedPostId(null);
+                      setHighlightedCommentId(null);
+                    }}
+                    users={users}
+                    onViewApiLogs={handleViewApiLogs}
+                  />
+                ))}
+                {newsPosts.length > visibleNews && (
+                  <div className="p-6 flex justify-center border-b border-white/10">
+                    <button 
+                      onClick={() => setVisibleNews(prev => prev + 30)}
+                      className="bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-2 px-6 rounded-xl transition border border-white/10"
+                    >
+                      Load More News
+                    </button>
+                  </div>
+                )}
+                {newsPosts.length === 0 && isFetchingNews ? (
+                  <div className="flex flex-col items-center justify-center p-12 text-gray-500">
+                    <Loader2 className="animate-spin mb-4 text-orange-500" size={40} />
+                    <p className="font-medium animate-pulse text-slate-400">Loading broadcasts...</p>
+                  </div>
+                ) : newsPosts.length === 0 && (
+                  <div className="p-8 text-center text-slate-500">
+                    <p>No news broadcasts at the moment.</p>
+                    <p className="text-sm mt-2">Follow more news accounts or wait for breaking news.</p>
                   </div>
                 )}
               </div>
@@ -3224,10 +3355,10 @@ export default function App() {
           )}
 
           {activeTab === 'messages' && (
-            <div className="flex h-[calc(100vh-60px)]">
+            <div className="flex flex-1 min-h-0 flex-col">
               {/* Conversation List */}
               {!activeChat && (
-                <div className="w-full flex flex-col">
+                <div className="w-full flex-1 flex flex-col min-h-0">
                   <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-950/80 backdrop-blur-xl">
                     <h2 className="font-bold text-lg tracking-tight text-slate-100">Comms</h2>
                     <button onClick={() => setShowCreateGroupModal(true)} className="p-2 hover:bg-white/10 rounded-full transition" title="New Group Chat">
@@ -3309,8 +3440,8 @@ export default function App() {
 
               {/* Chat Area */}
               {activeChat && (
-                <div className="w-full flex flex-col">
-                  <div className="p-4 border-b border-white/10 font-bold flex items-center justify-between bg-slate-950/80 backdrop-blur-xl">
+                <div className="w-full flex-1 flex flex-col min-h-0">
+                  <div className="p-4 border-b border-white/10 font-bold flex items-center justify-between bg-slate-950/80 backdrop-blur-xl shrink-0">
                     <div className="flex items-center gap-3">
                       <button onClick={() => setActiveChat(null)} className="p-2 hover:bg-white/10 rounded-full transition">
                         <ArrowLeft size={20} />
@@ -3338,7 +3469,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => setShowGallery(true)}
+                        onClick={handleOpenGallery}
                         className="p-2 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-full transition"
                         title="View Gallery"
                       >
@@ -3358,6 +3489,15 @@ export default function App() {
                       >
                         <Star size={20} fill={dmFavorites.some(f => f.target_id === activeChat.id && f.is_group === (isGroupChat ? 1 : 0)) ? "currentColor" : "none"} />
                       </button>
+                      {(!isGroupChat && users.find(u => u.id === activeChat.id)?.is_ai === 1) && (
+                        <button
+                          onClick={handlePoke}
+                          className="p-2 text-slate-400 hover:text-green-500 hover:bg-green-500/10 rounded-full transition"
+                          title="Poke Character (Force Online)"
+                        >
+                          <Hand size={20} />
+                        </button>
+                      )}
                       {!isGroupChat && (
                         <button 
                           onClick={handleResetChat}
@@ -3564,7 +3704,7 @@ export default function App() {
                   </div>
                 </div>
                 {universes.map(u => (
-                  <div key={u.id} onClick={() => handleViewUniverse(u.id)} className="bg-slate-900/50 border border-white/10 rounded-2xl p-4 cursor-pointer hover:bg-slate-800/50 hover:border-orange-500/30 transition flex flex-col h-full backdrop-blur-sm group">
+                  <div key={u.id} onClick={() => handleViewUniverse(u.id)} className={`bg-slate-900/50 border border-white/10 rounded-2xl p-4 cursor-pointer hover:bg-slate-800/50 hover:border-orange-500/30 transition flex flex-col h-full backdrop-blur-sm group ${u.is_paused ? 'opacity-50 grayscale' : ''}`}>
                     <div className="flex items-center gap-4 mb-3">
                       <div className="w-16 h-16 bg-slate-800 rounded-full overflow-hidden flex-shrink-0 border border-white/10 group-hover:border-orange-500/50 transition-colors">
                         {u.image_url ? (
@@ -3574,7 +3714,10 @@ export default function App() {
                         )}
                       </div>
                       <div>
-                        <h3 className="font-bold text-lg text-slate-100 group-hover:text-orange-400 transition-colors">{u.name}</h3>
+                        <h3 className="font-bold text-lg text-slate-100 group-hover:text-orange-400 transition-colors">
+                          {u.name}
+                          {u.is_paused === 1 && <span className="ml-2 text-[10px] uppercase tracking-wider font-bold bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-white/10">Paused</span>}
+                        </h3>
                         <p className="text-sm text-slate-400">{universeCounts[u.id] || 0} characters</p>
                       </div>
                     </div>
@@ -3684,7 +3827,10 @@ export default function App() {
                       )}
                     </div>
                     <div>
-                      <h2 className="text-3xl font-bold mb-2 text-slate-100">{viewingUniverse.name}</h2>
+                      <h2 className="text-3xl font-bold mb-2 text-slate-100 flex items-center gap-3 flex-wrap">
+                        {viewingUniverse.name}
+                        {viewingUniverse.is_paused === 1 && <span className="text-xs uppercase tracking-wider font-bold bg-slate-800 text-slate-400 px-3 py-1 rounded-lg border border-white/10">Paused</span>}
+                      </h2>
                       <p className="text-slate-400 mb-4">{viewingUniverseCharacters.length} characters</p>
                       {viewingUniverse.description ? (
                         <p className="text-slate-300 whitespace-pre-wrap">{viewingUniverse.description}</p>
@@ -4896,6 +5042,10 @@ export default function App() {
             <Camera size={20} />
             <span className="text-[10px] font-medium">FauxPics</span>
           </button>
+          <button onClick={() => { setActiveTab('news'); fetchNews(); }} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${activeTab === 'news' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+            <Newspaper size={20} />
+            <span className="text-[10px] font-medium">News</span>
+          </button>
           <button onClick={() => { setActiveTab('notifications'); markNotificationsRead(); }} className={`p-2 rounded-xl flex flex-col items-center gap-1 relative ${activeTab === 'notifications' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
             <div className="relative">
               <Bell size={20} />
@@ -4907,18 +5057,7 @@ export default function App() {
             </div>
             <span className="text-[10px] font-medium">Notifs</span>
           </button>
-          <button onClick={() => setActiveTab('messages')} className={`p-2 rounded-xl flex flex-col items-center gap-1 relative ${activeTab === 'messages' ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
-            <div className="relative">
-              <MessageSquare size={20} />
-              {unreadMessages > 0 && (
-                <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                  {unreadMessages}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] font-medium">Comms</span>
-          </button>
-          <button onClick={() => setShowMobileMenu(true)} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${['universes', 'following', 'explore', 'arcs', 'relationships', 'fauxpast', 'settings'].includes(activeTab) ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
+          <button onClick={() => setShowMobileMenu(true)} className={`p-2 rounded-xl flex flex-col items-center gap-1 ${['messages', 'universes', 'following', 'explore', 'arcs', 'relationships', 'fauxpast', 'settings'].includes(activeTab) ? 'text-orange-500' : 'text-slate-400 hover:text-slate-200'}`}>
             <Menu size={20} />
             <span className="text-[10px] font-medium">More</span>
           </button>
@@ -4938,6 +5077,21 @@ export default function App() {
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
+                <NavItem 
+                  icon={
+                    <div className="relative">
+                      <MessageSquare />
+                      {unreadMessages > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                          {unreadMessages}
+                        </span>
+                      )}
+                    </div>
+                  } 
+                  label="Comms" 
+                  active={activeTab === 'messages'} 
+                  onClick={() => { setActiveTab('messages'); setShowMobileMenu(false); }} 
+                />
                 <NavItem icon={<Search />} label="Search" active={activeTab === 'search'} onClick={() => { setActiveTab('search'); setShowMobileMenu(false); }} />
                 <NavItem icon={<Globe />} label="Universes" active={activeTab === 'universes'} onClick={() => { setActiveTab('universes'); fetchUniverses(); setShowMobileMenu(false); }} />
                 <NavItem icon={<UserCheck />} label="Following" active={activeTab === 'following'} onClick={() => { setActiveTab('following'); setShowMobileMenu(false); }} />
@@ -5690,16 +5844,23 @@ export default function App() {
                 <button onClick={() => setShowGallery(false)} className="text-slate-400 hover:text-white transition-colors"><X size={24} /></button>
               </div>
               <div className="p-4 overflow-y-auto flex-1">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {chatMessages.filter(msg => msg.image_url).map((msg, idx) => (
-                    <div key={idx} className="aspect-square rounded-lg overflow-hidden border border-white/10 cursor-pointer hover:border-orange-500 transition-colors shadow-lg" onClick={() => setExpandedImageUrl(msg.image_url)}>
-                      <img src={msg.image_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    </div>
-                  ))}
-                  {chatMessages.filter(msg => msg.image_url).length === 0 && (
-                    <div className="col-span-full text-center text-slate-500 py-8">No images in this chat yet.</div>
-                  )}
-                </div>
+                {isFetchingGallery ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                    <Loader2 className="animate-spin mb-2" size={32} />
+                    <p>Loading gallery...</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {galleryImages.map((msg, idx) => (
+                      <div key={idx} className="aspect-square rounded-lg overflow-hidden border border-white/10 cursor-pointer hover:border-orange-500 transition-colors shadow-lg" onClick={() => setExpandedImageUrl(msg.image_url)}>
+                        <img src={msg.image_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </div>
+                    ))}
+                    {galleryImages.length === 0 && (
+                      <div className="col-span-full text-center text-slate-500 py-8">No images in this chat yet.</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -5752,14 +5913,24 @@ function renderContentWithTags(content: string, users: any[] | undefined, onView
 const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfile, onShowLikers, formatTimestamp, onRefresh, users, loggedInUser, apiFetch }: { post: any, onLike: () => void, onViewProfile: (id: number) => void, onShowLikers: (type: 'post' | 'comment', id: number) => void, formatTimestamp: (ts: string) => string, onRefresh: () => void, users?: any[], loggedInUser?: any, apiFetch: any }) {
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
+  const [isFetchingComments, setIsFetchingComments] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [isSendingComment, setIsSendingComment] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any>(null);
   const [replyContent, setReplyContent] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
 
-  const fetchComments = useCallback(() => {
-    apiFetch(`/api/posts/${post.id}/comments`).then((r: any) => r.json()).then(setComments);
+  const fetchComments = useCallback(async () => {
+    setIsFetchingComments(true);
+    try {
+      const r = await apiFetch(`/api/posts/${post.id}/comments`);
+      const data = await r.json();
+      setComments(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsFetchingComments(false);
+    }
   }, [post.id, apiFetch]);
 
   useEffect(() => {
@@ -5924,7 +6095,13 @@ const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfil
           <div className="mt-4 pt-4 border-t border-white/10 space-y-4">
             <div className="max-h-[400px] overflow-y-auto space-y-4 pr-2">
               {rootComments.length === 0 ? (
-                <p className="text-slate-500 text-xs italic">No comments yet</p>
+                isFetchingComments ? (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="animate-spin text-orange-500" size={24} />
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-xs italic">No comments yet</p>
+                )
               ) : (
                 rootComments.map(comment => (
                   <CommentItem 
@@ -5988,6 +6165,7 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
   const [showComments, setShowComments] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
+  const [isFetchingComments, setIsFetchingComments] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [isSendingComment, setIsSendingComment] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any>(null);
@@ -6029,20 +6207,25 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
   }, [highlightedPostId, highlightedCommentId, post.id, showComments]);
 
   const fetchComments = () => {
-    apiFetch(`/api/posts/${post.id}/comments`).then(r => r.json()).then(data => {
-      setComments(data);
-      if (highlightedPostId === post.id && highlightedCommentId) {
-        setTimeout(() => {
-          const commentEl = commentRefs.current[highlightedCommentId];
-          if (commentEl) {
-            commentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          } else {
-            postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-          if (onHighlightClear) setTimeout(onHighlightClear, 2000);
-        }, 300);
-      }
-    });
+    setIsFetchingComments(true);
+    apiFetch(`/api/posts/${post.id}/comments`)
+      .then(r => r.json())
+      .then(data => {
+        setComments(data);
+        setIsFetchingComments(false);
+        if (highlightedPostId === post.id && highlightedCommentId) {
+          setTimeout(() => {
+            const commentEl = commentRefs.current[highlightedCommentId];
+            if (commentEl) {
+              commentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+              postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            if (onHighlightClear) setTimeout(onHighlightClear, 2000);
+          }, 300);
+        }
+      })
+      .catch(() => setIsFetchingComments(false));
   };
 
   useEffect(() => {
@@ -6302,6 +6485,11 @@ const PostItem = React.memo(function PostItem({ post, onLike, onViewProfile, onS
       
       {showComments && (
         <div className="mt-4 pl-10 space-y-4 border-l-2 border-white/10 ml-5">
+          {rootComments.length === 0 && isFetchingComments && (
+            <div className="flex justify-center py-4">
+              <Loader2 className="animate-spin text-orange-500" size={24} />
+            </div>
+          )}
           {rootComments.map(comment => (
             <CommentItem 
               apiFetch={apiFetch}
