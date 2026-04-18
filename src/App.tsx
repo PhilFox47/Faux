@@ -285,6 +285,7 @@ export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<any>(null);
   const [welcomeText] = useState(() => WELCOME_TEXTS[Math.floor(Math.random() * WELCOME_TEXTS.length)]);
   const [realUsers, setRealUsers] = useState<any[]>([]);
+  const [loginBackgroundAvatars, setLoginBackgroundAvatars] = useState<string[]>([]);
   const [loginPin, setLoginPin] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<any>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -315,6 +316,15 @@ export default function App() {
       apiFetch('/api/real-users')
         .then(res => res.json())
         .then(data => setRealUsers(data))
+        .catch(err => console.error(err));
+        
+      apiFetch('/api/users?limit=1000') // Fetch many to select a random background
+        .then(res => res.json())
+        .then(data => {
+            const aiUsersWithAvatars = data.filter((u: any) => u.is_ai === 1 && (u.account_type === 'character' || u.account_type === 'company' || u.account_type === 'news') && u.avatar_url);
+            const shuffled = [...aiUsersWithAvatars].sort(() => 0.5 - Math.random());
+            setLoginBackgroundAvatars(shuffled.slice(0, 80).map((u:any) => u.avatar_url));
+        })
         .catch(err => console.error(err));
     }
   }, [loggedInUser, apiFetch]);
@@ -2419,18 +2429,41 @@ export default function App() {
 
   if (!loggedInUser) {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center font-sans">
-        {toastMessage && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-full shadow-xl font-bold animate-pulse">
-            {toastMessage}
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
+        {loginBackgroundAvatars.length > 0 && (
+          <div className="absolute inset-[-50%] z-0 select-none flex justify-center items-center pointer-events-none opacity-20">
+            <div className="w-[150vw] h-[150vh] flex flex-wrap gap-2 transform -rotate-12 justify-center items-center content-center relative">
+               {Array.from({ length: 150 }).map((_, i) => {
+                 const avatarUrl = loginBackgroundAvatars[i % loginBackgroundAvatars.length];
+                 return (
+                   <div key={i} className="aspect-square w-24 sm:w-32 md:w-36 flex-shrink-0 rounded-md overflow-hidden bg-slate-900 border border-white/5 opacity-80">
+                      <img 
+                        src={avatarUrl} 
+                        alt="" 
+                        className="w-full h-full object-cover filter grayscale hover:grayscale-0 transition-all duration-1000" 
+                        referrerPolicy="no-referrer"
+                      />
+                   </div>
+                 );
+               })}
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent"></div>
+            <div className="absolute inset-0 bg-radial-gradient from-transparent via-black/80 to-black"></div>
           </div>
         )}
-        <div className="mb-12">
-          <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-24 object-contain" referrerPolicy="no-referrer" />
-        </div>
-        <h1 className="text-4xl font-bold mb-10 text-center">{welcomeText}</h1>
-        <div className="flex flex-wrap justify-center gap-8 max-w-4xl px-4">
-          {realUsers.map(user => (
+
+        <div className="z-10 relative flex flex-col items-center w-full max-w-4xl px-4">
+          {toastMessage && (
+            <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-full shadow-xl font-bold animate-pulse">
+              {toastMessage}
+            </div>
+          )}
+          <div className="mb-12">
+            <img src="https://i.imgur.com/tI0YtLX.png" alt="Faux Logo" className="h-24 object-contain" referrerPolicy="no-referrer" />
+          </div>
+          <h1 className="text-4xl font-bold mb-10 text-center">{welcomeText}</h1>
+          <div className="flex flex-wrap justify-center gap-8 w-full">
+            {realUsers.map(user => (
             <div 
               key={user.id} 
               className="flex flex-col items-center gap-4 cursor-pointer group"
@@ -2496,6 +2529,7 @@ export default function App() {
             </form>
           </div>
         )}
+        </div>
       </div>
     );
   }
