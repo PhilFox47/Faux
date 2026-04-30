@@ -2273,12 +2273,16 @@ async function startServer() {
     const universeId = req.query.universe_id as string;
     const accountType = req.query.account_type as string;
     
-    // For specific feeds, we drop INDEX hint and let SQLite optimize. We also make them global.
+    // Optimize query hints
     let indexHint = "";
-    if (!type && !accountType) {
-      indexHint = "INDEXED BY idx_posts_user_visible_created"; // Use a more appropriate index if available, or omit. Wait, idx_posts_visible_created is better for global descending.
+    if (universeId && !type) {
+      indexHint = "INDEXED BY idx_posts_universe_created";
+    } else if (type && !universeId) {
+      indexHint = "INDEXED BY idx_posts_visible_type_created";
+    } else if (!type && !accountType && !universeId) {
       indexHint = "INDEXED BY idx_posts_visible_created";
-    }
+    } 
+    // If multiple filters, let SQLite planner decide.
 
     let query = `
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
@@ -2291,12 +2295,13 @@ async function startServer() {
     `;
     const params: any[] = [userId];
 
-    // Restrict to followed users only on the home feed (no specific type/account_type)
-    if (!type && !accountType) {
+    // Restrict to followed users only on the home feed
+    if (!type && !accountType && !universeId) {
       query += ` AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)`;
       params.push(userId, userId);
     }
-
+    
+    // For specific feeds, filter efficiently
     if (type) {
       query += ` AND p.post_type = ?`;
       params.push(type);
@@ -2306,12 +2311,13 @@ async function startServer() {
       query += ` AND p.universe_id = ?`;
       params.push(universeId);
     }
-    
+
     if (accountType) {
       if (accountType === 'news') {
-        query += ` AND u.account_type IN ('news', 'faux_news')`;
+        // Use subquery so SQLite can optimize the user filtering
+        query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type IN ('news', 'faux_news'))`;
       } else {
-        query += ` AND u.account_type = ?`;
+        query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type = ?)`;
         params.push(accountType);
       }
     }

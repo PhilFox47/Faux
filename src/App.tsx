@@ -1296,7 +1296,13 @@ export default function App() {
         setChatMessages(prev => [...data, ...prev]);
         setIsLoadingMoreMessages(false);
       } else {
-        setChatMessages(data);
+        setChatMessages(prev => {
+          if (silent && prev.length > 0) {
+            const hasContentChanged = data.some((m: any, i: number) => m.content !== prev[i]?.content || m.image_url !== prev[i]?.image_url || m.image_request_status !== prev[i]?.image_request_status || m.is_image_request !== prev[i]?.is_image_request);
+            if (!hasContentChanged && data.length === prev.length) return prev;
+          }
+          return data;
+        });
         if (!silent) setIsFetchingChatMessages(false);
         // Refresh unread counts
         if (isGroup) fetchGroupChats();
@@ -3663,11 +3669,13 @@ export default function App() {
                                         {msg.image_request_status === 'pending' && (
                                           <div className="flex gap-2 w-full mt-1">
                                             <button onClick={() => {
+                                              setChatMessages(prev => prev.map(m => m.id === msg.id ? { ...m, image_request_status: 'generating' } : m));
                                               apiFetch(`/api/dms/messages/${msg.id}/accept-image`, { method: 'POST' }).then(() => fetchChatMessages(activeChat.id, isGroupChat, undefined, true));
                                             }} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${isMe ? 'bg-white text-orange-600 hover:bg-slate-100' : 'bg-orange-500 text-white hover:bg-orange-400'}`}>
                                               Accept
                                             </button>
                                             <button onClick={() => {
+                                              setChatMessages(prev => prev.map(m => m.id === msg.id ? { ...m, image_request_status: 'declined' } : m));
                                               apiFetch(`/api/dms/messages/${msg.id}/decline-image`, { method: 'POST' }).then(() => fetchChatMessages(activeChat.id, isGroupChat, undefined, true));
                                             }} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${isMe ? 'bg-orange-700 text-white hover:bg-orange-600' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
                                               Decline
