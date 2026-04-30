@@ -1683,7 +1683,7 @@ export default function App() {
         setDisplayedMessages(expanded);
         return;
       }
-      const hasContentChanged = expanded.some((m, i) => m.content !== displayedMessages[i]?.content || m.image_url !== displayedMessages[i]?.image_url);
+      const hasContentChanged = expanded.some((m, i) => m.content !== displayedMessages[i]?.content || m.image_url !== displayedMessages[i]?.image_url || m.image_request_status !== displayedMessages[i]?.image_request_status || m.is_image_request !== displayedMessages[i]?.is_image_request);
       if (hasContentChanged) {
         setDisplayedMessages(expanded);
         return;
@@ -3651,7 +3651,7 @@ export default function App() {
                                         {msg.internal_thought}
                                       </div>
                                     )}
-                                    {msg.is_image_request === 1 && (
+                                    {msg.is_image_request === 1 && !String(msg.id).includes('_image') && (
                                       <div className={`mt-3 p-3 rounded-xl border flex flex-col gap-2 ${isMe ? 'bg-orange-800/40 border-orange-400/30' : 'bg-slate-900/60 border-slate-600/50'}`}>
                                         <div className="flex items-center gap-2">
                                           <Camera size={14} className={isMe ? 'text-orange-300' : 'text-slate-400'} />

@@ -1678,6 +1678,7 @@ async function startServer() {
 
   app.get("/api/users", (req, res) => {
     try {
+      const startTime = Date.now();
       const user = getRealUser(req);
       const limit = parseInt(req.query.limit as string) || 1000;
       const offset = parseInt(req.query.offset as string) || 0;
@@ -1709,7 +1710,9 @@ async function startServer() {
       query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 
+      const q1Time = Date.now();
       const users = db.prepare(query).all(...params) as any[];
+      const q2Time = Date.now();
       
       // Batch check for recent DMs to optimize online status calculation
       const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
@@ -1723,6 +1726,7 @@ async function startServer() {
       } catch (dmErr) {
         console.error("Error fetching recent DMs for online status:", dmErr);
       }
+      const q3Time = Date.now();
 
       // Pre-calculate time for online status to avoid repeated expensive calls
       const now = Date.now();
@@ -1740,6 +1744,11 @@ async function startServer() {
           console.error(`Error calculating online status for user ${u.id}:`, uErr);
         }
       });
+      
+      const q4Time = Date.now();
+      if (q4Time - startTime > 500) {
+        console.log(`Slow /api/users: total=${q4Time - startTime}ms db_users=${q2Time - q1Time}ms db_dms=${q3Time - q2Time}ms online_calc=${q4Time - q3Time}ms`);
+      }
 
       res.json(users);
     } catch (e: any) {
@@ -2264,9 +2273,11 @@ async function startServer() {
     const universeId = req.query.universe_id as string;
     const accountType = req.query.account_type as string;
     
-    let indexHint = "INDEXED BY idx_posts_visible_created";
-    if (type) {
-      indexHint = "INDEXED BY idx_posts_visible_type_created";
+    // For specific feeds, we drop INDEX hint and let SQLite optimize. We also make them global.
+    let indexHint = "";
+    if (!type && !accountType) {
+      indexHint = "INDEXED BY idx_posts_user_visible_created"; // Use a more appropriate index if available, or omit. Wait, idx_posts_visible_created is better for global descending.
+      indexHint = "INDEXED BY idx_posts_visible_created";
     }
 
     let query = `
@@ -2277,9 +2288,14 @@ async function startServer() {
       FROM posts p ${indexHint}
       JOIN users u ON p.user_id = u.id
       WHERE p.is_visible = 1
-      AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)
     `;
-    const params: any[] = [userId, userId, userId];
+    const params: any[] = [userId];
+
+    // Restrict to followed users only on the home feed (no specific type/account_type)
+    if (!type && !accountType) {
+      query += ` AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)`;
+      params.push(userId, userId);
+    }
 
     if (type) {
       query += ` AND p.post_type = ?`;
@@ -3132,22 +3148,6 @@ async function startServer() {
       }
       
       const data = JSON.parse(recap.data);
-      
-      // Filter images that don't exist on disk
-      if (data.images && Array.isArray(data.images)) {
-        data.images = data.images.filter((url: string) => {
-          if (url.startsWith('/uploads/')) {
-            // Remove leading slash for path.join if needed, but path.join handles it if it's absolute from cwd
-            const filePath = path.join(process.cwd(), url.startsWith('/') ? url.substring(1) : url);
-            try {
-              return fs.existsSync(filePath);
-            } catch (e) {
-              return false;
-            }
-          }
-          return true; // Keep external URLs
-        });
-      }
 
       res.json({
         ...recap,

@@ -1217,7 +1217,8 @@ ${historyStr}
 Write a short, in-character message. 
 ${character.account_type === 'company' ? 'Your message should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be a promotional message, customer support, or a brand partnership inquiry.' : ''}
 CRITICAL: Make it feel like a REALISTIC text message/DM. 
-- Do NOT include any timestamps in your message (e.g., no "[2026-04-08 22:04:15]").
+- Do NOT include any timestamps or Sent at prefixes in your message (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)").
+- Do NOT include any image placeholders or text like "[Generating image...]" or "[IMAGE ATTACHED: ...]" in your message.
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
@@ -1378,7 +1379,8 @@ Reply in character to their latest message.
 Notice the timestamps to understand the flow of time between messages.
 ${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be customer support, answering inquiries, or maintaining brand voice.' : ''}
 CRITICAL: Make it feel like a REALISTIC text message/DM. 
-- Do NOT include any timestamps in your reply (e.g., no "[2026-04-08 22:04:15]").
+- Do NOT include any timestamps or Sent at prefixes in your reply (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)"). Just write the text.
+- Do NOT include any image placeholders or text like "[Generating image...]" or "[IMAGE ATTACHED: ...]" in your message. If you decide to send an image or pretend to attach one, just talk about it naturally without any bracketed text describing it.
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
@@ -1475,7 +1477,7 @@ Reply in character to the latest messages.
 Notice the timestamps to understand the flow of time between messages.
 ${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the group in a corporate or brand-appropriate way. You are representing the company in this group chat.' : ''}
 CRITICAL: Make it feel like a REALISTIC group chat message. 
-- Do NOT include any timestamps in your reply (e.g., no "[2026-04-08 22:04:15]").
+- Do NOT include any timestamps or Sent at prefixes in your reply (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)"). Just write the text.
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
