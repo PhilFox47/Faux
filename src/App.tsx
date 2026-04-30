@@ -1195,6 +1195,7 @@ export default function App() {
       setEditingProfile(null);
       setProfileNewUniverseName('');
       fetchUsers();
+      fetchExploreUsers(0, false, characterSearch);
       setActiveTab('home');
       showToast('Profile updated!');
     } finally {
@@ -1216,6 +1217,7 @@ export default function App() {
         setEditingProfile(null);
         setActiveTab('home');
         fetchUsers();
+        fetchExploreUsers(0, false, characterSearch);
         fetchPosts();
         fetchConversations();
         setConfirmModal(null);
@@ -1975,6 +1977,7 @@ export default function App() {
       setCharRunByCharacterId(null);
       setPersonaChatResponse('');
       fetchUsers();
+      fetchExploreUsers(0, false, characterSearch);
       showToast('Character added!');
     } finally {
       setIsAddingCharacter(false);
