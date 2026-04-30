@@ -90,6 +90,8 @@ export function initDb() {
       image_prompt TEXT,
       image_description TEXT,
       is_read BOOLEAN DEFAULT 0,
+      is_image_request BOOLEAN DEFAULT 0,
+      image_request_status TEXT DEFAULT 'none',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (sender_id) REFERENCES users(id),
       FOREIGN KEY (receiver_id) REFERENCES users(id)
@@ -295,6 +297,11 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_posts_is_visible ON posts(is_visible);
     CREATE INDEX IF NOT EXISTS idx_posts_visible_created ON posts(is_visible, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_posts_visible_type_created ON posts(is_visible, post_type, created_at DESC);
+    -- New Performance Indexes
+    CREATE INDEX IF NOT EXISTS idx_posts_type_created ON posts(post_type, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_posts_universe_created ON posts(universe_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_users_search ON users(username, display_name);
+    CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id_created_at ON comments(post_id, created_at ASC);
     CREATE INDEX IF NOT EXISTS idx_comments_parent_id ON comments(parent_id);
@@ -356,6 +363,18 @@ export function initDb() {
   }
 
   // Add image_description column to direct_messages if it doesn't exist
+  try {
+    db.exec("ALTER TABLE direct_messages ADD COLUMN is_image_request BOOLEAN DEFAULT 0");
+  } catch (e) {
+    // Column might already exist
+  }
+
+  try {
+    db.exec("ALTER TABLE direct_messages ADD COLUMN image_request_status TEXT DEFAULT 'none'");
+  } catch (e) {
+    // Column might already exist
+  }
+
   try {
     db.exec("ALTER TABLE direct_messages ADD COLUMN image_description TEXT");
   } catch (e) {

@@ -1,0 +1,274 @@
+38:  const summaryRow = db.prepare("SELECT * FROM dm_summaries WHERE user_id_1 = ? AND user_id_2 = ?").get(minId, maxId) as any;
+44:    SELECT id, sender_id, content, image_description, created_at 
+62:    const char1 = db.prepare("SELECT display_name FROM users WHERE id = ?").get(minId);
+63:    const char2 = db.prepare("SELECT display_name FROM users WHERE id = ?").get(maxId);
+271:      SELECT 1 FROM direct_messages dm
+340:    dbUser = db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as any;
+368:  const user1 = db.prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?").get(user1Id) as any;
+369:  const user2 = db.prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?").get(user2Id) as any;
+386:  const existingRel = db.prepare("SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any;
+390:    SELECT COUNT(*) as count FROM comments 
+391:    WHERE (user_id = ? AND post_id IN (SELECT id FROM posts WHERE user_id = ?))
+392:       OR (user_id = ? AND post_id IN (SELECT id FROM posts WHERE user_id = ?))
+393:       OR (user_id = ? AND parent_id IN (SELECT id FROM comments WHERE user_id = ?))
+394:       OR (user_id = ? AND parent_id IN (SELECT id FROM comments WHERE user_id = ?))
+398:    SELECT COUNT(*) as count FROM direct_messages 
+415:  const actualChecks = (db.prepare("SELECT COUNT(*) as count FROM relationship_checks WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any).count;
+419:    const user1 = db.prepare("SELECT * FROM users WHERE id = ?").get(user1Id) as any;
+420:    const user2 = db.prepare("SELECT * FROM users WHERE id = ?").get(user2Id) as any;
+425:      SELECT c.content, c.created_at, u1.display_name as commenter, u2.display_name as poster, p.content as post_content
+435:      SELECT dm.content, dm.created_at, u.display_name as sender
+443:    const u1Rels = (db.prepare("SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").get(user1Id, user1Id) as any).count;
+444:    const u2Rels = (db.prepare("SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").get(user2Id, user2Id) as any).count;
+477:  const settings = db.prepare("SELECT cross_universe_prob FROM settings WHERE id = 1").get() as any;
+480:  const opUser = db.prepare("SELECT universe_id, account_type FROM users WHERE id = ?").get(opId) as any;
+486:    const post = db.prepare("SELECT u.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
+510:  const relationships = db.prepare("SELECT user_id_1, user_id_2 FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").all(opId, opId) as any[];
+514:  const followers = db.prepare("SELECT follower_id FROM follows WHERE followed_id = ?").all(opId) as any[];
+532:  const aiUsers = db.prepare("SELECT id FROM users WHERE is_ai = 1 AND is_active = 1").all() as any[];
+552:  const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+555:  const allUsers = db.prepare("SELECT * FROM users").all() as any[];
+559:  const postAuthor = db.prepare("SELECT u.is_ai, p.universe_id FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
+563:    const universe = db.prepare("SELECT is_paused FROM universes WHERE id = ?").get(postAuthor.universe_id) as any;
+589:      SELECT p.*, u.display_name as author_name, u.bio as author_bio, u.is_ai 
+595:    let aiUsersQuery = "SELECT * FROM users WHERE is_ai = 1 AND is_active = 1 AND id != ?";
+600:        SELECT u.* FROM users u 
+613:    const existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(postId).map((r: any) => r.user_id);
+628:    const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(postId).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
+629:    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, post.user_id) as any;
+643:        const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(post.user_id) as any;
+662:      SELECT c.*, u.display_name, p.content as post_content, p.created_at as post_created_at, pu.display_name as post_author
+687:    const comment = db.prepare("SELECT parent_id FROM comments WHERE id = ?").get(currentCommentId) as any;
+696:  const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+700:    SELECT c.*, p.user_id as op_id, p.content as post_content, u.display_name as author_name, u.is_ai as author_is_ai,
+710:    AND p.id IN (SELECT id FROM posts WHERE is_visible = 1 ORDER BY posts.created_at DESC LIMIT 10)
+712:      SELECT 1 FROM comments reply 
+728:      const opUser = db.prepare("SELECT * FROM users WHERE id = ?").get(comment.target_op_id) as any;
+732:        const universe = db.prepare("SELECT is_paused FROM universes WHERE id = ?").get(opUser.universe_id) as any;
+742:      const post = db.prepare("SELECT p.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(comment.post_id) as any;
+750:        const commenter = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.user_id) as any;
+757:        const postAuthor = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.op_id) as any;
+763:          const commenter = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.user_id) as any;
+774:      const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(opUser.id, comment.user_id) as any;
+806:  const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+813:        const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(aiUser.id) as any;
+817:          SELECT p.content, p.created_at, u.display_name, univ.name as universe_name
+829:          SELECT p.content, p.created_at, u.display_name
+838:          SELECT * FROM universe_arcs
+845:          SELECT p.content, p.created_at, u.display_name
+869:    SELECT p.content, p.created_at, u.display_name 
+876:    SELECT u.display_name, r.description 
+883:  const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
+886:    const forced = db.prepare("SELECT * FROM post_archetypes WHERE id = ?").get(forcedArchetypeId) as any;
+890:    SELECT u.username, u.universe_id, un.name as universe_name
+901:  const universe = aiUser.universe_id ? db.prepare("SELECT * FROM universes WHERE id = ?").get(aiUser.universe_id) as any : null;
+905:    pastUniverseArcs = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(universe.id) as any[];
+906:    activeUniverseArc = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'active'").get(universe.id) as any;
+912:        activeUniverseArc = db.prepare("SELECT * FROM universe_arcs WHERE id = ?").get(info.lastInsertRowid);
+921:          SELECT p.content, u.display_name 
+933:          SELECT p.content, u.display_name 
+961:    activeArc = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'active'").get(aiUser.id) as any;
+962:    pastArcs = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(aiUser.id) as any[];
+967:        SELECT p.content, p.created_at, u.display_name 
+989:          activeArc = db.prepare("SELECT * FROM character_arcs WHERE id = ?").get(info.lastInsertRowid);
+1007:        const recentUserPosts = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5").all(aiUser.id).map((p: any) => `[${p.created_at}] ${p.content}`).join(" | ");
+1010:          SELECT c.content, u.display_name 
+1013:          WHERE c.post_id IN (SELECT id FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5) 
+1024:          const recentUserPosts = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10").all(aiUser.id, activeArc.last_update_date || activeArc.start_date).map((p: any) => `[${p.created_at}] ${p.content}`).join(" | ");
+1038:          SELECT c.content, u.display_name 
+1041:          WHERE c.post_id IN (SELECT id FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 2) 
+1110:      const allUsers = db.prepare("SELECT * FROM users").all() as any[];
+1113:        SELECT DISTINCT receiver_id FROM direct_messages dm
+1153:              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(otherAi.id, aiUser.id) as any;
+1155:              const post = db.prepare("SELECT created_at FROM posts WHERE id = ?").get(postId) as any;
+1205:    const user = db.prepare("SELECT id, universe_id, account_type, is_ai FROM users WHERE id = ?").get(userId) as any;
+1213:          SELECT id, ? FROM users WHERE universe_id = ? AND is_ai = 1 AND id != ?
+1220:          AND follower_id IN (SELECT id FROM users WHERE (universe_id != ? OR universe_id IS NULL) AND is_ai = 1)
+1224:        db.prepare("DELETE FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)").run(user.id);
+1231:          SELECT ?, id FROM users WHERE account_type = 'news' AND universe_id = ?
+1238:          AND followed_id IN (SELECT id FROM users WHERE account_type = 'news' AND (universe_id != ? OR universe_id IS NULL))
+1245:          AND followed_id IN (SELECT id FROM users WHERE account_type = 'news')
+1255:      SELECT c.id, n.id 
+1265:        SELECT f.ROWID
+1278:  const fauxNews = db.prepare("SELECT * FROM users WHERE username = 'fauxnews'").get() as any;
+1284:    const newUser = db.prepare("SELECT * FROM users WHERE username = 'fauxnews'").get() as any;
+1305:      user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
+1307:      user = db.prepare("SELECT * FROM users WHERE is_ai = 0 ORDER BY id ASC LIMIT 1").get() as any;
+1331:      SELECT l.*, u.display_name as user_display_name, u.avatar_url as user_profile_picture, u.account_type as user_account_type 
+1362:      SELECT rc.*, u1.display_name as user1_name, u1.avatar_url as user1_avatar, u2.display_name as user2_name, u2.avatar_url as user2_avatar
+1377:    const users = db.prepare("SELECT id, username, display_name, avatar_url, role, pin IS NOT NULL AND pin != '' as has_pin FROM users WHERE is_ai = 0 ORDER BY id ASC").all();
+1384:    const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId);
+1391:    const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
+1423:    const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get();
+1428:    const settings = db.prepare("SELECT show_internal_thoughts FROM settings WHERE id = 1").get() as any;
+1433:    const archetypes = db.prepare("SELECT * FROM post_archetypes").all();
+1552:      const universes = db.prepare("SELECT name FROM universes").all().map((u: any) => u.name);
+1567:      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
+1568:      (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
+1569:      (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
+1570:      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
+1586:      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
+1596:      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
+1608:      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+1611:        SELECT u.*, 
+1613:        EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
+1614:        (SELECT COUNT(*) FROM follows WHERE follower_id = u.id) as following_count,
+1615:        (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
+1667:      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+1671:        SELECT id, username, display_name, avatar_url, is_ai, is_active, universe_id, account_type, 
+1674:               EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = users.id) as is_followed
+1700:          SELECT DISTINCT receiver_id FROM direct_messages dm
+1734:      const arcs = db.prepare("SELECT *, 'character' as arc_type FROM character_arcs WHERE user_id = ? ORDER BY created_at DESC").all(req.params.id);
+1745:      SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar, u.account_type as other_account_type, u.role as other_role, u1.role as user1_role, u.is_verified as other_is_verified
+1765:      const user1 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user_id_1) as any;
+1766:      const user2 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user_id_2) as any;
+1817:      const user = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(userId) as any;
+1830:      const comments = db.prepare("SELECT id FROM comments WHERE user_id = ?").all(userId) as any[];
+1839:      const posts = db.prepare("SELECT id FROM posts WHERE user_id = ?").all(userId) as any[];
+1841:        db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)").run(p.id);
+1842:        db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)").run(p.id);
+1864:      SELECT u.*, (SELECT COUNT(*) FROM users WHERE universe_id = u.id) as character_count
+1900:        const universe = db.prepare("SELECT paused_at FROM universes WHERE id = ?").get(req.params.id) as any;
+1919:            WHERE status = 'active' AND user_id IN (SELECT id FROM users WHERE universe_id = ?)
+1950:    const universe = db.prepare("SELECT * FROM universes WHERE id = ?").get(req.params.id) as any;
+1986:    const aiUser = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id) as any;
+2003:    const characters = db.prepare("SELECT id, username, display_name, avatar_url, bio, is_ai, is_active, online_times, current_online_status, status_expires_at FROM users WHERE universe_id = ?").all(req.params.id);
+2008:    const arcs = db.prepare("SELECT *, 'universe' as arc_type FROM universe_arcs WHERE universe_id = ? ORDER BY created_at DESC").all(req.params.id);
+2076:        SELECT 
+2087:        SELECT 
+2155:      const existingUser = db.prepare("SELECT id FROM users WHERE username = ?").get(username);
+2205:      SELECT n.*, u.display_name as actor_name, u.avatar_url as actor_avatar, u.account_type as actor_account_type, u.is_verified as actor_is_verified
+2226:      const aiUser = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1").get(req.params.id) as any;
+2250:      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
+2251:      (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
+2252:      (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
+2253:      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
+2257:      AND (p.user_id = ? OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = ? AND f.followed_id = p.user_id))
+2351:      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
+2352:      (SELECT COUNT(id) FROM comment_likes WHERE comment_id = c.id) as like_count,
+2353:      EXISTS(SELECT 1 FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
+2378:      const parentComment = db.prepare("SELECT user_id FROM comments WHERE id = ?").get(parent_id) as any;
+2381:      const post = db.prepare("SELECT user_id FROM posts WHERE id = ?").get(req.params.id) as any;
+2391:      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
+2401:      SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
+2413:      SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
+2414:      (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as likes,
+2415:      (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comments,
+2416:      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
+2435:      db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)").run(postId);
+2436:      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)").run(postId);
+2460:      SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
+2475:      db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE parent_id = ?)").run(commentId);
+2476:      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE parent_id = ?)").run(commentId);
+2531:      SELECT gc.*, 
+2532:      (SELECT content FROM group_chat_messages WHERE group_chat_id = gc.id ORDER BY created_at DESC LIMIT 1) as last_message,
+2533:      (SELECT created_at FROM group_chat_messages WHERE group_chat_id = gc.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
+2534:      (SELECT COUNT(*) FROM group_chat_messages WHERE group_chat_id = gc.id AND created_at > gcm.last_read_at) as unread_count
+2543:        SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at
+2585:      SELECT m.*, u.display_name, u.username, u.avatar_url, u.account_type, u.is_verified
+2600:    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params) as any[];
+2613:    const msg = db.prepare("SELECT * FROM group_chat_messages WHERE id = ?").get(req.params.id) as any;
+2616:    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(msg.group_chat_id, user.id);
+2629:    const msg = db.prepare("SELECT * FROM group_chat_messages WHERE id = ?").get(req.params.id) as any;
+2632:    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(msg.group_chat_id, user.id);
+2654:      const group = db.prepare("SELECT * FROM group_chats WHERE id = ?").get(groupId) as any;
+2658:        SELECT u.* FROM users u
+2664:        SELECT m.sender_id, m.content, u.display_name, m.created_at
+2677:      const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
+2696:              SELECT u.* FROM users u
+2728:    const favorites = db.prepare("SELECT * FROM dm_favorites WHERE user_id = ?").all(user.id);
+2760:        SELECT 
+2768:        SELECT sender_id, COUNT(*) as count
+2773:      SELECT 
+2795:      SELECT * FROM direct_messages
+2808:    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params) as any[];
+2828:      SELECT image_url, created_at, id
+2845:    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(req.params.id, user.id);
+2851:      SELECT image_url, created_at, id
+2864:    const settings = db.prepare("SELECT * FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = ?").get(user.id, req.params.targetId, isGroup ? 1 : 0) as any;
+2896:    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
+2911:    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
+2956:          const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
+2957:          const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
+2965:              const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(user.id, receiverId) as any;
+2970:              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
+3030:          const ai = db.prepare("SELECT display_name FROM users WHERE id = ?").get(aiId) as any;
+3037:        const ai = db.prepare("SELECT display_name FROM users WHERE id = ?").get(chatId) as any;
+3048:      const recaps = db.prepare("SELECT id, month_year, title, created_at FROM monthly_recaps ORDER BY month_year DESC").all();
+3058:      const recap = db.prepare("SELECT * FROM monthly_recaps WHERE month_year = ?").get(req.params.monthYear) as any;
+3101:      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+3104:      const allUsers = db.prepare("SELECT * FROM users").all() as any[];
+3107:        SELECT DISTINCT receiver_id FROM direct_messages dm
+3122:      const pausedUniverses = new Set(db.prepare("SELECT id FROM universes WHERE is_paused = 1").all().map((u: any) => u.id));
+3153:            const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(newsAccount.id) as any;
+3158:              SELECT p.content, p.created_at, u.display_name
+3168:                SELECT * FROM universe_arcs
+3175:                SELECT p.content, p.created_at, u.display_name
+3184:                SELECT content, created_at
+3231:            const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(fnAccount.id) as any;
+3236:              SELECT p.content, p.created_at, u.display_name, univ.name as universe_name
+3247:                SELECT content, created_at
+3281:        const recentPosts = db.prepare("SELECT id, user_id FROM posts WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 10").all() as any[];
+3289:        const recentComments = db.prepare("SELECT id, user_id FROM comments ORDER BY created_at DESC LIMIT 10").all() as any[];
+3300:          const totalAiUsersCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE is_ai = 1").get() as any;
+3301:          const followingCountA = db.prepare("SELECT COUNT(*) as c FROM follows WHERE follower_id = ? AND followed_id IN (SELECT id FROM users WHERE is_ai = 1)").get(randomAi.id) as any;
+3324:                SELECT id as user_id
+3342:              const followerCountB = db.prepare("SELECT COUNT(*) as c FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)").get(userToFollow.id) as any;
+3359:      const realUsers = db.prepare("SELECT * FROM users WHERE is_ai = 0").all() as any[];
+3370:            SELECT u.* FROM users u
+3381:              const favorites = db.prepare("SELECT target_id, is_group FROM dm_favorites WHERE user_id = ?").all(realUser.id) as any[];
+3386:                    SELECT u.* FROM users u
+3395:                    const groupChat = db.prepare("SELECT name FROM group_chats WHERE id = ?").get(randomFav.target_id) as any;
+3397:                      SELECT sender_id, content, created_at FROM group_chat_messages
+3403:                      const sender = db.prepare("SELECT display_name FROM users WHERE id = ?").get(msg.sender_id) as any;
+3418:                          SELECT u.display_name, u.description FROM users u
+3436:                    SELECT u.* FROM users u 
+3446:                        const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+3472:                    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+3497:                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
+3519:      const allRealUsers = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").all() as any[];
+3523:          SELECT dm.*, u.online_times
+3526:          WHERE dm.receiver_id IN (SELECT id FROM users WHERE is_ai = 1 AND is_active = 1)
+3529:            SELECT 1 FROM direct_messages reply 
+3547:                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(aiUser.id, realUser.id) as any;
+3550:                const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(realUser.id, aiUser.id) as any;
+3591:        const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(randomAi.id) as any).count;
+3621:        const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(inactiveUser.id) as any).count;
+3640:        const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(activeUser.id) as any;
+3652:          const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(activeUser.id) as any).count;
+3671:          SELECT gc.id, gc.name, MAX(gcm.created_at) as last_msg_time
+3683:            SELECT u.* FROM users u
+3704:            const lastMsg = db.prepare("SELECT sender_id FROM group_chat_messages WHERE group_chat_id = ? ORDER BY created_at DESC LIMIT 1").get(group.id) as any;
+3713:                  SELECT m.sender_id, m.content, u.display_name, m.created_at, u.is_ai
+3726:                  SELECT u.* FROM users u
+3748:        SELECT p.id as post_id, NULL as comment_id, p.content, u.id as ai_user_id, p.user_id as author_id, u.online_times
+3753:          SELECT 1 FROM comments c WHERE c.post_id = p.id AND c.user_id = u.id AND c.parent_id IS NULL
+3756:        SELECT c.post_id, c.id as comment_id, c.content, u.id as ai_user_id, c.user_id as author_id, u.online_times
+3761:          SELECT 1 FROM comments c2 WHERE c2.parent_id = c.id AND c2.user_id = u.id
+3778:          const postAuthor = db.prepare("SELECT u.universe_id, u.account_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(mention.post_id) as any;
+3793:              SELECT c.*, u.display_name as author_name, p.content as post_content
+3812:                    SELECT u.display_name, r.description 
+3828:                    const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(commentData.user_id) as any;
+3842:              SELECT p.*, u.display_name as author_name, u.bio as author_bio
+3854:                  const otherComments = db.prepare("SELECT c.content, u.display_name FROM comments c JOIN users u ON c.user_id = u.id WHERE c.post_id = ? AND c.parent_id IS NULL").all(mention.post_id) as any[];
+3858:                    SELECT u.display_name, r.description 
+3875:                    const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(postData.user_id) as any;
+3894:          SELECT p.*, u.display_name as author_name, u.bio as author_bio,
+3895:          (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count
+3907:            SELECT c.*, u.display_name as author_name, p.content as post_content,
+3908:            (SELECT COUNT(*) FROM comments WHERE parent_id = c.id) as reply_count
+3928:          const isRealUser = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(post.user_id) as any;
+3944:            currentComment = db.prepare("SELECT parent_id FROM comments WHERE id = ?").get(currentComment.parent_id) as any;
+3965:            const author = db.prepare("SELECT * FROM users WHERE id = ?").get(choice.data.user_id) as any;
+3972:            const followedAis = db.prepare("SELECT followed_id FROM follows WHERE follower_id = ?").all(author.id).map((f: any) => f.followed_id);
+3980:                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, author.id) as any;
+4001:          const targetUser = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(targetUserId) as any;
+4005:            existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(choice.data.id).map((r: any) => r.user_id);
+4007:            existingRepliers = db.prepare("SELECT user_id FROM comments WHERE parent_id = ?").all(choice.data.id).map((r: any) => r.user_id);
+4012:            const followedAis = db.prepare("SELECT followed_id FROM follows WHERE follower_id = ?").all(targetUserId).map((f: any) => f.followed_id);
+4041:                  const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
+4044:                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
+4058:                    const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomPost.user_id) as any;
+4072:                const existingReply = db.prepare("SELECT 1 FROM comments WHERE parent_id = ? AND user_id = ?").get(randomComment.id, randomAi.id);
+4077:                    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
+4093:                      const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomComment.user_id) as any;

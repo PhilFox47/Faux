@@ -318,12 +318,10 @@ export default function App() {
         .then(data => setRealUsers(data))
         .catch(err => console.error(err));
         
-      apiFetch('/api/users?limit=1000') // Fetch many to select a random background
+      apiFetch('/api/random-profiles?limit=80') // Fetch many to select a random background
         .then(res => res.json())
         .then(data => {
-            const aiUsersWithAvatars = data.filter((u: any) => u.is_ai === 1 && (u.account_type === 'character' || u.account_type === 'company' || u.account_type === 'news') && u.avatar_url);
-            const shuffled = [...aiUsersWithAvatars].sort(() => 0.5 - Math.random());
-            setLoginBackgroundAvatars(shuffled.slice(0, 80).map((u:any) => u.avatar_url));
+            setLoginBackgroundAvatars(data.map((u:any) => u.avatar_url));
         })
         .catch(err => console.error(err));
     }
@@ -2933,6 +2931,12 @@ export default function App() {
 
               {/* Feed */}
               <div className="divide-y divide-white/5">
+                {isFetchingPosts && posts.length > 0 && (
+                  <div className="w-full flex justify-center items-center py-3 bg-orange-500/10 border-b border-orange-500/20">
+                    <Loader2 className="animate-spin text-orange-500 mr-2" size={16} />
+                    <span className="text-orange-500 text-xs font-semibold uppercase tracking-wider">Syncing Data...</span>
+                  </div>
+                )}
                 {posts.slice(0, visiblePosts).map(post => (
                   <PostItem 
                     apiFetch={apiFetch}
@@ -3645,6 +3649,56 @@ export default function App() {
                                           <span>Thought</span>
                                         </div>
                                         {msg.internal_thought}
+                                      </div>
+                                    )}
+                                    {msg.is_image_request === 1 && (
+                                      <div className={`mt-3 p-3 rounded-xl border flex flex-col gap-2 ${isMe ? 'bg-orange-800/40 border-orange-400/30' : 'bg-slate-900/60 border-slate-600/50'}`}>
+                                        <div className="flex items-center gap-2">
+                                          <Camera size={14} className={isMe ? 'text-orange-300' : 'text-slate-400'} />
+                                          <p className={`text-xs font-semibold ${isMe ? 'text-orange-100' : 'text-slate-200'}`}>
+                                            {sender?.display_name || activeChat.name} wants to send an image.
+                                          </p>
+                                        </div>
+                                        
+                                        {msg.image_request_status === 'pending' && (
+                                          <div className="flex gap-2 w-full mt-1">
+                                            <button onClick={() => {
+                                              apiFetch(`/api/dms/messages/${msg.id}/accept-image`, { method: 'POST' }).then(() => fetchChatMessages(activeChat.id, isGroupChat, undefined, true));
+                                            }} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${isMe ? 'bg-white text-orange-600 hover:bg-slate-100' : 'bg-orange-500 text-white hover:bg-orange-400'}`}>
+                                              Accept
+                                            </button>
+                                            <button onClick={() => {
+                                              apiFetch(`/api/dms/messages/${msg.id}/decline-image`, { method: 'POST' }).then(() => fetchChatMessages(activeChat.id, isGroupChat, undefined, true));
+                                            }} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${isMe ? 'bg-orange-700 text-white hover:bg-orange-600' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+                                              Decline
+                                            </button>
+                                          </div>
+                                        )}
+                                        
+                                        {msg.image_request_status === 'generating' && (
+                                          <div className="flex items-center gap-2 py-1">
+                                            <Loader2 size={12} className="animate-spin text-orange-400" />
+                                            <span className="text-[10px] uppercase tracking-wider font-bold text-orange-400/80">Generating Image...</span>
+                                          </div>
+                                        )}
+                                        
+                                        {msg.image_request_status === 'accepted' && (
+                                          <div className="py-1">
+                                            <span className="text-[10px] uppercase tracking-wider font-bold text-green-400/80">Request Accepted</span>
+                                          </div>
+                                        )}
+
+                                        {msg.image_request_status === 'declined' && (
+                                          <div className="py-1">
+                                            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500/80">Request Declined</span>
+                                          </div>
+                                        )}
+
+                                        {msg.image_request_status === 'failed' && (
+                                          <div className="py-1">
+                                            <span className="text-[10px] uppercase tracking-wider font-bold text-red-400/80">Failed to generate</span>
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </>
@@ -6128,6 +6182,11 @@ const FauxPicItem = React.memo(function FauxPicItem({ post, onLike, onViewProfil
         {showComments && (
           <div className="mt-4 pt-4 border-t border-white/10 space-y-4">
             <div className="max-h-[400px] overflow-y-auto space-y-4 pr-2">
+              {rootComments.length > 0 && isFetchingComments && (
+                <div className="flex justify-center py-2">
+                  <Loader2 className="animate-spin text-orange-500/50" size={16} />
+                </div>
+              )}
               {rootComments.length === 0 ? (
                 isFetchingComments ? (
                   <div className="flex justify-center py-4">

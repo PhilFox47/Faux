@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, summarizeDMHistory, updateDMSummaryAndFacts, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, updateCharacterArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
+import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, checkIfWantsToSendImage, createDMImageRequestPrompt, summarizeDMHistory, updateDMSummaryAndFacts, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, updateCharacterArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
 import { logPerformance } from "./src/logger";
 
@@ -385,14 +385,12 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
   // Check if relationship already exists
   const existingRel = db.prepare("SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any;
 
-  // Get interaction counts
-  const commentsCount = (db.prepare(`
-    SELECT COUNT(*) as count FROM comments 
-    WHERE (user_id = ? AND post_id IN (SELECT id FROM posts WHERE user_id = ?))
-       OR (user_id = ? AND post_id IN (SELECT id FROM posts WHERE user_id = ?))
-       OR (user_id = ? AND parent_id IN (SELECT id FROM comments WHERE user_id = ?))
-       OR (user_id = ? AND parent_id IN (SELECT id FROM comments WHERE user_id = ?))
-  `).get(user1Id, user2Id, user2Id, user1Id, user1Id, user2Id, user2Id, user1Id) as any).count;
+  // Get interaction counts using individual join queries for better performance
+  const count1 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user1Id, user2Id) as any).count;
+  const count2 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user2Id, user1Id) as any).count;
+  const count3 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN comments p ON c.parent_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user1Id, user2Id) as any).count;
+  const count4 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN comments p ON c.parent_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user2Id, user1Id) as any).count;
+  const commentsCount = count1 + count2 + count3 + count4;
 
   const dmsCount = (db.prepare(`
     SELECT COUNT(*) as count FROM direct_messages 
@@ -1563,16 +1561,19 @@ async function startServer() {
   app.get("/api/users/:id/posts", (req, res) => {
     const user = getRealUser(req);
     const userId = user ? user.id : 0;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = parseInt(req.query.offset as string) || 0;
     const posts = db.prepare(`
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
-      (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ? LIMIT 1) as is_liked
+      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
       WHERE p.user_id = ? AND p.is_visible = 1
       ORDER BY p.created_at DESC
-    `).all(userId, req.params.id) as any[];
+      LIMIT ? OFFSET ?
+    `).all(userId, req.params.id, limit, offset) as any[];
     
     const showThoughts = shouldShowInternalThoughts();
     if (!showThoughts) {
@@ -1654,6 +1655,24 @@ async function startServer() {
     } catch (e: any) {
       console.error("Error in /api/users/:id/poke:", e);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/random-profiles", (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      // Fetch only essential data for background gallery, randomizing efficiently
+      const users = db.prepare(`
+        SELECT id, avatar_url, account_type
+        FROM users
+        WHERE account_type IN ('character', 'company', 'news') AND avatar_url IS NOT NULL AND avatar_url != ''
+        ORDER BY RANDOM()
+        LIMIT ?
+      `).all(limit);
+      res.json(users);
+    } catch (e: any) {
+      console.error("Error fetching random profiles:", e);
+      res.status(500).json({ error: "Failed to fetch random profiles" });
     }
   });
 
@@ -2072,35 +2091,34 @@ async function startServer() {
       const limit = parseInt(req.query.limit as string) || 20;
       const offset = parseInt(req.query.offset as string) || 0;
 
-      const characterArcs = db.prepare(`
+      const allArcs = db.prepare(`
         SELECT 
-          ca.*, 
+          ca.id, ca.user_id, ca.title, ca.description, ca.current_status_text, ca.status, 
+          ca.start_date, ca.target_end_date, ca.last_update_date, ca.completion_summary, ca.created_at,
           'character' as arc_type,
           u.display_name as entity_name,
           u.avatar_url as entity_image,
           u.username as entity_handle
         FROM character_arcs ca
         JOIN users u ON ca.user_id = u.id
-      `).all() as any[];
 
-      const universeArcs = db.prepare(`
+        UNION ALL
+
         SELECT 
-          ua.*, 
+          ua.id, ua.universe_id as user_id, ua.title, ua.description, ua.current_status_text, ua.status, 
+          ua.start_date, ua.target_end_date, ua.last_update_date, ua.completion_summary, ua.created_at,
           'universe' as arc_type,
           un.name as entity_name,
           un.image_url as entity_image,
           NULL as entity_handle
         FROM universe_arcs ua
         JOIN universes un ON ua.universe_id = un.id
-      `).all() as any[];
 
-      const allArcs = [...characterArcs, ...universeArcs].sort((a, b) => {
-        const dateA = new Date((a.last_update_date || a.created_at) + 'Z').getTime();
-        const dateB = new Date((b.last_update_date || b.created_at) + 'Z').getTime();
-        return dateB - dateA;
-      });
+        ORDER BY COALESCE(last_update_date, created_at) DESC
+        LIMIT ? OFFSET ?
+      `).all(limit, offset) as any[];
 
-      res.json(allArcs.slice(offset, offset + limit));
+      res.json(allArcs);
     } catch (e) {
       console.error("Failed to fetch arcs:", e);
       res.status(500).json({ error: "Failed to fetch arcs" });
@@ -2246,12 +2264,17 @@ async function startServer() {
     const universeId = req.query.universe_id as string;
     const accountType = req.query.account_type as string;
     
+    let indexHint = "INDEXED BY idx_posts_visible_created";
+    if (type) {
+      indexHint = "INDEXED BY idx_posts_visible_type_created";
+    }
+
     let query = `
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
-      (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ? LIMIT 1) as is_liked
-      FROM posts p
+      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) as is_liked
+      FROM posts p ${indexHint}
       JOIN users u ON p.user_id = u.id
       WHERE p.is_visible = 1
       AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)
@@ -2350,7 +2373,7 @@ async function startServer() {
     const comments = db.prepare(`
       SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comment_likes WHERE comment_id = c.id) as like_count,
-      (SELECT 1 FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
+      EXISTS(SELECT 1 FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
       FROM comments c
       JOIN users u ON c.user_id = u.id
       WHERE c.post_id = ?
@@ -2754,15 +2777,21 @@ async function startServer() {
     const user = getRealUser(req);
     if (!user) return res.status(401).json({ error: "User not found" });
 
-    // Get latest message per conversation
+    // Get latest message per conversation using indexed subqueries
     const conversations = db.prepare(`
-      WITH LatestMessages AS (
+      WITH OtherUsers AS (
+        SELECT receiver_id as other_user_id FROM direct_messages WHERE sender_id = ?
+        UNION
+        SELECT sender_id as other_user_id FROM direct_messages WHERE receiver_id = ?
+      ),
+      LatestMessages AS (
         SELECT 
-          CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END as other_user_id,
-          MAX(id) as max_id
-        FROM direct_messages
-        WHERE sender_id = ? OR receiver_id = ?
-        GROUP BY other_user_id
+          o.other_user_id,
+          MAX(
+            COALESCE((SELECT MAX(id) FROM direct_messages WHERE sender_id = ? AND receiver_id = o.other_user_id), 0),
+            COALESCE((SELECT MAX(id) FROM direct_messages WHERE sender_id = o.other_user_id AND receiver_id = ?), 0)
+          ) as max_id
+        FROM OtherUsers o
       ),
       UnreadCounts AS (
         SELECT sender_id, COUNT(*) as count
@@ -2780,7 +2809,7 @@ async function startServer() {
       JOIN users u ON u.id = lm.other_user_id
       LEFT JOIN UnreadCounts uc ON uc.sender_id = u.id
       ORDER BY dm.created_at DESC
-    `).all(user.id, user.id, user.id, user.id);
+    `).all(user.id, user.id, user.id, user.id, user.id);
     res.json(conversations);
   });
 
@@ -2919,6 +2948,60 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.post("/api/dms/messages/:id/accept-image", async (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    
+    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
+    if (!msg || msg.receiver_id !== user.id) return res.status(403).json({ error: "Unauthorized" });
+    if (!msg.is_image_request || msg.image_request_status !== 'pending') return res.status(400).json({ error: "Invalid request" });
+
+    db.prepare("UPDATE direct_messages SET image_request_status = 'generating' WHERE id = ?").run(req.params.id);
+    res.json({ success: true, status: 'generating' });
+
+    try {
+      const aiUser = db.prepare("SELECT * FROM users WHERE id = ?").get(msg.sender_id) as any;
+      const formattedHistory = await getDMSummaryAndHistory(user.id, aiUser.id, aiUser.id);
+      
+      const lastTextMsg = db.prepare("SELECT content FROM direct_messages WHERE sender_id = ? AND receiver_id = ? AND is_image_request = 0 ORDER BY id DESC LIMIT 1").get(aiUser.id, user.id) as any;
+      const lastTextContent = lastTextMsg ? lastTextMsg.content : "";
+
+      const rawPrompt = await createDMImageRequestPrompt(aiUser, formattedHistory, lastTextContent);
+      const enriched = await enrichDMImagePrompt(aiUser, rawPrompt);
+      
+      const refImagesStr = aiUser.reference_images || '[]';
+      let refImages: string[] = [];
+      try {
+        const parsed = JSON.parse(refImagesStr);
+        if (Array.isArray(parsed)) refImages.push(...parsed);
+      } catch(e) {}
+      
+      if (aiUser.avatar_url && enriched.characterVisible) refImages.push(aiUser.avatar_url);
+
+      const imageUrl = await generateImage(enriched.prompt, "", refImages.length > 0 ? refImages : undefined);
+      if (imageUrl) {
+         db.prepare("UPDATE direct_messages SET image_url = ?, image_prompt = ?, image_request_status = 'accepted' WHERE id = ?")
+           .run(imageUrl, enriched.prompt, req.params.id);
+      } else {
+         db.prepare("UPDATE direct_messages SET image_request_status = 'failed' WHERE id = ?").run(req.params.id);
+      }
+    } catch (e) {
+      console.error("Error generating requested image:", e);
+      db.prepare("UPDATE direct_messages SET image_request_status = 'failed' WHERE id = ?").run(req.params.id);
+    }
+  });
+
+  app.post("/api/dms/messages/:id/decline-image", (req, res) => {
+    const user = getRealUser(req);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    
+    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
+    if (!msg || msg.receiver_id !== user.id) return res.status(403).json({ error: "Unauthorized" });
+
+    db.prepare("UPDATE direct_messages SET image_request_status = 'declined' WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
   app.post("/api/dms/:userId", async (req, res) => {
     try {
       const { content, image_url } = req.body;
@@ -2972,30 +3055,18 @@ async function startServer() {
 
               const replyData = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id, false, allowImageGen);
               if (replyData) {
-                const { content: replyContent, internal_thought, imagePrompt } = replyData;
+                const { content: replyContent, internal_thought } = replyData;
                 
-                let imageUrl: string | null = null;
-                let finalImagePrompt = imagePrompt;
-                if (imagePrompt && allowImageGen) {
-                  const enriched = await enrichDMImagePrompt(receiver, imagePrompt);
-                  finalImagePrompt = enriched.prompt;
-                  const negativePrompt = await generateNegativeImagePrompt(finalImagePrompt);
-
-                  let refImages: string[] = [];
-                  if (receiver.avatar_url && enriched.characterVisible) refImages.push(receiver.avatar_url);
-                  if (receiver.reference_images && enriched.characterVisible) {
-                    try {
-                      const parsed = JSON.parse(receiver.reference_images);
-                      if (Array.isArray(parsed)) {
-                        refImages.push(...parsed);
-                      }
-                    } catch(e) {}
+                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                  .run(receiverId, user.id, replyContent.trim(), internal_thought);
+                
+                if (allowImageGen) {
+                  const wantsImage = await checkIfWantsToSendImage(receiver, formattedHistory, replyContent);
+                  if (wantsImage) {
+                    db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')")
+                      .run(receiverId, user.id);
                   }
-                  imageUrl = await generateImage(finalImagePrompt, negativePrompt, refImages.length > 0 ? refImages : undefined) || null;
                 }
-
-                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt, internal_thought) VALUES (?, ?, ?, ?, ?, ?)")
-                  .run(receiverId, user.id, replyContent.trim(), imageUrl, finalImagePrompt || null, internal_thought);
 
                 checkDynamicRelationship(receiver.id, user.id).catch(console.error);
               }
@@ -3552,28 +3623,19 @@ async function startServer() {
 
                 const replyData = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true, allowImageGen);
                 if (replyData && replyData.content) {
-                  let imageUrl: string | null = null;
-                  let finalImagePrompt = replyData.imagePrompt;
-                  if (replyData.imagePrompt && allowImageGen) {
-                    const enriched = await enrichDMImagePrompt(aiUser, replyData.imagePrompt);
-                    finalImagePrompt = enriched.prompt;
-                    const negativePrompt = await generateNegativeImagePrompt(finalImagePrompt);
+                  const { content: replyContent, internal_thought } = replyData;
 
-                    let refImages: string[] = [];
-                    if (aiUser.avatar_url && enriched.characterVisible) refImages.push(aiUser.avatar_url);
-                    if (aiUser.reference_images && enriched.characterVisible) {
-                      try {
-                        const parsed = JSON.parse(aiUser.reference_images);
-                        if (Array.isArray(parsed)) {
-                          refImages.push(...parsed);
-                        }
-                      } catch(e) {}
+                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
+                    .run(aiUser.id, realUser.id, replyContent.trim(), internal_thought);
+
+                  if (allowImageGen) {
+                    const wantsImage = await checkIfWantsToSendImage(aiUser, formattedHistory, replyContent);
+                    if (wantsImage) {
+                      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')")
+                        .run(aiUser.id, realUser.id);
                     }
-                    imageUrl = await generateImage(finalImagePrompt, negativePrompt, refImages.length > 0 ? refImages : undefined) || null;
                   }
 
-                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url, image_prompt, internal_thought) VALUES (?, ?, ?, ?, ?, ?)")
-                    .run(aiUser.id, realUser.id, replyData.content.trim(), imageUrl, finalImagePrompt || null, replyData.internal_thought);
                   checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
                   console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
                 }

@@ -630,12 +630,18 @@ export async function generateNewArc(character: any) {
   
   const prompt = `${buildCharacterPrompt(character)}
 You are planning the next narrative arc for this ${entityType}. Create a 1-week to 6-week storyline. 
-${isCompany ? 'Focus on business goals, product launches, PR campaigns, or corporate drama.' : 'Focus on personal growth, relationships, life changes, or personal projects.'}
+CRITICAL CONSTRAINTS:
+1. Tone & Realism: The arc MUST fit the character's bio and universe perfectly. Do not make the arc random, eccentric, or overly weird unless their bio strictly demands it.
+2. Grounded Tropes: Use recognizable ${isCompany ? 'corporate/business' : 'character-driven'} tropes that feel organic to their specific world. 
+${isCompany ? 'Focus on realistic business milestones, PR crises, new product launches, or corporate rivalries.' : 'Focus on grounded personal growth, relationship dynamics, realistic life changes, or personal projects.'}
+3. Relevant Impact: The arc should have meaningful stakes, but keep the scale appropriate. Avoid world-ending scenarios unless explicitly established by their lore.
+4. Cohesion: Ensure the storyline makes sense for their daily life and doesn't introduce jarring elements.
+
 Do NOT define a strict ending; instead, provide 2-3 possible directions it could go based on interactions. 
 Return ONLY a valid JSON object with the following structure:
 {
   "title": "A short, catchy title for the arc",
-  "description": "A detailed description of the arc's premise and possible directions",
+  "description": "A detailed description of the arc's premise and possible directions without being overly eccentric.",
   "duration_days": 21
 }
 Ensure duration_days is an integer between 7 and 42.`;
@@ -878,14 +884,19 @@ ${universe.description}
 
 It is time to start a new "Universe Arc". This is a long-term, overarching storyline or event that will affect ALL characters within this universe. It should be broad enough to allow individual characters to have their own personal journeys (Character Arcs) within it, but impactful enough to change the status quo.
 
+CRITICAL CONSTRAINTS:
+1. Lore Compliance: The arc MUST fit the established rules and tone of the universe. If it's a realistic modern setting, do not introduce magic, aliens, or extreme sci-fi.
+2. Believable Events: Use overarching tropes that make logical sense for this specific world (e.g., a major election, a natural disaster, a massive cultural shift, a corporate buyout) rather than absurd or random events.
+3. Impactful but Grounded: The stakes should be high and engaging, but avoid jumping to extreme "end of the world" scenarios frequently. Maintain suspension of disbelief.
+
 Create a new Universe Arc that will last between 2 to 10 weeks in real time.
 
 Return ONLY a JSON object with the following structure:
 {
   "title": "A catchy title for the universe arc",
-  "description": "A detailed description of the overarching event, conflict, or change happening in the universe.",
+  "description": "A detailed, grounded description of the overarching event, conflict, or change happening in the universe.",
   "current_status_text": "The initial state of this arc as it begins today.",
-  "duration_days": 42 // An integer between 14 and 70 representing how long this arc should last
+  "duration_days": 42
 }`;
 
   try {
@@ -1360,15 +1371,6 @@ ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
 ${isDelayed ? `IMPORTANT: You were offline/busy for a while and are just now getting back to this message. You can briefly mention why you took so long if it fits your character (e.g. you were sleeping, busy with something, or just didn't see it).` : ''}
 
-${allowImageGen ? `
-IMAGE GENERATION:
-You can send images in this DM if the user explicitly asks for one (e.g., "show me a picture", "send me a photo", "I'd love to see that").
-To send an image, include the following tag at the END of your message: [GENERATE_IMAGE: a detailed description of the image you want to send].
-The description should be what IS in the image, not instructions for the AI.
-${character.artstyle ? `CRITICAL ARTSTYLE INSTRUCTION: The image MUST be generated in the following artstyle: "${character.artstyle}". You MUST include keywords related to this artstyle in your description to ensure the generator follows it.` : ''}
-Only send an image if it makes sense in the context of the conversation and the user's request.
-` : 'IMPORTANT: You CANNOT send images in this DM. Do not offer to send images.'}
-
 Conversation history:
 ${historyStr}
 
@@ -1434,15 +1436,8 @@ Return your response in the following JSON format:
     const json = extractJSON(content);
     let finalContent = cleanAiResponse(json.content || content);
     let internal_thought = json.internal_thought || "";
-    let imagePrompt = json.image_prompt;
 
-    const imageMatch = finalContent.match(/\[GENERATE_IMAGE:\s*(.*?)\]/i);
-    if (imageMatch) {
-      if (!imagePrompt) imagePrompt = imageMatch[1].trim();
-      finalContent = finalContent.replace(/\[GENERATE_IMAGE:\s*.*?\]/gi, '').trim();
-    }
-
-    return { content: finalContent, internal_thought, imagePrompt };
+    return { content: finalContent, internal_thought };
   } catch (error: any) {
     console.error('Error replying to DM:', error);
     logApi(
@@ -1547,6 +1542,66 @@ Return your response in the following JSON format:
     );
     return null;
   }
+}
+
+export async function checkIfWantsToSendImage(character: any, messageHistory: {role: string, content: string}[], lastMessageContent: string): Promise<boolean> {
+  try {
+    const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+    let maxHistory = messageHistory.slice(-5);
+    let historyText = maxHistory.map(m => `${m.role}: ${m.content}`).join('\n');
+    const prompt = `Based on the following recent conversation history, does the AI character "${character.display_name}" want to send an image to the user? 
+Consider if the user explicitly asked for an image, or if the AI offered to show something or naturally would send a picture (e.g. "look at this selfie", "here is a photo").
+Note: their last message text was: "${lastMessageContent}".
+Answer with EXACTLY "Yes" or "No". Nothing else.
+
+Conversation history:
+${historyText}`;
+
+    const response = await getOpenAI().chat.completions.create({
+      model: settings?.model_name || "zai-org/glm-5",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 5,
+      temperature: 0.1,
+    });
+    
+    const ans = (response.choices[0].message.content || "").trim().toLowerCase();
+    
+    logApi(
+      "checkIfWantsToSendImage",
+      { prompt },
+      { response: ans },
+      character.id
+    );
+    
+    return ans.includes("yes");
+  } catch (e) {
+    console.error("Error in checkIfWantsToSendImage:", e);
+    return false;
+  }
+}
+
+export async function createDMImageRequestPrompt(character: any, messageHistory: {role: string, content: string}[], lastMessageContent: string): Promise<string> {
+   try {
+     const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+     let maxHistory = messageHistory.slice(-5);
+     let historyText = maxHistory.map(m => `${m.role}: ${m.content}`).join('\n');
+     const prompt = `Based on the conversation history where you (the AI) decided to send an image to the user, write a brief 1-2 sentence description of WHAT that image should contain. Do not include your appearance. Just describe the scene or object you are showing. If it's a selfie, just say "a selfie taken in a [location]".
+
+Conversation history:
+${historyText}
+Last message sent: "${lastMessageContent}"`;
+
+     const response = await getOpenAI().chat.completions.create({
+       model: settings?.model_name || "zai-org/glm-5",
+       messages: [{ role: "user", content: prompt }],
+       max_tokens: 100,
+       temperature: 0.7,
+     });
+     
+     return (response.choices[0].message.content || "").trim();
+   } catch (e) {
+     return "A photo related to the recent conversation.";
+   }
 }
 
 export async function enrichDMImagePrompt(character: any, dmDescription: string) {
