@@ -1620,6 +1620,7 @@ CRITICAL: Make it feel like a REALISTIC text message/DM.
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
+- BE PROACTIVE AND OPINIONATED: Do not just agree with everything ("yes-sayer"). Have strong opinions, disagree if it fits your character, introduce new topics, and be unpredictable. Bring banter, friction, and mood swings. If your character is rude, be rude. If they are chaotic, act chaotic.
 - CRITICAL: Natural conversations don't always end with a question or a call to action. It is okay (and often preferred) to just make a statement, share an observation, or drop a thought without forcing the other person to reply. Do NOT feel pressured to keep the conversation going at all costs. Let things end naturally.
 If there is previous history, you can pick up where you left off or start a new topic. 
 Notice the timestamps in the history to understand how much time has passed since the last message.
@@ -1800,7 +1801,7 @@ export async function replyToDM(
     .map((m) =>
       m.role === "system"
         ? m.content
-        : `(Sent at ${m.created_at}) ${m.role === "assistant" ? character.display_name : userDisplayName}: ${m.content}`,
+        : `[Time: ${m.created_at}] ${m.role === "assistant" ? character.display_name : userDisplayName}: ${m.content}`,
     )
     .join("\n");
 
@@ -1817,12 +1818,13 @@ Reply in character to their latest message.
 Notice the timestamps to understand the flow of time between messages.
 ${character.account_type === "company" ? "Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be customer support, answering inquiries, or maintaining brand voice." : ""}
 CRITICAL: Make it feel like a REALISTIC text message/DM. 
-- Do NOT include any timestamps or Sent at prefixes in your reply (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)"). Just write the text.
+- Do NOT include any timestamps or time prefixes in your reply (e.g., no "[2026-04-08 22:04:15]", "[Time: ...]", or "(Sent at ...)"). Just write the text.
 - Do NOT include any image placeholders or text like "[Generating image...]" or "[IMAGE ATTACHED: ...]" in your message. If you decide to send an image or pretend to attach one, just talk about it naturally without any bracketed text describing it.
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
+- BE PROACTIVE AND OPINIONATED: Do not just agree with everything ("yes-sayer"). Have strong opinions, disagree if it fits your character, introduce new topics, and be unpredictable. Bring banter, friction, and mood swings. If your character is rude, be rude. If they are chaotic, act chaotic.
 - Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
 - CRITICAL: Natural conversations don't always end with a question or a call to action. It is okay (and often preferred) to just make a statement, acknowledge what they said, or react without forcing them to reply. Do NOT feel pressured to keep the conversation going at all costs. Let things end naturally.
 Focus on the conversation topic.
@@ -1840,10 +1842,7 @@ Return your response in the following JSON format:
     { role: "system", content: systemPrompt },
     ...messageHistory.map((m) => ({
       role: m.role === "system" ? "system" : m.role,
-      content:
-        m.role === "system"
-          ? m.content
-          : `(Sent at ${m.created_at})\n${m.content}`,
+      content: m.content,
     })),
   ];
 
@@ -1921,7 +1920,7 @@ export async function generateGroupChatReply(
     .join("\n\n");
 
   const historyStr = messageHistory
-    .map((m) => `(Sent at ${m.created_at}) ${m.content}`)
+    .map((m) => `[Time: ${m.created_at}] ${m.content}`)
     .join("\n");
 
   const systemPrompt = `${buildCharacterPrompt(character)}
@@ -1936,11 +1935,12 @@ Reply in character to the latest messages.
 Notice the timestamps to understand the flow of time between messages.
 ${character.account_type === "company" ? "Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the group in a corporate or brand-appropriate way. You are representing the company in this group chat." : ""}
 CRITICAL: Make it feel like a REALISTIC group chat message. 
-- Do NOT include any timestamps or Sent at prefixes in your reply (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)"). Just write the text.
+- Do NOT include any timestamps or time prefixes in your reply (e.g., no "[2026-04-08 22:04:15]", "[Time: ...]", or "(Sent at ...)"). Just write the text.
 - Do NOT write long, overly formal paragraphs. 
 - Use casual language, abbreviations, or slang if it fits your character. 
 - People text in short bursts. Keep it brief and conversational.
 - Do NOT sound like an AI assistant. Sound like a real person (or character) texting on their phone.
+- BE PROACTIVE AND OPINIONATED: Do not just agree with everything ("yes-sayer"). Have strong opinions, disagree if it fits your character, introduce new topics, and be unpredictable. Bring banter, friction, and mood swings. If your character is rude, be rude. If they are chaotic, act chaotic.
 - Do not default to Roleplaying with actions in asterisks unless it's a core part of your character's texting style.
 - CRITICAL: Natural conversations don't always end with a question or a call to action. It is okay (and often preferred) to just make a statement, acknowledge what was said, or react without forcing someone to reply. Do NOT feel pressured to keep the conversation going at all costs. Let things end naturally.
 - IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.

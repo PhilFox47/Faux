@@ -4,49 +4,91 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import db, { initDb } from "./src/db";
-import { generatePost, generateImagePostData, generateComment, generateDM, replyToDM, checkIfWantsToSendImage, createDMImageRequestPrompt, summarizeDMHistory, updateDMSummaryAndFacts, testConnection, generatePersona, generateImage, generateImagePrompt, enrichDMImagePrompt, generateNegativeImagePrompt, generateGroupChatReply, pickBestCommenter, pickArchetype, evaluateDynamicRelationship, analyzeImage, generateNewArc, concludeArc, updateCharacterArc, generateNewUniverseArc, updateUniverseArc, concludeUniverseArc, logApi, generateNewsPost, generateFauxNewsPost } from "./src/ai";
+import {
+  generatePost,
+  generateImagePostData,
+  generateComment,
+  generateDM,
+  replyToDM,
+  checkIfWantsToSendImage,
+  createDMImageRequestPrompt,
+  summarizeDMHistory,
+  updateDMSummaryAndFacts,
+  testConnection,
+  generatePersona,
+  generateImage,
+  generateImagePrompt,
+  enrichDMImagePrompt,
+  generateNegativeImagePrompt,
+  generateGroupChatReply,
+  pickBestCommenter,
+  pickArchetype,
+  evaluateDynamicRelationship,
+  analyzeImage,
+  generateNewArc,
+  concludeArc,
+  updateCharacterArc,
+  generateNewUniverseArc,
+  updateUniverseArc,
+  concludeUniverseArc,
+  logApi,
+  generateNewsPost,
+  generateFauxNewsPost,
+} from "./src/ai";
 import { checkAndGenerateMissingRecaps } from "./src/recap";
 import { logPerformance } from "./src/logger";
 
 function saveBase64Image(base64String: string): string {
-  if (!base64String.startsWith('data:image/')) {
+  if (!base64String.startsWith("data:image/")) {
     return base64String; // Not a base64 image, return as is
   }
-  
-  const matches = base64String.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+
+  const matches = base64String.match(
+    /^data:image\/([A-Za-z-+\/]+);base64,(.+)$/,
+  );
   if (!matches || matches.length !== 3) {
     return base64String;
   }
 
-  const extension = matches[1] === 'jpeg' ? 'jpg' : matches[1];
-  const buffer = Buffer.from(matches[2], 'base64');
+  const extension = matches[1] === "jpeg" ? "jpg" : matches[1];
+  const buffer = Buffer.from(matches[2], "base64");
   const filename = `${crypto.randomUUID()}.${extension}`;
-  const uploadDir = path.join(process.cwd(), 'uploads');
-  
+  const uploadDir = path.join(process.cwd(), "uploads");
+
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
-  
+
   fs.writeFileSync(path.join(uploadDir, filename), buffer);
   return `/uploads/${filename}`;
 }
 
-async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId: number) {
+async function getDMSummaryAndHistory(
+  user1Id: number,
+  user2Id: number,
+  aiUserId: number,
+) {
   const minId = Math.min(user1Id, user2Id);
   const maxId = Math.max(user1Id, user2Id);
 
-  const summaryRow = db.prepare("SELECT * FROM dm_summaries WHERE user_id_1 = ? AND user_id_2 = ?").get(minId, maxId) as any;
+  const summaryRow = db
+    .prepare("SELECT * FROM dm_summaries WHERE user_id_1 = ? AND user_id_2 = ?")
+    .get(minId, maxId) as any;
   let currentSummary = summaryRow ? summaryRow.summary : null;
   let currentFacts = summaryRow ? summaryRow.facts : null;
   let lastMessageId = summaryRow ? summaryRow.last_message_id : 0;
 
-  const newMessages = db.prepare(`
-    SELECT id, sender_id, content, image_description, created_at 
+  const newMessages = db
+    .prepare(
+      `
+    SELECT id, sender_id, content, image_description, image_prompt, created_at 
     FROM direct_messages
     WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
       AND id > ?
     ORDER BY id ASC
-  `).all(user1Id, user2Id, user2Id, user1Id, lastMessageId) as any[];
+  `,
+    )
+    .all(user1Id, user2Id, user2Id, user1Id, lastMessageId) as any[];
 
   let messagesToSummarize: any[] = [];
   let recentMessages: any[] = [];
@@ -59,57 +101,81 @@ async function getDMSummaryAndHistory(user1Id: number, user2Id: number, aiUserId
     messagesToSummarize = newMessages.slice(0, splitIndex);
     recentMessages = newMessages.slice(splitIndex);
 
-    const char1 = db.prepare("SELECT display_name FROM users WHERE id = ?").get(minId);
-    const char2 = db.prepare("SELECT display_name FROM users WHERE id = ?").get(maxId);
+    const char1 = db
+      .prepare("SELECT display_name FROM users WHERE id = ?")
+      .get(minId);
+    const char2 = db
+      .prepare("SELECT display_name FROM users WHERE id = ?")
+      .get(maxId);
 
-    const formattedForSummary = messagesToSummarize.map(msg => ({
-      role: msg.sender_id === maxId ? 'user' : 'assistant',
-      content: msg.content,
-      created_at: msg.created_at
-    }));
+    const formattedForSummary = messagesToSummarize.map((msg) => {
+      let msgContent = msg.content;
+      const desc = msg.image_description || msg.image_prompt;
+      if (desc) {
+        msgContent += `\n\n[(IMAGE SENT) Description: ${desc}]`;
+      }
+      return {
+        role: msg.sender_id === maxId ? "user" : "assistant",
+        content: msgContent,
+        created_at: msg.created_at,
+      };
+    });
 
-    const updateResponse = await updateDMSummaryAndFacts(currentSummary, currentFacts, formattedForSummary, char1, char2);
+    const updateResponse = await updateDMSummaryAndFacts(
+      currentSummary,
+      currentFacts,
+      formattedForSummary,
+      char1,
+      char2,
+    );
     currentSummary = updateResponse.summary;
     currentFacts = updateResponse.facts;
     lastMessageId = messagesToSummarize[messagesToSummarize.length - 1].id;
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO dm_summaries (user_id_1, user_id_2, summary, facts, last_message_id) 
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(user_id_1, user_id_2) DO UPDATE SET 
         summary = excluded.summary, 
         facts = excluded.facts,
         last_message_id = excluded.last_message_id
-    `).run(minId, maxId, currentSummary, currentFacts, lastMessageId);
+    `,
+    ).run(minId, maxId, currentSummary, currentFacts, lastMessageId);
   } else {
     recentMessages = newMessages;
   }
 
   const formattedHistory: any[] = [];
-  
+
   if (currentFacts) {
     formattedHistory.push({
-      role: 'system',
-      content: `[PERMANENT RELATIONSHIP FACTS & MEMORIES]:\n${currentFacts}`
+      role: "system",
+      content: `[PERMANENT RELATIONSHIP FACTS & MEMORIES]:\n${currentFacts}`,
     });
   }
 
   if (currentSummary) {
     formattedHistory.push({
-      role: 'system',
-      content: `[Summary of older conversation]:\n${currentSummary}`
+      role: "system",
+      content: `[Summary of older conversation]:\n${currentSummary}`,
     });
   }
 
   for (const msg of recentMessages) {
     let msgContent = msg.content;
-    if (msg.image_description) {
-      msgContent += `\n\n[User sent an image. Description: ${msg.image_description}]`;
+    const desc = msg.image_description || msg.image_prompt;
+    if (desc) {
+      if (msg.sender_id === aiUserId) {
+        msgContent += `\n\n[You sent an image. Description/Prompt: ${desc}]`;
+      } else {
+        msgContent += `\n\n[User sent an image. Description: ${desc}]`;
+      }
     }
     formattedHistory.push({
-      role: msg.sender_id === aiUserId ? 'assistant' : 'user',
+      role: msg.sender_id === aiUserId ? "assistant" : "user",
       content: msgContent,
-      created_at: msg.created_at
+      created_at: msg.created_at,
     });
   }
 
@@ -125,24 +191,34 @@ const timeFormatters = new Map<string, Intl.DateTimeFormat>();
 function getFormatter(timezone: string) {
   if (!timeFormatters.has(timezone)) {
     try {
-      timeFormatters.set(timezone, new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone,
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: false
-      }));
+      timeFormatters.set(
+        timezone,
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: timezone,
+          hour: "numeric",
+          minute: "numeric",
+          hour12: false,
+        }),
+      );
     } catch (e) {
       console.warn(`Invalid timezone: ${timezone}, falling back to UTC`);
-      return getFormatter('UTC');
+      return getFormatter("UTC");
     }
   }
   return timeFormatters.get(timezone)!;
 }
 
-function scheduleNextNewsPost(user: any, timezone: string, forceTomorrow: boolean = false) {
+function scheduleNextNewsPost(
+  user: any,
+  timezone: string,
+  forceTomorrow: boolean = false,
+) {
   let onlineTimes: string[] = [];
   try {
-    onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : user.online_times;
+    onlineTimes =
+      typeof user.online_times === "string"
+        ? JSON.parse(user.online_times)
+        : user.online_times;
   } catch (e) {}
 
   if (!onlineTimes || onlineTimes.length === 0) {
@@ -151,37 +227,42 @@ function scheduleNextNewsPost(user: any, timezone: string, forceTomorrow: boolea
 
   // Pick a random window
   const window = onlineTimes[Math.floor(Math.random() * onlineTimes.length)];
-  const parts = window.split('-');
+  const parts = window.split("-");
   if (parts.length !== 2) return;
   const [start, end] = parts;
-  const [startH, startM] = start.trim().split(':').map(Number);
-  const [endH, endM] = end.trim().split(':').map(Number);
+  const [startH, startM] = start.trim().split(":").map(Number);
+  const [endH, endM] = end.trim().split(":").map(Number);
 
   const startTotal = startH * 60 + startM;
   let endTotal = endH * 60 + endM;
   if (endTotal <= startTotal) endTotal += 24 * 60; // Handle overnight windows
 
-  const randomMinute = Math.floor(Math.random() * (endTotal - startTotal)) + startTotal;
+  const randomMinute =
+    Math.floor(Math.random() * (endTotal - startTotal)) + startTotal;
   const targetHour = Math.floor(randomMinute / 60) % 24;
   const targetMinute = randomMinute % 60;
 
   // Calculate the next occurrence of this time in the given timezone
   const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-US', {
+  const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
-    year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', second: 'numeric',
-    hour12: false
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
   });
-  
+
   const parts2 = formatter.formatToParts(now);
   const tzDate = new Date(
-    parseInt(parts2.find(p => p.type === 'year')!.value),
-    parseInt(parts2.find(p => p.type === 'month')!.value) - 1,
-    parseInt(parts2.find(p => p.type === 'day')!.value),
-    parseInt(parts2.find(p => p.type === 'hour')!.value),
-    parseInt(parts2.find(p => p.type === 'minute')!.value),
-    parseInt(parts2.find(p => p.type === 'second')!.value)
+    parseInt(parts2.find((p) => p.type === "year")!.value),
+    parseInt(parts2.find((p) => p.type === "month")!.value) - 1,
+    parseInt(parts2.find((p) => p.type === "day")!.value),
+    parseInt(parts2.find((p) => p.type === "hour")!.value),
+    parseInt(parts2.find((p) => p.type === "minute")!.value),
+    parseInt(parts2.find((p) => p.type === "second")!.value),
   );
 
   let scheduledDate = new Date(tzDate);
@@ -198,27 +279,34 @@ function scheduleNextNewsPost(user: any, timezone: string, forceTomorrow: boolea
   const offset = tzDate.getTime() - now.getTime();
   const utcScheduledDate = new Date(scheduledDate.getTime() - offset);
 
-  db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ?").run(utcScheduledDate.toISOString(), user.id);
+  db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ?").run(
+    utcScheduledDate.toISOString(),
+    user.id,
+  );
   user.next_scheduled_post = utcScheduledDate.toISOString();
 }
 
 function scheduleNextFauxNewsPost(user: any, timezone: string) {
   const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-US', {
+  const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
-    year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', second: 'numeric',
-    hour12: false
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
   });
-  
+
   const parts = formatter.formatToParts(now);
   const tzDate = new Date(
-    parseInt(parts.find(p => p.type === 'year')!.value),
-    parseInt(parts.find(p => p.type === 'month')!.value) - 1,
-    parseInt(parts.find(p => p.type === 'day')!.value),
-    parseInt(parts.find(p => p.type === 'hour')!.value),
-    parseInt(parts.find(p => p.type === 'minute')!.value),
-    parseInt(parts.find(p => p.type === 'second')!.value)
+    parseInt(parts.find((p) => p.type === "year")!.value),
+    parseInt(parts.find((p) => p.type === "month")!.value) - 1,
+    parseInt(parts.find((p) => p.type === "day")!.value),
+    parseInt(parts.find((p) => p.type === "hour")!.value),
+    parseInt(parts.find((p) => p.type === "minute")!.value),
+    parseInt(parts.find((p) => p.type === "second")!.value),
   );
 
   const targetHours = [8, 15, 22];
@@ -244,43 +332,61 @@ function scheduleNextFauxNewsPost(user: any, timezone: string) {
   const offset = tzDate.getTime() - now.getTime();
   const utcScheduledDate = new Date(nextScheduledDate.getTime() - offset);
 
-  db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ?").run(utcScheduledDate.toISOString(), user.id);
+  db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ?").run(
+    utcScheduledDate.toISOString(),
+    user.id,
+  );
   user.next_scheduled_post = utcScheduledDate.toISOString();
 }
 
-const timeMinutesCache = new Map<string, { minutes: number, timestamp: number }>();
+const timeMinutesCache = new Map<
+  string,
+  { minutes: number; timestamp: number }
+>();
 
-function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserIds?: Set<number>, precalculatedTime?: { currentTimeInMinutes: number }) {
+function getDeterministicOnlineStatus(
+  user: any,
+  timezone: string,
+  recentDmUserIds?: Set<number>,
+  precalculatedTime?: { currentTimeInMinutes: number },
+) {
   const userId = user.id;
   if (!userId) return true;
   if (user.is_ai === 0) return true;
 
   const now = Date.now();
-  
+
   if (user.forced_online_until) {
     const forcedUntil = new Date(user.forced_online_until).getTime();
     if (forcedUntil > now) return true;
   }
-  
+
   // 1. Check for recent DMs from real users (Read-only)
   if (recentDmUserIds) {
     if (recentDmUserIds.has(userId)) return true;
   } else {
     const fifteenMinsAgo = new Date(now - 15 * 60 * 1000).toISOString();
-    const recentDm = db.prepare(`
+    const recentDm = db
+      .prepare(
+        `
       SELECT 1 FROM direct_messages dm
       JOIN users u ON dm.sender_id = u.id
       WHERE dm.receiver_id = ? AND u.is_ai = 0 AND dm.created_at >= ?
       LIMIT 1
-    `).get(userId, fifteenMinsAgo);
+    `,
+      )
+      .get(userId, fifteenMinsAgo);
     if (recentDm) return true;
   }
 
   // 2. Check timeframe
   let inOnlineTimeframe = true;
-  if (user.online_times && user.online_times !== '[]') {
+  if (user.online_times && user.online_times !== "[]") {
     try {
-      const onlineTimes = typeof user.online_times === 'string' ? JSON.parse(user.online_times) : user.online_times;
+      const onlineTimes =
+        typeof user.online_times === "string"
+          ? JSON.parse(user.online_times)
+          : user.online_times;
       if (onlineTimes && onlineTimes.length > 0) {
         let currentTimeInMinutes: number;
         if (precalculatedTime) {
@@ -291,24 +397,29 @@ function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserI
             currentTimeInMinutes = cached.minutes;
           } else {
             const localTime = getFormatter(timezone).format(new Date(now));
-            let [currentHour, currentMinute] = localTime.split(':').map(Number);
+            let [currentHour, currentMinute] = localTime.split(":").map(Number);
             if (currentHour === 24) currentHour = 0;
             currentTimeInMinutes = currentHour * 60 + currentMinute;
-            timeMinutesCache.set(timezone, { minutes: currentTimeInMinutes, timestamp: now });
+            timeMinutesCache.set(timezone, {
+              minutes: currentTimeInMinutes,
+              timestamp: now,
+            });
           }
         }
 
         inOnlineTimeframe = onlineTimes.some((window: string) => {
-          const parts = window.split('-');
+          const parts = window.split("-");
           if (parts.length !== 2) return false;
           const [start, end] = parts;
-          const [startH, startM] = start.trim().split(':').map(Number);
-          const [endH, endM] = end.trim().split(':').map(Number);
+          const [startH, startM] = start.trim().split(":").map(Number);
+          const [endH, endM] = end.trim().split(":").map(Number);
           const startTotal = startH * 60 + startM;
           const endTotal = endH * 60 + endM;
-          return startTotal < endTotal 
-            ? (currentTimeInMinutes >= startTotal && currentTimeInMinutes < endTotal)
-            : (currentTimeInMinutes >= startTotal || currentTimeInMinutes < endTotal);
+          return startTotal < endTotal
+            ? currentTimeInMinutes >= startTotal &&
+                currentTimeInMinutes < endTotal
+            : currentTimeInMinutes >= startTotal ||
+                currentTimeInMinutes < endTotal;
         });
       }
     } catch (e) {}
@@ -316,47 +427,65 @@ function getDeterministicOnlineStatus(user: any, timezone: string, recentDmUserI
 
   // 3. Deterministic "Random" check
   const activityLevel = user.activity_level ?? 5;
-  const chance = inOnlineTimeframe ? (50 + (5 * activityLevel)) : (2 * activityLevel);
-  
+  const chance = inOnlineTimeframe ? 50 + 5 * activityLevel : 2 * activityLevel;
+
   // Seed changes every 15 minutes to keep status stable but dynamic
   const interval = Math.floor(now / (15 * 60 * 1000));
   const seed = userId * 10000 + interval;
   const x = Math.sin(seed) * 10000;
   const randomValue = (x - Math.floor(x)) * 100;
-  
+
   return randomValue < chance;
 }
 
-function isUserOnline(user: any, timezone: string, recentDmUserIds?: Set<number>, precalculatedTime?: { currentTimeInMinutes: number }) {
+function isUserOnline(
+  user: any,
+  timezone: string,
+  recentDmUserIds?: Set<number>,
+  precalculatedTime?: { currentTimeInMinutes: number },
+) {
   // Determine the correct user ID based on the object structure
   let userId = user.id;
-  if (user.ai_user_id) userId = user.ai_user_id; // From unrepliedMentions
+  if (user.ai_user_id)
+    userId = user.ai_user_id; // From unrepliedMentions
   else if (user.receiver_id && user.sender_id) userId = user.receiver_id; // From unrepliedDms
 
   if (!userId) return true;
 
   let dbUser = user;
-  if (user.is_ai === undefined || user.online_times === undefined || user.activity_level === undefined) {
+  if (
+    user.is_ai === undefined ||
+    user.online_times === undefined ||
+    user.activity_level === undefined
+  ) {
     dbUser = db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as any;
     if (!dbUser) return true;
   }
 
-  const isOnline = getDeterministicOnlineStatus(dbUser, timezone, recentDmUserIds, precalculatedTime);
-  
+  const isOnline = getDeterministicOnlineStatus(
+    dbUser,
+    timezone,
+    recentDmUserIds,
+    precalculatedTime,
+  );
+
   // Update the object in memory so subsequent checks in the same loop are consistent
   user.current_online_status = isOnline ? 1 : 0;
   // Set a fake expiry so frontend/other logic thinks it's valid for a bit
-  user.status_expires_at = Date.now() + (15 * 60 * 1000); 
+  user.status_expires_at = Date.now() + 15 * 60 * 1000;
 
   return isOnline;
 }
 
 function pickWeightedRandomUser(users: any[]) {
   if (!users || users.length === 0) return null;
-  const totalWeight = users.reduce((sum, u) => sum + (u.activity_level ?? 5), 0);
+  const totalWeight = users.reduce(
+    (sum, u) => sum + (u.activity_level ?? 5),
+    0,
+  );
   let random = Math.random() * totalWeight;
   for (const user of users) {
-    random -= (user.activity_level ?? 5);
+    random -= user.activity_level ?? 5;
     if (random <= 0) return user;
   }
   return users[users.length - 1];
@@ -364,45 +493,93 @@ function pickWeightedRandomUser(users: any[]) {
 
 async function checkDynamicRelationship(user1Id: number, user2Id: number) {
   if (user1Id === user2Id) return;
-  
-  const user1 = db.prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?").get(user1Id) as any;
-  const user2 = db.prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?").get(user2Id) as any;
+
+  const user1 = db
+    .prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?")
+    .get(user1Id) as any;
+  const user2 = db
+    .prepare("SELECT account_type, universe_id, is_ai FROM users WHERE id = ?")
+    .get(user2Id) as any;
 
   if (!user1 || !user2) return;
 
   // News accounts cannot form relationships
-  if (user1.account_type === 'news' || user2.account_type === 'news') return;
+  if (user1.account_type === "news" || user2.account_type === "news") return;
 
-  const isUser1Company = user1.account_type === 'company';
-  const isUser2Company = user2.account_type === 'company';
+  const isUser1Company = user1.account_type === "company";
+  const isUser2Company = user2.account_type === "company";
 
   // Companies cannot form relationships with characters
-  if ((isUser1Company && !isUser2Company) || (!isUser1Company && isUser2Company)) return;
+  if (
+    (isUser1Company && !isUser2Company) ||
+    (!isUser1Company && isUser2Company)
+  )
+    return;
 
   // If both are companies, they must be from the same universe
-  if (isUser1Company && isUser2Company && user1.universe_id !== user2.universe_id) return;
+  if (
+    isUser1Company &&
+    isUser2Company &&
+    user1.universe_id !== user2.universe_id
+  )
+    return;
 
   // Check if relationship already exists
-  const existingRel = db.prepare("SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any;
+  const existingRel = db
+    .prepare(
+      "SELECT * FROM relationships WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)",
+    )
+    .get(user1Id, user2Id, user2Id, user1Id) as any;
 
   // Get interaction counts using individual join queries for better performance
-  const count1 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user1Id, user2Id) as any).count;
-  const count2 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user2Id, user1Id) as any).count;
-  const count3 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN comments p ON c.parent_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user1Id, user2Id) as any).count;
-  const count4 = (db.prepare(`SELECT COUNT(c.id) as count FROM comments c JOIN comments p ON c.parent_id = p.id WHERE c.user_id = ? AND p.user_id = ?`).get(user2Id, user1Id) as any).count;
+  const count1 = (
+    db
+      .prepare(
+        `SELECT COUNT(c.id) as count FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.user_id = ? AND p.user_id = ?`,
+      )
+      .get(user1Id, user2Id) as any
+  ).count;
+  const count2 = (
+    db
+      .prepare(
+        `SELECT COUNT(c.id) as count FROM comments c JOIN posts p ON c.post_id = p.id WHERE c.user_id = ? AND p.user_id = ?`,
+      )
+      .get(user2Id, user1Id) as any
+  ).count;
+  const count3 = (
+    db
+      .prepare(
+        `SELECT COUNT(c.id) as count FROM comments c JOIN comments p ON c.parent_id = p.id WHERE c.user_id = ? AND p.user_id = ?`,
+      )
+      .get(user1Id, user2Id) as any
+  ).count;
+  const count4 = (
+    db
+      .prepare(
+        `SELECT COUNT(c.id) as count FROM comments c JOIN comments p ON c.parent_id = p.id WHERE c.user_id = ? AND p.user_id = ?`,
+      )
+      .get(user2Id, user1Id) as any
+  ).count;
   const commentsCount = count1 + count2 + count3 + count4;
 
-  const dmsCount = (db.prepare(`
+  const dmsCount = (
+    db
+      .prepare(
+        `
     SELECT COUNT(*) as count FROM direct_messages 
     WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-  `).get(user1Id, user2Id, user2Id, user1Id) as any).count;
+  `,
+      )
+      .get(user1Id, user2Id, user2Id, user1Id) as any
+  ).count;
 
   let expectedChecks = 0;
   const isCrossUniverse = user1.universe_id !== user2.universe_id;
 
   if (existingRel) {
     // If relationship exists, check every 20 comments or 100 DMs
-    expectedChecks = Math.floor(commentsCount / 20) + Math.floor(dmsCount / 100);
+    expectedChecks =
+      Math.floor(commentsCount / 20) + Math.floor(dmsCount / 100);
   } else {
     // If no relationship, check every 10 comments or 40 DMs
     expectedChecks = Math.floor(commentsCount / 10) + Math.floor(dmsCount / 40);
@@ -410,16 +587,28 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
 
   if (expectedChecks <= 0) return;
 
-  const actualChecks = (db.prepare("SELECT COUNT(*) as count FROM relationship_checks WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)").get(user1Id, user2Id, user2Id, user1Id) as any).count;
+  const actualChecks = (
+    db
+      .prepare(
+        "SELECT COUNT(*) as count FROM relationship_checks WHERE (user_id_1 = ? AND user_id_2 = ?) OR (user_id_1 = ? AND user_id_2 = ?)",
+      )
+      .get(user1Id, user2Id, user2Id, user1Id) as any
+  ).count;
 
   if (expectedChecks > actualChecks) {
     // Perform check
-    const user1 = db.prepare("SELECT * FROM users WHERE id = ?").get(user1Id) as any;
-    const user2 = db.prepare("SELECT * FROM users WHERE id = ?").get(user2Id) as any;
+    const user1 = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(user1Id) as any;
+    const user2 = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(user2Id) as any;
     if (!user1 || !user2) return;
 
     // Get recent interactions
-    const recentComments = db.prepare(`
+    const recentComments = db
+      .prepare(
+        `
       SELECT c.content, c.created_at, u1.display_name as commenter, u2.display_name as poster, p.content as post_content
       FROM comments c
       JOIN users u1 ON c.user_id = u1.id
@@ -427,107 +616,187 @@ async function checkDynamicRelationship(user1Id: number, user2Id: number) {
       JOIN users u2 ON p.user_id = u2.id
       WHERE (c.user_id = ? AND p.user_id = ?) OR (c.user_id = ? AND p.user_id = ?)
       ORDER BY c.created_at DESC LIMIT 10
-    `).all(user1Id, user2Id, user2Id, user1Id) as any[];
+    `,
+      )
+      .all(user1Id, user2Id, user2Id, user1Id) as any[];
 
-    const recentDms = db.prepare(`
+    const recentDms = db
+      .prepare(
+        `
       SELECT dm.content, dm.created_at, u.display_name as sender
       FROM direct_messages dm
       JOIN users u ON dm.sender_id = u.id
       WHERE (dm.sender_id = ? AND dm.receiver_id = ?) OR (dm.sender_id = ? AND dm.receiver_id = ?)
       ORDER BY dm.created_at DESC LIMIT 10
-    `).all(user1Id, user2Id, user2Id, user1Id) as any[];
+    `,
+      )
+      .all(user1Id, user2Id, user2Id, user1Id) as any[];
 
     // Calculate difficulty
-    const u1Rels = (db.prepare("SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").get(user1Id, user1Id) as any).count;
-    const u2Rels = (db.prepare("SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").get(user2Id, user2Id) as any).count;
+    const u1Rels = (
+      db
+        .prepare(
+          "SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?",
+        )
+        .get(user1Id, user1Id) as any
+    ).count;
+    const u2Rels = (
+      db
+        .prepare(
+          "SELECT COUNT(*) as count FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?",
+        )
+        .get(user2Id, user2Id) as any
+    ).count;
     const minRels = Math.min(u1Rels, u2Rels);
-    
+
     let difficulty = "Easy";
     if (minRels >= 10) difficulty = "Hard";
     else if (minRels >= 5) difficulty = "Medium";
 
-    const { result, description } = await evaluateDynamicRelationship(user1, user2, recentComments, recentDms, difficulty, existingRel?.description, isCrossUniverse);
+    const { result, description } = await evaluateDynamicRelationship(
+      user1,
+      user2,
+      recentComments,
+      recentDms,
+      difficulty,
+      existingRel?.description,
+      isCrossUniverse,
+    );
 
     const u1 = Math.min(user1Id, user2Id);
     const u2 = Math.max(user1Id, user2Id);
 
-    db.prepare("INSERT OR IGNORE INTO relationship_checks (user_id_1, user_id_2, interaction_threshold, result, description, is_update) VALUES (?, ?, ?, ?, ?, ?)").run(
-      u1, u2, expectedChecks, result ? 1 : 0, description || null, existingRel ? 1 : 0
+    db.prepare(
+      "INSERT OR IGNORE INTO relationship_checks (user_id_1, user_id_2, interaction_threshold, result, description, is_update) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      u1,
+      u2,
+      expectedChecks,
+      result ? 1 : 0,
+      description || null,
+      existingRel ? 1 : 0,
     );
 
     if (result && description) {
       if (existingRel) {
-        db.prepare("UPDATE relationships SET description = ? WHERE id = ?").run(description, existingRel.id);
-        console.log(`Dynamic relationship updated between ${user1.display_name} and ${user2.display_name}: ${description}`);
+        db.prepare("UPDATE relationships SET description = ? WHERE id = ?").run(
+          description,
+          existingRel.id,
+        );
+        console.log(
+          `Dynamic relationship updated between ${user1.display_name} and ${user2.display_name}: ${description}`,
+        );
       } else {
-        db.prepare("INSERT OR IGNORE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(u1, u2, description);
-        console.log(`Dynamic relationship formed between ${user1.display_name} and ${user2.display_name}: ${description}`);
+        db.prepare(
+          "INSERT OR IGNORE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)",
+        ).run(u1, u2, description);
+        console.log(
+          `Dynamic relationship formed between ${user1.display_name} and ${user2.display_name}: ${description}`,
+        );
       }
     } else {
-      console.log(`Dynamic relationship check failed for ${user1.display_name} and ${user2.display_name}`);
+      console.log(
+        `Dynamic relationship check failed for ${user1.display_name} and ${user2.display_name}`,
+      );
     }
   }
 }
 
-function filterAvailableUsersForComment(opId: number, availableAiUsers: any[], postId?: number) {
+function filterAvailableUsersForComment(
+  opId: number,
+  availableAiUsers: any[],
+  postId?: number,
+) {
   if (!availableAiUsers || availableAiUsers.length === 0) return [];
 
-  const settings = db.prepare("SELECT cross_universe_prob FROM settings WHERE id = 1").get() as any;
+  const settings = db
+    .prepare("SELECT cross_universe_prob FROM settings WHERE id = 1")
+    .get() as any;
   const crossUniverseProb = (settings?.cross_universe_prob ?? 50.0) / 100;
 
-  const opUser = db.prepare("SELECT universe_id, account_type FROM users WHERE id = ?").get(opId) as any;
+  const opUser = db
+    .prepare("SELECT universe_id, account_type FROM users WHERE id = ?")
+    .get(opId) as any;
   let opUniverseId = opUser?.universe_id;
-  let opAccountType = opUser?.account_type || 'character';
+  let opAccountType = opUser?.account_type || "character";
 
   let isNewsPost = false;
   if (postId) {
-    const post = db.prepare("SELECT u.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
-    if (post?.account_type === 'news' || post?.post_type === 'news') {
+    const post = db
+      .prepare(
+        "SELECT u.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?",
+      )
+      .get(postId) as any;
+    if (post?.account_type === "news" || post?.post_type === "news") {
       isNewsPost = true;
       opUniverseId = post.universe_id;
     }
   }
 
-  const filteredAiUsers = availableAiUsers.filter(u => {
+  const filteredAiUsers = availableAiUsers.filter((u) => {
     // Company commenting logic
-    if (u.account_type === 'company') {
-      const companyCommentProb = opAccountType === 'company' ? 0.1 : 0.02;
+    if (u.account_type === "company") {
+      const companyCommentProb = opAccountType === "company" ? 0.1 : 0.02;
       if (Math.random() > companyCommentProb) return false;
     }
 
-    if (opAccountType === 'faux_news') return true; // Faux news is multiversal, anyone can reply
+    if (opAccountType === "faux_news") return true; // Faux news is multiversal, anyone can reply
     if (u.universe_id === opUniverseId) return true;
     // News posts are strictly universe-locked for comments and replies
-    if (opAccountType === 'news' || isNewsPost) return false;
+    if (opAccountType === "news" || isNewsPost) return false;
     return Math.random() < crossUniverseProb;
   });
 
   if (filteredAiUsers.length === 0) return [];
 
   // 1. ALL Users who the OP has a relationship with
-  const relationships = db.prepare("SELECT user_id_1, user_id_2 FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").all(opId, opId) as any[];
-  const relatedUserIds = new Set(relationships.flatMap(r => [r.user_id_1, r.user_id_2]).filter(id => id !== opId));
+  const relationships = db
+    .prepare(
+      "SELECT user_id_1, user_id_2 FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?",
+    )
+    .all(opId, opId) as any[];
+  const relatedUserIds = new Set(
+    relationships
+      .flatMap((r) => [r.user_id_1, r.user_id_2])
+      .filter((id) => id !== opId),
+  );
 
   // 2. Users following OP
-  const followers = db.prepare("SELECT follower_id FROM follows WHERE followed_id = ?").all(opId) as any[];
-  const followerIds = new Set(followers.map(f => f.follower_id));
+  const followers = db
+    .prepare("SELECT follower_id FROM follows WHERE followed_id = ?")
+    .all(opId) as any[];
+  const followerIds = new Set(followers.map((f) => f.follower_id));
 
-  const relatedUsers = filteredAiUsers.filter(u => relatedUserIds.has(u.id));
+  const relatedUsers = filteredAiUsers.filter((u) => relatedUserIds.has(u.id));
 
   // Up to 20 Users who are following OP (excluding related users)
-  const followerUsers = filteredAiUsers.filter(u => followerIds.has(u.id) && !relatedUserIds.has(u.id));
-  const selectedFollowers = followerUsers.sort(() => 0.5 - Math.random()).slice(0, 20);
+  const followerUsers = filteredAiUsers.filter(
+    (u) => followerIds.has(u.id) && !relatedUserIds.has(u.id),
+  );
+  const selectedFollowers = followerUsers
+    .sort(() => 0.5 - Math.random())
+    .slice(0, 20);
 
   // 20 Additional, random Users (excluding related users and selected followers)
-  const selectedFollowerIds = new Set(selectedFollowers.map(u => u.id));
-  const remainingUsers = filteredAiUsers.filter(u => !relatedUserIds.has(u.id) && !selectedFollowerIds.has(u.id));
-  const randomUsers = remainingUsers.sort(() => 0.5 - Math.random()).slice(0, 20);
+  const selectedFollowerIds = new Set(selectedFollowers.map((u) => u.id));
+  const remainingUsers = filteredAiUsers.filter(
+    (u) => !relatedUserIds.has(u.id) && !selectedFollowerIds.has(u.id),
+  );
+  const randomUsers = remainingUsers
+    .sort(() => 0.5 - Math.random())
+    .slice(0, 20);
 
   return [...relatedUsers, ...selectedFollowers, ...randomUsers];
 }
 
-function addLikesToPostOrComment(postId: number, commentId: number | null, count: number) {
-  const aiUsers = db.prepare("SELECT id FROM users WHERE is_ai = 1 AND is_active = 1").all() as any[];
+function addLikesToPostOrComment(
+  postId: number,
+  commentId: number | null,
+  count: number,
+) {
+  const aiUsers = db
+    .prepare("SELECT id FROM users WHERE is_ai = 1 AND is_active = 1")
+    .all() as any[];
   if (aiUsers.length === 0) return;
 
   const shuffled = aiUsers.sort(() => 0.5 - Math.random());
@@ -536,9 +805,14 @@ function addLikesToPostOrComment(postId: number, commentId: number | null, count
   for (const user of selected) {
     try {
       if (commentId) {
-        db.prepare("INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)").run(commentId, user.id);
+        db.prepare(
+          "INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)",
+        ).run(commentId, user.id);
       } else {
-        db.prepare("INSERT INTO likes (post_id, user_id) VALUES (?, ?)").run(postId, user.id);
+        db.prepare("INSERT INTO likes (post_id, user_id) VALUES (?, ?)").run(
+          postId,
+          user.id,
+        );
       }
     } catch (e) {
       // Already liked
@@ -546,27 +820,50 @@ function addLikesToPostOrComment(postId: number, commentId: number | null, count
   }
 }
 
-async function triggerPostComments(postId: number, postType: string, isForced: boolean = false) {
-  const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+async function triggerPostComments(
+  postId: number,
+  postType: string,
+  isForced: boolean = false,
+) {
+  const settings = db
+    .prepare("SELECT * FROM settings WHERE id = 1")
+    .get() as any;
   if (!settings || !settings.ai_enabled) return;
 
   const allUsers = db.prepare("SELECT * FROM users").all() as any[];
-  const onlineUsers = allUsers.filter(u => isUserOnline(u, settings.timezone || 'UTC'));
-  const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
+  const onlineUsers = allUsers.filter((u) =>
+    isUserOnline(u, settings.timezone || "UTC"),
+  );
+  const onlineRatio =
+    allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
-  const postAuthor = db.prepare("SELECT u.is_ai, p.universe_id FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(postId) as any;
+  const postAuthor = db
+    .prepare(
+      "SELECT u.is_ai, p.universe_id FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?",
+    )
+    .get(postId) as any;
   if (!postAuthor) return;
 
   if (postAuthor.universe_id) {
-    const universe = db.prepare("SELECT is_paused FROM universes WHERE id = ?").get(postAuthor.universe_id) as any;
+    const universe = db
+      .prepare("SELECT is_paused FROM universes WHERE id = ?")
+      .get(postAuthor.universe_id) as any;
     if (universe && universe.is_paused) return; // Ignore if universe is paused
   }
 
   const isRealUserPost = postAuthor.is_ai === 0;
 
-  const baseCount = (postType === 'question' || postType === 'discussion' || postType === 'seeking_advice') ? 5 : 3;
-  let count = Math.max(0, Math.round((isRealUserPost ? 10 : baseCount) * onlineRatio));
-  
+  const baseCount =
+    postType === "question" ||
+    postType === "discussion" ||
+    postType === "seeking_advice"
+      ? 5
+      : 3;
+  let count = Math.max(
+    0,
+    Math.round((isRealUserPost ? 10 : baseCount) * onlineRatio),
+  );
+
   if (isRealUserPost && isForced) {
     // Real users should get 6-10 comments initially
     if (count < 6) count = 6 + Math.floor(Math.random() * 3); // 6, 7, or 8
@@ -574,25 +871,32 @@ async function triggerPostComments(postId: number, postType: string, isForced: b
   } else if (isForced && count < 2) {
     count = 2; // Ensure at least 2 comments for forced posts
   }
-  
+
   if (count === 0) return;
 
   const commentedUserIds = new Set<number>();
-  
+
   for (let i = 0; i < count; i++) {
     // Wait a bit to simulate typing/reading
-    await new Promise(resolve => setTimeout(resolve, 5000 + Math.random() * 10000));
-    
-    const post = db.prepare(`
+    await new Promise((resolve) =>
+      setTimeout(resolve, 5000 + Math.random() * 10000),
+    );
+
+    const post = db
+      .prepare(
+        `
       SELECT p.*, u.display_name as author_name, u.bio as author_bio, u.is_ai 
       FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?
-    `).get(postId) as any;
-    
+    `,
+      )
+      .get(postId) as any;
+
     if (!post) break;
 
-    let aiUsersQuery = "SELECT * FROM users WHERE is_ai = 1 AND is_active = 1 AND id != ?";
+    let aiUsersQuery =
+      "SELECT * FROM users WHERE is_ai = 1 AND is_active = 1 AND id != ?";
     let aiUsersParams = [post.user_id];
-    
+
     if (post.is_ai === 0) {
       aiUsersQuery = `
         SELECT u.* FROM users u 
@@ -603,49 +907,109 @@ async function triggerPostComments(postId: number, postType: string, isForced: b
     }
 
     if (post.universe_id) {
-      aiUsersQuery += post.is_ai === 0 ? ` AND u.universe_id = ?` : ` AND universe_id = ?`;
+      aiUsersQuery +=
+        post.is_ai === 0 ? ` AND u.universe_id = ?` : ` AND universe_id = ?`;
       aiUsersParams.push(post.universe_id);
     }
 
     const aiUsers = db.prepare(aiUsersQuery).all(...aiUsersParams) as any[];
-    const existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(postId).map((r: any) => r.user_id);
-    const availableAiUsers = aiUsers.filter(u => {
-      const isOnline = isForced ? true : isUserOnline(u, settings.timezone || 'UTC');
-      return isOnline && !commentedUserIds.has(u.id) && !existingRepliers.includes(u.id) && !pendingComments.has(`${u.id}:post:${postId}`);
+    const existingRepliers = db
+      .prepare(
+        "SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL",
+      )
+      .all(postId)
+      .map((r: any) => r.user_id);
+    const availableAiUsers = aiUsers.filter((u) => {
+      const isOnline = isForced
+        ? true
+        : isUserOnline(u, settings.timezone || "UTC");
+      return (
+        isOnline &&
+        !commentedUserIds.has(u.id) &&
+        !existingRepliers.includes(u.id) &&
+        !pendingComments.has(`${u.id}:post:${postId}`)
+      );
     });
     if (availableAiUsers.length === 0) continue;
 
-    const candidateUsers = filterAvailableUsersForComment(post.user_id, availableAiUsers, postId);
+    const candidateUsers = filterAvailableUsersForComment(
+      post.user_id,
+      availableAiUsers,
+      postId,
+    );
     if (candidateUsers.length === 0) continue;
 
     const chosenAiId = await pickBestCommenter(post, candidateUsers);
-    const randomAi = candidateUsers.find(u => u.id === chosenAiId) || candidateUsers[0];
+    const randomAi =
+      candidateUsers.find((u) => u.id === chosenAiId) || candidateUsers[0];
     commentedUserIds.add(randomAi.id);
     pendingComments.add(`${randomAi.id}:post:${postId}`);
 
-    const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(postId).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
-    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, post.user_id) as any;
-    const relContext = rel ? rel.description : '';
+    const otherComments = db
+      .prepare(
+        "SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5",
+      )
+      .all(postId)
+      .map((c: any) => `[${c.created_at}] ${c.content}`)
+      .join(" | ");
+    const rel = db
+      .prepare(
+        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+      )
+      .get(randomAi.id, post.user_id) as any;
+    const relContext = rel ? rel.description : "";
 
     try {
-      const commentData = await generateComment(randomAi, post.content, post.author_name, otherComments, false, relContext, post.user_id, post.image_prompt, post.created_at);
+      const commentData = await generateComment(
+        randomAi,
+        post.content,
+        post.author_name,
+        otherComments,
+        false,
+        relContext,
+        post.user_id,
+        post.image_prompt,
+        post.created_at,
+      );
       if (commentData) {
-        const info = db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-          .run(postId, randomAi.id, commentData.content, commentData.internal_thought);
-        checkDynamicRelationship(randomAi.id, post.user_id).catch(console.error);
-        console.log(`${randomAi.display_name} auto-commented on post ${postId}`);
+        const info = db
+          .prepare(
+            "INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+          )
+          .run(
+            postId,
+            randomAi.id,
+            commentData.content,
+            commentData.internal_thought,
+          );
+        checkDynamicRelationship(randomAi.id, post.user_id).catch(
+          console.error,
+        );
+        console.log(
+          `${randomAi.display_name} auto-commented on post ${postId}`,
+        );
 
         // Add 1-5 likes to the post
-        addLikesToPostOrComment(postId, null, Math.floor(Math.random() * 5) + 1);
+        addLikesToPostOrComment(
+          postId,
+          null,
+          Math.floor(Math.random() * 5) + 1,
+        );
 
-        const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(post.user_id) as any;
+        const postAuthor = db
+          .prepare("SELECT id, is_ai FROM users WHERE id = ?")
+          .get(post.user_id) as any;
         if (postAuthor && postAuthor.is_ai === 0) {
-          db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-            .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
+          db.prepare(
+            "INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)",
+          ).run(postAuthor.id, randomAi.id, info.lastInsertRowid);
         }
       }
     } catch (err) {
-      console.error(`Failed to auto-comment on post ${postId} by ${randomAi.display_name}:`, err);
+      console.error(
+        `Failed to auto-comment on post ${postId} by ${randomAi.display_name}:`,
+        err,
+      );
     } finally {
       pendingComments.delete(`${randomAi.id}:post:${postId}`);
     }
@@ -656,33 +1020,43 @@ function buildThreadContext(commentId: number): string {
   let context = [];
   let currentCommentId = commentId;
   while (currentCommentId) {
-    const comment = db.prepare(`
+    const comment = db
+      .prepare(
+        `
       SELECT c.*, u.display_name, p.content as post_content, p.created_at as post_created_at, pu.display_name as post_author
       FROM comments c
       JOIN users u ON c.user_id = u.id
       JOIN posts p ON c.post_id = p.id
       JOIN users pu ON p.user_id = pu.id
       WHERE c.id = ?
-    `).get(currentCommentId) as any;
-    
+    `,
+      )
+      .get(currentCommentId) as any;
+
     if (!comment) break;
-    
-    context.unshift(`[${comment.created_at}] ${comment.display_name}: "${comment.content}"`);
-    
+
+    context.unshift(
+      `[${comment.created_at}] ${comment.display_name}: "${comment.content}"`,
+    );
+
     if (!comment.parent_id) {
-      context.unshift(`[${comment.post_created_at}] Original Post by ${comment.post_author}: "${comment.post_content}"`);
+      context.unshift(
+        `[${comment.post_created_at}] Original Post by ${comment.post_author}: "${comment.post_content}"`,
+      );
       break;
     }
     currentCommentId = comment.parent_id;
   }
-  return context.join('\n');
+  return context.join("\n");
 }
 
 function getCommentDepth(commentId: number): number {
   let depth = 1;
   let currentCommentId = commentId;
   while (currentCommentId) {
-    const comment = db.prepare("SELECT parent_id FROM comments WHERE id = ?").get(currentCommentId) as any;
+    const comment = db
+      .prepare("SELECT parent_id FROM comments WHERE id = ?")
+      .get(currentCommentId) as any;
     if (!comment || !comment.parent_id) break;
     currentCommentId = comment.parent_id;
     depth++;
@@ -691,11 +1065,15 @@ function getCommentDepth(commentId: number): number {
 }
 
 function isAITooSoonToDM(aiId: number, userId: number): boolean {
-  const recentDMs = db.prepare(`
+  const recentDMs = db
+    .prepare(
+      `
     SELECT sender_id, created_at FROM direct_messages 
     WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
     ORDER BY id DESC LIMIT 20
-  `).all(aiId, userId, userId, aiId) as any[];
+  `,
+    )
+    .all(aiId, userId, userId, aiId) as any[];
 
   if (recentDMs.length === 0) return false;
 
@@ -705,7 +1083,7 @@ function isAITooSoonToDM(aiId: number, userId: number): boolean {
   for (const dm of recentDMs) {
     if (dm.sender_id === aiId) {
       consecutiveAIs++;
-      if (!lastAITime) lastAITime = new Date(dm.created_at + 'Z').getTime();
+      if (!lastAITime) lastAITime = new Date(dm.created_at + "Z").getTime();
     } else {
       break;
     }
@@ -723,10 +1101,14 @@ function isAITooSoonToDM(aiId: number, userId: number): boolean {
 }
 
 async function handleOPReplies() {
-  const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+  const settings = db
+    .prepare("SELECT * FROM settings WHERE id = 1")
+    .get() as any;
   if (!settings || !settings.ai_enabled) return;
 
-  const unansweredComments = db.prepare(`
+  const unansweredComments = db
+    .prepare(
+      `
     SELECT c.*, p.user_id as op_id, p.content as post_content, u.display_name as author_name, u.is_ai as author_is_ai,
            COALESCE(parent_c.user_id, p.user_id) as target_op_id
     FROM comments c
@@ -743,56 +1125,85 @@ async function handleOPReplies() {
       WHERE reply.parent_id = c.id AND reply.user_id = op.id
     )
     ORDER BY c.created_at DESC LIMIT 20
-  `).all() as any[];
+  `,
+    )
+    .all() as any[];
 
   for (const comment of unansweredComments) {
     // Real user comments: 100% reply. AI comments: 65% reply.
-    const shouldReply = comment.author_is_ai === 0 ? true : Math.random() < 0.65;
-    
+    const shouldReply =
+      comment.author_is_ai === 0 ? true : Math.random() < 0.65;
+
     if (shouldReply) {
       if (getCommentDepth(comment.id) >= 5) {
-        db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+        db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(
+          comment.id,
+        );
         continue;
       }
 
-      const opUser = db.prepare("SELECT * FROM users WHERE id = ?").get(comment.target_op_id) as any;
+      const opUser = db
+        .prepare("SELECT * FROM users WHERE id = ?")
+        .get(comment.target_op_id) as any;
       if (!opUser) continue;
 
       if (opUser.universe_id) {
-        const universe = db.prepare("SELECT is_paused FROM universes WHERE id = ?").get(opUser.universe_id) as any;
+        const universe = db
+          .prepare("SELECT is_paused FROM universes WHERE id = ?")
+          .get(opUser.universe_id) as any;
         if (universe && universe.is_paused) {
-          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(
+            comment.id,
+          );
           continue;
         }
       }
 
-      if (!isUserOnline(opUser, settings.timezone || 'UTC')) continue;
+      if (!isUserOnline(opUser, settings.timezone || "UTC")) continue;
 
       // Universe locking
-      const post = db.prepare("SELECT p.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(comment.post_id) as any;
+      const post = db
+        .prepare(
+          "SELECT p.universe_id, u.account_type, p.post_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?",
+        )
+        .get(comment.post_id) as any;
       if (post?.universe_id) {
         // The AI replying must be from the same universe as the post
         if (opUser.universe_id !== post.universe_id) {
-          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(
+            comment.id,
+          );
           continue;
         }
         // The person they are replying to must also be from the same universe (or it's a real user, but we still lock AI replies to the universe)
-        const commenter = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.user_id) as any;
+        const commenter = db
+          .prepare("SELECT universe_id FROM users WHERE id = ?")
+          .get(comment.user_id) as any;
         if (commenter && commenter.universe_id !== post.universe_id) {
-          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+          db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(
+            comment.id,
+          );
           continue;
         }
-      } else if (post?.account_type === 'news' || post?.post_type === 'news') {
+      } else if (post?.account_type === "news" || post?.post_type === "news") {
         // Legacy fallback for news posts without universe_id on the post itself
-        const postAuthor = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.op_id) as any;
+        const postAuthor = db
+          .prepare("SELECT universe_id FROM users WHERE id = ?")
+          .get(comment.op_id) as any;
         if (postAuthor?.universe_id) {
           if (opUser.universe_id !== postAuthor.universe_id) {
-            db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+            db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(
+              comment.id,
+            );
             continue;
           }
-          const commenter = db.prepare("SELECT universe_id FROM users WHERE id = ?").get(comment.user_id) as any;
+          const commenter = db
+            .prepare("SELECT universe_id FROM users WHERE id = ?")
+            .get(comment.user_id) as any;
           if (commenter && commenter.universe_id !== postAuthor.universe_id) {
-            db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+            db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(
+              comment.id,
+            );
             continue;
           }
         }
@@ -801,25 +1212,57 @@ async function handleOPReplies() {
       if (pendingComments.has(`${opUser.id}:comment:${comment.id}`)) continue;
       pendingComments.add(`${opUser.id}:comment:${comment.id}`);
 
-      const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(opUser.id, comment.user_id) as any;
-      const relContext = rel ? rel.description : '';
+      const rel = db
+        .prepare(
+          "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+        )
+        .get(opUser.id, comment.user_id) as any;
+      const relContext = rel ? rel.description : "";
 
       const threadContext = buildThreadContext(comment.id);
 
       try {
-        const commentData = await generateComment(opUser, comment.content, comment.author_name, threadContext, true, relContext, comment.user_id, undefined, comment.created_at);
+        const commentData = await generateComment(
+          opUser,
+          comment.content,
+          comment.author_name,
+          threadContext,
+          true,
+          relContext,
+          comment.user_id,
+          undefined,
+          comment.created_at,
+        );
         if (commentData) {
-          const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id, internal_thought) VALUES (?, ?, ?, ?, ?)")
-            .run(comment.post_id, opUser.id, commentData.content, comment.id, commentData.internal_thought);
-          checkDynamicRelationship(opUser.id, comment.user_id).catch(console.error);
-          console.log(`OP ${opUser.display_name} replied to comment ${comment.id}`);
+          const info = db
+            .prepare(
+              "INSERT INTO comments (post_id, user_id, content, parent_id, internal_thought) VALUES (?, ?, ?, ?, ?)",
+            )
+            .run(
+              comment.post_id,
+              opUser.id,
+              commentData.content,
+              comment.id,
+              commentData.internal_thought,
+            );
+          checkDynamicRelationship(opUser.id, comment.user_id).catch(
+            console.error,
+          );
+          console.log(
+            `OP ${opUser.display_name} replied to comment ${comment.id}`,
+          );
 
           // Add 1-5 likes to the comment being replied to
-          addLikesToPostOrComment(comment.post_id, comment.id, Math.floor(Math.random() * 5) + 1);
+          addLikesToPostOrComment(
+            comment.post_id,
+            comment.id,
+            Math.floor(Math.random() * 5) + 1,
+          );
 
           if (comment.author_is_ai === 0) {
-            db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-              .run(comment.user_id, opUser.id, info.lastInsertRowid);
+            db.prepare(
+              "INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)",
+            ).run(comment.user_id, opUser.id, info.lastInsertRowid);
           }
         }
       } finally {
@@ -827,119 +1270,232 @@ async function handleOPReplies() {
       }
     } else {
       // Mark as ignored so we don't keep trying
-      db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(comment.id);
+      db.prepare("UPDATE comments SET op_ignored = 1 WHERE id = ?").run(
+        comment.id,
+      );
     }
   }
 }
 
-async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, forcedArchetypeId?: string) {
-  const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+async function doAiPost(
+  aiUser: any,
+  forceType: "text" | "image" | null = null,
+  forcedArchetypeId?: string,
+) {
+  const settings = db
+    .prepare("SELECT * FROM settings WHERE id = 1")
+    .get() as any;
 
   // NEWS LOGIC (FORCED RECAP)
-  if (aiUser.account_type === 'news' || aiUser.account_type === 'faux_news') {
+  if (aiUser.account_type === "news" || aiUser.account_type === "faux_news") {
     try {
       let newsContent = null;
-      if (aiUser.account_type === 'faux_news') {
-        const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(aiUser.id) as any;
-        const sinceDate = lastPost ? lastPost.created_at : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      if (aiUser.account_type === "faux_news") {
+        const lastPost = db
+          .prepare(
+            "SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+          )
+          .get(aiUser.id) as any;
+        const sinceDate = lastPost
+          ? lastPost.created_at
+          : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-        const newsPosts = db.prepare(`
+        const newsPosts = db
+          .prepare(
+            `
           SELECT p.content, p.created_at, u.display_name, univ.name as universe_name
           FROM posts p
           JOIN users u ON p.user_id = u.id
           LEFT JOIN universes univ ON u.universe_id = univ.id
           WHERE u.account_type = 'news' AND p.created_at > ? AND u.id != ?
           ORDER BY p.created_at ASC
-        `).all(sinceDate, aiUser.id) as any[];
+        `,
+          )
+          .all(sinceDate, aiUser.id) as any[];
 
         newsContent = await generateFauxNewsPost(aiUser, newsPosts);
       } else {
         // Get recent posts from this universe (last 24 hours), excluding comments
-        const recentPosts = db.prepare(`
+        const recentPosts = db
+          .prepare(
+            `
           SELECT p.content, p.created_at, u.display_name
           FROM posts p
           JOIN users u ON p.user_id = u.id
           WHERE u.universe_id = ? AND p.created_at >= datetime('now', '-24 hours') AND u.account_type != 'news'
           ORDER BY p.created_at ASC
-        `).all(aiUser.universe_id) as any[];
+        `,
+          )
+          .all(aiUser.universe_id) as any[];
 
         // Get active universe arc
-        const activeUniverseArc = db.prepare(`
+        const activeUniverseArc = db
+          .prepare(
+            `
           SELECT * FROM universe_arcs
           WHERE universe_id = ? AND status = 'active'
           ORDER BY created_at DESC LIMIT 1
-        `).get(aiUser.universe_id) as any;
+        `,
+          )
+          .get(aiUser.universe_id) as any;
 
         // Get other news posts from today in this universe
-        const otherNewsPosts = db.prepare(`
+        const otherNewsPosts = db
+          .prepare(
+            `
           SELECT p.content, p.created_at, u.display_name
           FROM posts p
           JOIN users u ON p.user_id = u.id
           WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
           ORDER BY p.created_at ASC
-        `).all(aiUser.universe_id, aiUser.id) as any[];
+        `,
+          )
+          .all(aiUser.universe_id, aiUser.id) as any[];
 
-        newsContent = await generateNewsPost(aiUser, recentPosts, activeUniverseArc, otherNewsPosts);
+        newsContent = await generateNewsPost(
+          aiUser,
+          recentPosts,
+          activeUniverseArc,
+          otherNewsPosts,
+        );
       }
 
       if (newsContent) {
-        const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought, universe_id) VALUES (?, ?, 'news', ?, ?)").run(aiUser.id, newsContent.content, newsContent.internal_thought, aiUser.universe_id || null);
+        const info = db
+          .prepare(
+            "INSERT INTO posts (user_id, content, post_type, internal_thought, universe_id) VALUES (?, ?, 'news', ?, ?)",
+          )
+          .run(
+            aiUser.id,
+            newsContent.content,
+            newsContent.internal_thought,
+            aiUser.universe_id || null,
+          );
         const postId = info.lastInsertRowid as number;
-        triggerPostComments(postId, 'news', forceType !== null);
+        triggerPostComments(postId, "news", forceType !== null);
         return true;
       }
       return false;
     } catch (e) {
-      console.error(`Error generating forced news post for ${aiUser.display_name}:`, e);
+      console.error(
+        `Error generating forced news post for ${aiUser.display_name}:`,
+        e,
+      );
       return false;
     }
   }
 
-  const recentContext = db.prepare(`
+  const recentContext = db
+    .prepare(
+      `
     SELECT p.content, p.created_at, u.display_name 
     FROM posts p JOIN users u ON p.user_id = u.id 
     ORDER BY p.created_at DESC LIMIT 5
-  `).all() as any[];
-  const contextStr = recentContext.map(p => `[${p.created_at}] ${p.display_name}: ${p.content}`).join(" | ");
-  
-  const rels = db.prepare(`
+  `,
+    )
+    .all() as any[];
+  const contextStr = recentContext
+    .map((p) => `[${p.created_at}] ${p.display_name}: ${p.content}`)
+    .join(" | ");
+
+  const rels = db
+    .prepare(
+      `
     SELECT u.display_name, r.description 
     FROM relationships r 
     JOIN users u ON r.user_id_2 = u.id 
     WHERE r.user_id_1 = ?
-  `).all(aiUser.id) as any[];
-  const relStr = rels.map(r => `${r.display_name}: ${r.description}`).join(", ");
+  `,
+    )
+    .all(aiUser.id) as any[];
+  const relStr = rels
+    .map((r) => `${r.display_name}: ${r.description}`)
+    .join(", ");
 
-  const isFirstPost = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(aiUser.id) as any).count === 0;
-  let archetype = pickArchetype(isFirstPost, forceType === 'image', aiUser.account_type);
+  const isFirstPost =
+    (
+      db
+        .prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?")
+        .get(aiUser.id) as any
+    ).count === 0;
+  let archetype = pickArchetype(
+    isFirstPost,
+    forceType === "image",
+    aiUser.account_type,
+  );
   if (forcedArchetypeId) {
-    const forced = db.prepare("SELECT * FROM post_archetypes WHERE id = ?").get(forcedArchetypeId) as any;
+    const forced = db
+      .prepare("SELECT * FROM post_archetypes WHERE id = ?")
+      .get(forcedArchetypeId) as any;
     if (forced) archetype = forced;
   }
-  const relatedUsers = db.prepare(`
+  const relatedUsers = db
+    .prepare(
+      `
     SELECT u.username, u.universe_id, un.name as universe_name
     FROM users u
     LEFT JOIN universes un ON u.universe_id = un.id
     JOIN relationships r ON (r.user_id_1 = u.id AND r.user_id_2 = ?) OR (r.user_id_2 = u.id AND r.user_id_1 = ?)
     WHERE u.id != ?
-  `).all(aiUser.id, aiUser.id, aiUser.id) as any[];
-  const availableUsernames = relatedUsers.map(u => `@${u.username} (Universe: ${u.universe_name || 'None'})`).join(', ');
-  
+  `,
+    )
+    .all(aiUser.id, aiUser.id, aiUser.id) as any[];
+  const availableUsernames = relatedUsers
+    .map((u) => `@${u.username} (Universe: ${u.universe_name || "None"})`)
+    .join(", ");
+
   // UNIVERSE ARC LOGIC
   let activeUniverseArc = null;
   let pastUniverseArcs: any[] = [];
-  const universe = aiUser.universe_id ? db.prepare("SELECT * FROM universes WHERE id = ?").get(aiUser.universe_id) as any : null;
-  const arcArchetypes = ['life_update', 'follow_up', 'seeking_advice', 'company_announcement', 'public_apology', 'giveaway_contest', 'brand_banter'];
+  const universe = aiUser.universe_id
+    ? (db
+        .prepare("SELECT * FROM universes WHERE id = ?")
+        .get(aiUser.universe_id) as any)
+    : null;
+  const arcArchetypes = [
+    "life_update",
+    "follow_up",
+    "seeking_advice",
+    "company_announcement",
+    "public_apology",
+    "giveaway_contest",
+    "brand_banter",
+  ];
 
   if (universe) {
-    pastUniverseArcs = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(universe.id) as any[];
-    activeUniverseArc = db.prepare("SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'active'").get(universe.id) as any;
+    pastUniverseArcs = db
+      .prepare(
+        "SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3",
+      )
+      .all(universe.id) as any[];
+    activeUniverseArc = db
+      .prepare(
+        "SELECT * FROM universe_arcs WHERE universe_id = ? AND status = 'active'",
+      )
+      .get(universe.id) as any;
 
     if (!activeUniverseArc && arcArchetypes.includes(archetype.id)) {
       const newUniverseArcData = await generateNewUniverseArc(universe);
-      if (newUniverseArcData && newUniverseArcData.title && newUniverseArcData.description && newUniverseArcData.duration_days) {
-        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
-        activeUniverseArc = db.prepare("SELECT * FROM universe_arcs WHERE id = ?").get(info.lastInsertRowid);
+      if (
+        newUniverseArcData &&
+        newUniverseArcData.title &&
+        newUniverseArcData.description &&
+        newUniverseArcData.duration_days
+      ) {
+        const info = db
+          .prepare(
+            "INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)",
+          )
+          .run(
+            universe.id,
+            newUniverseArcData.title,
+            newUniverseArcData.description,
+            newUniverseArcData.current_status_text,
+            newUniverseArcData.duration_days,
+          );
+        activeUniverseArc = db
+          .prepare("SELECT * FROM universe_arcs WHERE id = ?")
+          .get(info.lastInsertRowid);
       }
     } else if (activeUniverseArc) {
       const now = new Date();
@@ -947,33 +1503,62 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       const lastUpdateDate = new Date(activeUniverseArc.last_update_date);
 
       if (now >= targetDate) {
-        const recentUniversePosts = db.prepare(`
+        const recentUniversePosts = db
+          .prepare(
+            `
           SELECT p.content, u.display_name 
           FROM posts p 
           JOIN users u ON p.user_id = u.id 
           WHERE u.universe_id = ? AND p.created_at >= ? 
           ORDER BY p.created_at DESC LIMIT 20
-        `).all(universe.id, activeUniverseArc.start_date).map((p: any) => `${p.display_name}: ${p.content}`).join(" | ");
-        
-        const conclusion = await concludeUniverseArc(universe, activeUniverseArc, recentUniversePosts);
-        db.prepare("UPDATE universe_arcs SET status = 'completed', completion_summary = ? WHERE id = ?").run(conclusion, activeUniverseArc.id);
+        `,
+          )
+          .all(universe.id, activeUniverseArc.start_date)
+          .map((p: any) => `${p.display_name}: ${p.content}`)
+          .join(" | ");
+
+        const conclusion = await concludeUniverseArc(
+          universe,
+          activeUniverseArc,
+          recentUniversePosts,
+        );
+        db.prepare(
+          "UPDATE universe_arcs SET status = 'completed', completion_summary = ? WHERE id = ?",
+        ).run(conclusion, activeUniverseArc.id);
         activeUniverseArc = null;
-      } else if (now.getTime() - lastUpdateDate.getTime() >= 24 * 60 * 60 * 1000) {
-        const recentUniversePosts = db.prepare(`
+      } else if (
+        now.getTime() - lastUpdateDate.getTime() >=
+        24 * 60 * 60 * 1000
+      ) {
+        const recentUniversePosts = db
+          .prepare(
+            `
           SELECT p.content, u.display_name 
           FROM posts p 
           JOIN users u ON p.user_id = u.id 
           WHERE u.universe_id = ? AND p.created_at >= ? 
           ORDER BY p.created_at DESC LIMIT 20
-        `).all(universe.id, activeUniverseArc.last_update_date).map((p: any) => `${p.display_name}: ${p.content}`).join(" | ");
-        
-        const newStatusText = await updateUniverseArc(universe, activeUniverseArc, recentUniversePosts);
-        
+        `,
+          )
+          .all(universe.id, activeUniverseArc.last_update_date)
+          .map((p: any) => `${p.display_name}: ${p.content}`)
+          .join(" | ");
+
+        const newStatusText = await updateUniverseArc(
+          universe,
+          activeUniverseArc,
+          recentUniversePosts,
+        );
+
         let history = [];
-        try { history = JSON.parse(activeUniverseArc.history || '[]'); } catch (e) {}
+        try {
+          history = JSON.parse(activeUniverseArc.history || "[]");
+        } catch (e) {}
         history.push({ date: new Date().toISOString(), status: newStatusText });
-        
-        db.prepare("UPDATE universe_arcs SET current_status_text = ?, history = ?, last_update_date = datetime('now') WHERE id = ?").run(newStatusText, JSON.stringify(history), activeUniverseArc.id);
+
+        db.prepare(
+          "UPDATE universe_arcs SET current_status_text = ?, history = ?, last_update_date = datetime('now') WHERE id = ?",
+        ).run(newStatusText, JSON.stringify(history), activeUniverseArc.id);
         activeUniverseArc.current_status_text = newStatusText;
         activeUniverseArc.history = JSON.stringify(history);
       }
@@ -983,109 +1568,229 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   // ARC LOGIC
   let activeArc = null;
   let pastArcs: any[] = [];
-  let arcInstruction = '';
-  let arcComments = '';
+  let arcInstruction = "";
+  let arcComments = "";
   let recentNewsPosts: any[] = [];
 
-  if (aiUser.account_type !== 'news') {
-    activeArc = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'active'").get(aiUser.id) as any;
-    pastArcs = db.prepare("SELECT * FROM character_arcs WHERE user_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3").all(aiUser.id) as any[];
+  if (aiUser.account_type !== "news") {
+    activeArc = db
+      .prepare(
+        "SELECT * FROM character_arcs WHERE user_id = ? AND status = 'active'",
+      )
+      .get(aiUser.id) as any;
+    pastArcs = db
+      .prepare(
+        "SELECT * FROM character_arcs WHERE user_id = ? AND status = 'completed' ORDER BY target_end_date DESC LIMIT 3",
+      )
+      .all(aiUser.id) as any[];
 
     // NEWS LOGIC
     if (universe) {
-      recentNewsPosts = db.prepare(`
+      recentNewsPosts = db
+        .prepare(
+          `
         SELECT p.content, p.created_at, u.display_name 
         FROM posts p 
         JOIN users u ON p.user_id = u.id 
         WHERE u.universe_id = ? AND u.account_type = 'news' AND p.created_at >= datetime('now', '-24 hours')
         ORDER BY p.created_at DESC LIMIT 3
-      `).all(universe.id) as any[];
+      `,
+        )
+        .all(universe.id) as any[];
     }
 
-  console.log(`[DEBUG] Entering ARC LOGIC for ${aiUser.display_name}. Archetype: ${archetype.id}`);
-  console.log(`[DEBUG] arcArchetypes: ${JSON.stringify(arcArchetypes)}`);
-  
-  if (arcArchetypes.includes(archetype.id)) {
-    console.log(`[DEBUG] Archetype ${archetype.id} matched for arc generation for ${aiUser.display_name}`);
-    logApi('DEBUG_ARC_LOGIC', { archetypeId: archetype.id, userId: aiUser.id, activeArc: activeArc ? activeArc.id : null }, { message: `Archetype matched for user ${aiUser.display_name}` }, aiUser.id);
-    if (!activeArc) {
-      console.log(`[DEBUG] No active arc for ${aiUser.display_name}, generating new one...`);
-      const newArcData = await generateNewArc(aiUser);
-      console.log(`[DEBUG] New arc data for ${aiUser.display_name}:`, JSON.stringify(newArcData));
-      logApi('DEBUG_ARC_LOGIC_NEW_DATA', { characterId: aiUser.id }, { newArcData }, aiUser.id);
-      if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
-        try {
-          const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
-          activeArc = db.prepare("SELECT * FROM character_arcs WHERE id = ?").get(info.lastInsertRowid);
-          arcInstruction = 'START_ARC';
-          console.log(`[DEBUG] Successfully created arc ${activeArc.id} for ${aiUser.display_name}: ${activeArc.title}`);
-          logApi('DEBUG_ARC_LOGIC_CREATED', { characterId: aiUser.id, arcId: activeArc.id }, { arcTitle: activeArc.title }, aiUser.id);
-        } catch (e) {
-          console.error(`[DEBUG] Failed to insert arc for ${aiUser.display_name}:`, e);
+    console.log(
+      `[DEBUG] Entering ARC LOGIC for ${aiUser.display_name}. Archetype: ${archetype.id}`,
+    );
+    console.log(`[DEBUG] arcArchetypes: ${JSON.stringify(arcArchetypes)}`);
+
+    if (arcArchetypes.includes(archetype.id)) {
+      console.log(
+        `[DEBUG] Archetype ${archetype.id} matched for arc generation for ${aiUser.display_name}`,
+      );
+      logApi(
+        "DEBUG_ARC_LOGIC",
+        {
+          archetypeId: archetype.id,
+          userId: aiUser.id,
+          activeArc: activeArc ? activeArc.id : null,
+        },
+        { message: `Archetype matched for user ${aiUser.display_name}` },
+        aiUser.id,
+      );
+      if (!activeArc) {
+        console.log(
+          `[DEBUG] No active arc for ${aiUser.display_name}, generating new one...`,
+        );
+        const newArcData = await generateNewArc(aiUser);
+        console.log(
+          `[DEBUG] New arc data for ${aiUser.display_name}:`,
+          JSON.stringify(newArcData),
+        );
+        logApi(
+          "DEBUG_ARC_LOGIC_NEW_DATA",
+          { characterId: aiUser.id },
+          { newArcData },
+          aiUser.id,
+        );
+        if (
+          newArcData &&
+          newArcData.title &&
+          newArcData.description &&
+          newArcData.duration_days
+        ) {
+          try {
+            const info = db
+              .prepare(
+                "INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)",
+              )
+              .run(
+                aiUser.id,
+                newArcData.title,
+                newArcData.description,
+                newArcData.duration_days,
+              );
+            activeArc = db
+              .prepare("SELECT * FROM character_arcs WHERE id = ?")
+              .get(info.lastInsertRowid);
+            arcInstruction = "START_ARC";
+            console.log(
+              `[DEBUG] Successfully created arc ${activeArc.id} for ${aiUser.display_name}: ${activeArc.title}`,
+            );
+            logApi(
+              "DEBUG_ARC_LOGIC_CREATED",
+              { characterId: aiUser.id, arcId: activeArc.id },
+              { arcTitle: activeArc.title },
+              aiUser.id,
+            );
+          } catch (e) {
+            console.error(
+              `[DEBUG] Failed to insert arc for ${aiUser.display_name}:`,
+              e,
+            );
+          }
+        } else {
+          console.log(
+            `[DEBUG] Invalid arc data generated for ${aiUser.display_name}`,
+          );
+          logApi(
+            "DEBUG_ARC_LOGIC_INVALID_DATA",
+            { characterId: aiUser.id },
+            { newArcData },
+            aiUser.id,
+          );
         }
       } else {
-        console.log(`[DEBUG] Invalid arc data generated for ${aiUser.display_name}`);
-        logApi('DEBUG_ARC_LOGIC_INVALID_DATA', { characterId: aiUser.id }, { newArcData }, aiUser.id);
-      }
-    } else {
-      const now = new Date();
-      const targetDate = new Date(activeArc.target_end_date);
-      const lastUpdateDate = new Date(activeArc.last_update_date || activeArc.start_date);
+        const now = new Date();
+        const targetDate = new Date(activeArc.target_end_date);
+        const lastUpdateDate = new Date(
+          activeArc.last_update_date || activeArc.start_date,
+        );
 
-      if (now >= targetDate) {
-        // Fetch recent posts for context
-        const recentUserPosts = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5").all(aiUser.id).map((p: any) => `[${p.created_at}] ${p.content}`).join(" | ");
-        // Fetch recent comments on those posts
-        const recentUserComments = db.prepare(`
+        if (now >= targetDate) {
+          // Fetch recent posts for context
+          const recentUserPosts = db
+            .prepare(
+              "SELECT content, created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5",
+            )
+            .all(aiUser.id)
+            .map((p: any) => `[${p.created_at}] ${p.content}`)
+            .join(" | ");
+          // Fetch recent comments on those posts
+          const recentUserComments = db
+            .prepare(
+              `
           SELECT c.content, u.display_name 
           FROM comments c 
           JOIN users u ON c.user_id = u.id 
           WHERE c.post_id IN (SELECT id FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 5) 
           AND c.user_id != ? 
           ORDER BY c.created_at DESC LIMIT 10
-        `).all(aiUser.id, aiUser.id).map((c: any) => `${c.display_name}: ${c.content}`).join(" | ");
+        `,
+            )
+            .all(aiUser.id, aiUser.id)
+            .map((c: any) => `${c.display_name}: ${c.content}`)
+            .join(" | ");
 
-        const conclusion = await concludeArc(aiUser, activeArc, recentUserPosts, recentUserComments);
-        db.prepare("UPDATE character_arcs SET status = 'completed', completion_summary = ? WHERE id = ?").run(conclusion, activeArc.id);
-        activeArc.completion_summary = conclusion;
-        arcInstruction = 'CONCLUDE_ARC';
-      } else {
-        if (now.getTime() - lastUpdateDate.getTime() >= 24 * 60 * 60 * 1000) {
-          const recentUserPosts = db.prepare("SELECT content, created_at FROM posts WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10").all(aiUser.id, activeArc.last_update_date || activeArc.start_date).map((p: any) => `[${p.created_at}] ${p.content}`).join(" | ");
-          const newStatusText = await updateCharacterArc(aiUser, activeArc, recentUserPosts);
-          
-          let history = [];
-          try { history = JSON.parse(activeArc.history || '[]'); } catch (e) {}
-          history.push({ date: new Date().toISOString(), status: newStatusText });
-          
-          db.prepare("UPDATE character_arcs SET current_status_text = ?, history = ?, last_update_date = datetime('now') WHERE id = ?").run(newStatusText, JSON.stringify(history), activeArc.id);
-          activeArc.current_status_text = newStatusText;
-          activeArc.history = JSON.stringify(history);
-        }
+          const conclusion = await concludeArc(
+            aiUser,
+            activeArc,
+            recentUserPosts,
+            recentUserComments,
+          );
+          db.prepare(
+            "UPDATE character_arcs SET status = 'completed', completion_summary = ? WHERE id = ?",
+          ).run(conclusion, activeArc.id);
+          activeArc.completion_summary = conclusion;
+          arcInstruction = "CONCLUDE_ARC";
+        } else {
+          if (now.getTime() - lastUpdateDate.getTime() >= 24 * 60 * 60 * 1000) {
+            const recentUserPosts = db
+              .prepare(
+                "SELECT content, created_at FROM posts WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10",
+              )
+              .all(
+                aiUser.id,
+                activeArc.last_update_date || activeArc.start_date,
+              )
+              .map((p: any) => `[${p.created_at}] ${p.content}`)
+              .join(" | ");
+            const newStatusText = await updateCharacterArc(
+              aiUser,
+              activeArc,
+              recentUserPosts,
+            );
 
-        arcInstruction = 'PROGRESS_ARC';
-        const recentUserComments = db.prepare(`
+            let history = [];
+            try {
+              history = JSON.parse(activeArc.history || "[]");
+            } catch (e) {}
+            history.push({
+              date: new Date().toISOString(),
+              status: newStatusText,
+            });
+
+            db.prepare(
+              "UPDATE character_arcs SET current_status_text = ?, history = ?, last_update_date = datetime('now') WHERE id = ?",
+            ).run(newStatusText, JSON.stringify(history), activeArc.id);
+            activeArc.current_status_text = newStatusText;
+            activeArc.history = JSON.stringify(history);
+          }
+
+          arcInstruction = "PROGRESS_ARC";
+          const recentUserComments = db
+            .prepare(
+              `
           SELECT c.content, u.display_name 
           FROM comments c 
           JOIN users u ON c.user_id = u.id 
           WHERE c.post_id IN (SELECT id FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 2) 
           AND c.user_id != ? 
           ORDER BY c.created_at DESC LIMIT 5
-        `).all(aiUser.id, aiUser.id).map((c: any) => `${c.display_name}: ${c.content}`).join(" | ");
-        arcComments = recentUserComments;
+        `,
+            )
+            .all(aiUser.id, aiUser.id)
+            .map((c: any) => `${c.display_name}: ${c.content}`)
+            .join(" | ");
+          arcComments = recentUserComments;
+        }
       }
     }
   }
-}
 
   let postContent = "";
   let positivePrompt = "";
   let negativePrompt = "";
   let characterVisible = false;
-  
+
   let internalThought = "";
-  if (archetype.id === 'image_post') {
-    const imageData = await generateImagePostData(aiUser, contextStr, relStr, availableUsernames);
+  if (archetype.id === "image_post") {
+    const imageData = await generateImagePostData(
+      aiUser,
+      contextStr,
+      relStr,
+      availableUsernames,
+    );
     if (imageData) {
       postContent = imageData.textPost;
       internalThought = imageData.internal_thought || "";
@@ -1094,7 +1799,21 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       characterVisible = imageData.characterVisible;
     }
   } else {
-    const postData = await generatePost(aiUser, contextStr, relStr, archetype, availableUsernames, isFirstPost, activeArc, pastArcs, arcInstruction, arcComments, activeUniverseArc, pastUniverseArcs, recentNewsPosts);
+    const postData = await generatePost(
+      aiUser,
+      contextStr,
+      relStr,
+      archetype,
+      availableUsernames,
+      isFirstPost,
+      activeArc,
+      pastArcs,
+      arcInstruction,
+      arcComments,
+      activeUniverseArc,
+      pastUniverseArcs,
+      recentNewsPosts,
+    );
     if (postData) {
       postContent = postData.content;
       internalThought = postData.internal_thought || "";
@@ -1102,32 +1821,47 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
   }
 
   if (postContent) {
-    const isVisible = archetype.id === 'image_post' ? 0 : 1;
-    const info = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, internal_thought, universe_id) VALUES (?, ?, ?, ?, ?, ?)").run(aiUser.id, postContent, archetype.id, isVisible, internalThought, aiUser.universe_id || null);
+    const isVisible = archetype.id === "image_post" ? 0 : 1;
+    const info = db
+      .prepare(
+        "INSERT INTO posts (user_id, content, post_type, is_visible, internal_thought, universe_id) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        aiUser.id,
+        postContent,
+        archetype.id,
+        isVisible,
+        internalThought,
+        aiUser.universe_id || null,
+      );
     const postId = info.lastInsertRowid as number;
     console.log(`${aiUser.display_name} created a post (${archetype.id})`);
 
-    if (archetype.id === 'image_post') {
+    if (archetype.id === "image_post") {
       let referenceImageUrls: string[] | undefined = undefined;
       if (characterVisible) {
-        const refImages = JSON.parse(aiUser.reference_images || '[]');
+        const refImages = JSON.parse(aiUser.reference_images || "[]");
         if (refImages.length > 0) {
           referenceImageUrls = refImages;
         } else if (aiUser.avatar_url) {
           referenceImageUrls = [aiUser.avatar_url];
         }
       }
-      generateImage(positivePrompt, negativePrompt, referenceImageUrls).then(imageUrl => {
-        if (imageUrl) {
-          db.prepare("UPDATE posts SET image_url = ?, is_visible = 1, image_prompt = ? WHERE id = ?").run(imageUrl, positivePrompt, postId);
-          triggerPostComments(postId, archetype.id, forceType !== null);
-        } else {
+      generateImage(positivePrompt, negativePrompt, referenceImageUrls)
+        .then((imageUrl) => {
+          if (imageUrl) {
+            db.prepare(
+              "UPDATE posts SET image_url = ?, is_visible = 1, image_prompt = ? WHERE id = ?",
+            ).run(imageUrl, positivePrompt, postId);
+            triggerPostComments(postId, archetype.id, forceType !== null);
+          } else {
+            db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to generate image:", err);
           db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-        }
-      }).catch(err => {
-        console.error("Failed to generate image:", err);
-        db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-      });
+        });
     } else {
       triggerPostComments(postId, archetype.id, forceType !== null);
     }
@@ -1136,32 +1870,49 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
       db.prepare("UPDATE users SET is_active = 1 WHERE id = ?").run(aiUser.id);
     }
 
-    if (archetype.id === 'event' || archetype.id === 'meetup') {
+    if (archetype.id === "event" || archetype.id === "meetup") {
       const allUsers = db.prepare("SELECT * FROM users").all() as any[];
-      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      const recentDmUserIds = new Set<number>(db.prepare(`
+      const fifteenMinsAgo = new Date(
+        Date.now() - 15 * 60 * 1000,
+      ).toISOString();
+      const recentDmUserIds = new Set<number>(
+        db
+          .prepare(
+            `
         SELECT DISTINCT receiver_id FROM direct_messages dm
         JOIN users u ON dm.sender_id = u.id
         WHERE u.is_ai = 0 AND dm.created_at >= ?
-      `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
+      `,
+          )
+          .all(fifteenMinsAgo)
+          .map((r: any) => r.receiver_id as number),
+      );
 
       const now = Date.now();
-      const timezone = settings.timezone || 'UTC';
+      const timezone = settings.timezone || "UTC";
       const localTime = getFormatter(timezone).format(new Date(now));
-      let [currentHour, currentMinute] = localTime.split(':').map(Number);
+      let [currentHour, currentMinute] = localTime.split(":").map(Number);
       if (currentHour === 24) currentHour = 0;
-      const precalculatedTime = { currentTimeInMinutes: currentHour * 60 + currentMinute };
+      const precalculatedTime = {
+        currentTimeInMinutes: currentHour * 60 + currentMinute,
+      };
 
-      const onlineUsers = allUsers.filter(u => isUserOnline(u, timezone, recentDmUserIds, precalculatedTime));
-      const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
-      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1);
-      const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
+      const onlineUsers = allUsers.filter((u) =>
+        isUserOnline(u, timezone, recentDmUserIds, precalculatedTime),
+      );
+      const onlineRatio =
+        allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
+      const onlineAiUsers = onlineUsers.filter((u) => u.is_ai === 1);
+      const activeAiUsers = onlineAiUsers.filter((u) => u.is_active === 1);
 
       // Trigger other characters to react
-      const baseCount = archetype.id === 'event' ? Math.floor(Math.random() * 5) + 1 : Math.floor(Math.random() * 4) + 1;
+      const baseCount =
+        archetype.id === "event"
+          ? Math.floor(Math.random() * 5) + 1
+          : Math.floor(Math.random() * 4) + 1;
       const count = Math.max(0, Math.round(baseCount * onlineRatio));
       const crossUniverseProb = (settings.cross_universe_prob ?? 50.0) / 100;
-      const otherAis = activeAiUsers.filter(u => {
+      const otherAis = activeAiUsers.filter((u) => {
         if (u.id === aiUser.id) return false;
         if (u.universe_id === aiUser.universe_id) return true;
         return Math.random() < crossUniverseProb;
@@ -1172,28 +1923,57 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
         for (let i = 0; i < count && availableAis.length > 0; i++) {
           const picked = pickWeightedRandomUser(availableAis);
           selectedAis.push(picked);
-          availableAis = availableAis.filter(u => u.id !== picked.id);
+          availableAis = availableAis.filter((u) => u.id !== picked.id);
         }
-        
+
         // These characters will comment on the post shortly
         for (const otherAi of selectedAis) {
           pendingComments.add(`${otherAi.id}:post:${postId}`);
-          setTimeout(async () => {
-            try {
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(otherAi.id, aiUser.id) as any;
-              const relContext = rel ? rel.description : '';
-              const post = db.prepare("SELECT created_at FROM posts WHERE id = ?").get(postId) as any;
-              const commentData = await generateComment(otherAi, postContent, aiUser.display_name, '', false, relContext, aiUser.id, undefined, post?.created_at);
-              if (commentData) {
-                db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                  .run(postId, otherAi.id, commentData.content, commentData.internal_thought);
-                checkDynamicRelationship(otherAi.id, aiUser.id).catch(console.error);
-                console.log(`${otherAi.display_name} reacted to ${archetype.id} by ${aiUser.display_name}`);
+          setTimeout(
+            async () => {
+              try {
+                const rel = db
+                  .prepare(
+                    "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                  )
+                  .get(otherAi.id, aiUser.id) as any;
+                const relContext = rel ? rel.description : "";
+                const post = db
+                  .prepare("SELECT created_at FROM posts WHERE id = ?")
+                  .get(postId) as any;
+                const commentData = await generateComment(
+                  otherAi,
+                  postContent,
+                  aiUser.display_name,
+                  "",
+                  false,
+                  relContext,
+                  aiUser.id,
+                  undefined,
+                  post?.created_at,
+                );
+                if (commentData) {
+                  db.prepare(
+                    "INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                  ).run(
+                    postId,
+                    otherAi.id,
+                    commentData.content,
+                    commentData.internal_thought,
+                  );
+                  checkDynamicRelationship(otherAi.id, aiUser.id).catch(
+                    console.error,
+                  );
+                  console.log(
+                    `${otherAi.display_name} reacted to ${archetype.id} by ${aiUser.display_name}`,
+                  );
+                }
+              } finally {
+                pendingComments.delete(`${otherAi.id}:post:${postId}`);
               }
-            } finally {
-              pendingComments.delete(`${otherAi.id}:post:${postId}`);
-            }
-          }, 5000 + Math.random() * 30000);
+            },
+            5000 + Math.random() * 30000,
+          );
         }
       }
     }
@@ -1205,91 +1985,110 @@ async function doAiPost(aiUser: any, forceType: 'text' | 'image' | null = null, 
 async function startServer() {
   try {
     const app = express();
-  const PORT = 3000;
+    const PORT = 3000;
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
-  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+    app.use(express.json({ limit: "50mb" }));
+    app.use(express.urlencoded({ limit: "50mb", extended: true }));
+    app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
-  // Performance Logging Middleware
-  app.use((req, res, next) => {
-    const start = Date.now();
-    res.on('finish', () => {
-      const duration = Date.now() - start;
-      if (req.path.startsWith('/api/')) {
-        logPerformance('API_REQUEST', duration, {
-          method: req.method,
-          path: req.path,
-          query: req.query,
-          statusCode: res.statusCode
-        });
-      }
+    // Performance Logging Middleware
+    app.use((req, res, next) => {
+      const start = Date.now();
+      res.on("finish", () => {
+        const duration = Date.now() - start;
+        if (req.path.startsWith("/api/")) {
+          logPerformance("API_REQUEST", duration, {
+            method: req.method,
+            path: req.path,
+            query: req.query,
+            statusCode: res.statusCode,
+          });
+        }
+      });
+      next();
     });
-    next();
-  });
 
-  // Initialize Database
-  initDb();
+    // Initialize Database
+    initDb();
 
-  function syncNewsFollowers(userId: number | bigint) {
-    const user = db.prepare("SELECT id, universe_id, account_type, is_ai FROM users WHERE id = ?").get(userId) as any;
-    if (!user) return;
+    function syncNewsFollowers(userId: number | bigint) {
+      const user = db
+        .prepare(
+          "SELECT id, universe_id, account_type, is_ai FROM users WHERE id = ?",
+        )
+        .get(userId) as any;
+      if (!user) return;
 
-    if (user.account_type === 'news') {
-      if (user.universe_id) {
-        // AI characters from the same universe follow this news account
-        db.prepare(`
+      if (user.account_type === "news") {
+        if (user.universe_id) {
+          // AI characters from the same universe follow this news account
+          db.prepare(
+            `
           INSERT OR IGNORE INTO follows (follower_id, followed_id)
           SELECT id, ? FROM users WHERE universe_id = ? AND is_ai = 1 AND id != ?
-        `).run(user.id, user.universe_id, user.id);
-        
-        // AI characters NOT from this universe must NOT follow this news account
-        db.prepare(`
+        `,
+          ).run(user.id, user.universe_id, user.id);
+
+          // AI characters NOT from this universe must NOT follow this news account
+          db.prepare(
+            `
           DELETE FROM follows 
           WHERE followed_id = ? 
           AND follower_id IN (SELECT id FROM users WHERE (universe_id != ? OR universe_id IS NULL) AND is_ai = 1)
-        `).run(user.id, user.universe_id);
-      } else {
-        // If news account has no universe, no AI characters should follow it automatically
-        db.prepare("DELETE FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)").run(user.id);
-      }
-    } else if (user.is_ai === 1) {
-      if (user.universe_id) {
-        // This character follows all news accounts in its universe
-        db.prepare(`
+        `,
+          ).run(user.id, user.universe_id);
+        } else {
+          // If news account has no universe, no AI characters should follow it automatically
+          db.prepare(
+            "DELETE FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)",
+          ).run(user.id);
+        }
+      } else if (user.is_ai === 1) {
+        if (user.universe_id) {
+          // This character follows all news accounts in its universe
+          db.prepare(
+            `
           INSERT OR IGNORE INTO follows (follower_id, followed_id)
           SELECT ?, id FROM users WHERE account_type = 'news' AND universe_id = ?
-        `).run(user.id, user.universe_id);
-        
-        // This character must NOT follow news accounts from other universes
-        db.prepare(`
+        `,
+          ).run(user.id, user.universe_id);
+
+          // This character must NOT follow news accounts from other universes
+          db.prepare(
+            `
           DELETE FROM follows 
           WHERE follower_id = ? 
           AND followed_id IN (SELECT id FROM users WHERE account_type = 'news' AND (universe_id != ? OR universe_id IS NULL))
-        `).run(user.id, user.universe_id);
-      } else {
-        // If character has no universe, it shouldn't follow any news accounts
-        db.prepare(`
+        `,
+          ).run(user.id, user.universe_id);
+        } else {
+          // If character has no universe, it shouldn't follow any news accounts
+          db.prepare(
+            `
           DELETE FROM follows 
           WHERE follower_id = ? 
           AND followed_id IN (SELECT id FROM users WHERE account_type = 'news')
-        `).run(user.id);
+        `,
+          ).run(user.id);
+        }
       }
     }
-  }
 
-  function globalSyncNewsFollowers() {
-    // AI characters follow news accounts in their universe
-    db.prepare(`
+    function globalSyncNewsFollowers() {
+      // AI characters follow news accounts in their universe
+      db.prepare(
+        `
       INSERT OR IGNORE INTO follows (follower_id, followed_id)
       SELECT c.id, n.id 
       FROM users c
       JOIN users n ON c.universe_id = n.universe_id
       WHERE c.is_ai = 1 AND n.account_type = 'news' AND c.id != n.id
-    `).run();
+    `,
+      ).run();
 
-    // AI characters do NOT follow news accounts outside their universe
-    db.prepare(`
+      // AI characters do NOT follow news accounts outside their universe
+      db.prepare(
+        `
       DELETE FROM follows
       WHERE ROWID IN (
         SELECT f.ROWID
@@ -1299,306 +2098,394 @@ async function startServer() {
         WHERE c.is_ai = 1 AND n.account_type = 'news'
         AND (c.universe_id != n.universe_id OR c.universe_id IS NULL OR n.universe_id IS NULL)
       )
-    `).run();
-  }
+    `,
+      ).run();
+    }
 
-  globalSyncNewsFollowers();
+    globalSyncNewsFollowers();
 
-  // Initialize Faux News Account
-  const fauxNews = db.prepare("SELECT * FROM users WHERE username = 'fauxnews'").get() as any;
-  if (!fauxNews) {
-    db.prepare(`
+    // Initialize Faux News Account
+    const fauxNews = db
+      .prepare("SELECT * FROM users WHERE username = 'fauxnews'")
+      .get() as any;
+    if (!fauxNews) {
+      db.prepare(
+        `
       INSERT INTO users (username, display_name, bio, ai_persona, account_type, is_ai, is_active)
       VALUES ('fauxnews', 'Faux News', 'The ultimate cross-universe news authority for the Faux platform.', 'A professional, slightly dramatic, and highly informative news anchor for the entire Faux network.', 'faux_news', 1, 1)
-    `).run();
-    const newUser = db.prepare("SELECT * FROM users WHERE username = 'fauxnews'").get() as any;
-    scheduleNextFauxNewsPost(newUser, 'UTC');
-  }
-
-  const userCache = new Map<string, { user: any, timestamp: number }>();
-  const USER_CACHE_TTL = 5000; // 5 seconds
-
-  const getRealUser = (req: any) => {
-    if (req.user) return req.user;
-    
-    const userId = req.headers['x-user-id'];
-    const cacheKey = userId || 'default';
-    const cached = userCache.get(cacheKey);
-    
-    if (cached && (Date.now() - cached.timestamp < USER_CACHE_TTL)) {
-      req.user = cached.user;
-      return cached.user;
+    `,
+      ).run();
+      const newUser = db
+        .prepare("SELECT * FROM users WHERE username = 'fauxnews'")
+        .get() as any;
+      scheduleNextFauxNewsPost(newUser, "UTC");
     }
 
-    let user;
-    if (userId) {
-      user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
-    } else {
-      user = db.prepare("SELECT * FROM users WHERE is_ai = 0 ORDER BY id ASC LIMIT 1").get() as any;
-    }
-    
-    userCache.set(cacheKey, { user, timestamp: Date.now() });
-    req.user = user;
-    return user;
-  };
+    const userCache = new Map<string, { user: any; timestamp: number }>();
+    const USER_CACHE_TTL = 5000; // 5 seconds
 
-  // Middleware to populate req.user
-  app.use((req: any, res, next) => {
-    try {
-      getRealUser(req);
-    } catch (e) {
-      // Ignore errors in middleware
-    }
-    next();
-  });
+    const getRealUser = (req: any) => {
+      if (req.user) return req.user;
 
-  // API Routes
-  app.get("/api/logs", (req, res) => {
-    const q = req.query.q as string;
-    const errorOnly = req.query.error === 'true';
-    
-    let queryStr = `
+      const userId = req.headers["x-user-id"];
+      const cacheKey = userId || "default";
+      const cached = userCache.get(cacheKey);
+
+      if (cached && Date.now() - cached.timestamp < USER_CACHE_TTL) {
+        req.user = cached.user;
+        return cached.user;
+      }
+
+      let user;
+      if (userId) {
+        user = db
+          .prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0")
+          .get(userId) as any;
+      } else {
+        user = db
+          .prepare(
+            "SELECT * FROM users WHERE is_ai = 0 ORDER BY id ASC LIMIT 1",
+          )
+          .get() as any;
+      }
+
+      userCache.set(cacheKey, { user, timestamp: Date.now() });
+      req.user = user;
+      return user;
+    };
+
+    // Middleware to populate req.user
+    app.use((req: any, res, next) => {
+      try {
+        getRealUser(req);
+      } catch (e) {
+        // Ignore errors in middleware
+      }
+      next();
+    });
+
+    // API Routes
+    app.get("/api/logs", (req, res) => {
+      const q = req.query.q as string;
+      const errorOnly = req.query.error === "true";
+
+      let queryStr = `
       SELECT l.*, u.display_name as user_display_name, u.avatar_url as user_profile_picture, u.account_type as user_account_type 
       FROM api_logs l 
       LEFT JOIN users u ON l.user_id = u.id 
       WHERE 1=1
     `;
-    const params: any[] = [];
+      const params: any[] = [];
 
-    if (q) {
-      queryStr += ` AND (l.response_payload LIKE ? OR l.request_payload LIKE ?)`;
-      params.push(`%${q}%`, `%${q}%`);
-    }
+      if (q) {
+        queryStr += ` AND (l.response_payload LIKE ? OR l.request_payload LIKE ?)`;
+        params.push(`%${q}%`, `%${q}%`);
+      }
 
-    if (errorOnly) {
-      queryStr += ` AND (l.response_payload LIKE '%"error"%' OR l.response_payload LIKE '%Error:%' OR l.request_payload LIKE '%"error"%')`;
-    }
+      if (errorOnly) {
+        queryStr += ` AND (l.response_payload LIKE '%"error"%' OR l.response_payload LIKE '%Error:%' OR l.request_payload LIKE '%"error"%')`;
+      }
 
-    queryStr += ` ORDER BY l.created_at DESC LIMIT 50`;
+      queryStr += ` ORDER BY l.created_at DESC LIMIT 50`;
 
-    try {
-      const logs = db.prepare(queryStr).all(...params);
-      res.json(logs);
-    } catch (error) {
-      console.error("Error fetching logs:", error);
-      res.status(500).json({ error: "Failed to fetch logs" });
-    }
-  });
+      try {
+        const logs = db.prepare(queryStr).all(...params);
+        res.json(logs);
+      } catch (error) {
+        console.error("Error fetching logs:", error);
+        res.status(500).json({ error: "Failed to fetch logs" });
+      }
+    });
 
-  app.get("/api/relationship-checks", (req, res) => {
-    const limit = parseInt(req.query.limit as string) || 20;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const checks = db.prepare(`
+    app.get("/api/relationship-checks", (req, res) => {
+      const limit = parseInt(req.query.limit as string) || 20;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const checks = db
+        .prepare(
+          `
       SELECT rc.*, u1.display_name as user1_name, u1.avatar_url as user1_avatar, u2.display_name as user2_name, u2.avatar_url as user2_avatar
       FROM relationship_checks rc
       JOIN users u1 ON rc.user_id_1 = u1.id
       JOIN users u2 ON rc.user_id_2 = u2.id
       ORDER BY rc.created_at DESC
       LIMIT ? OFFSET ?
-    `).all(limit, offset);
-    res.json(checks);
-  });
+    `,
+        )
+        .all(limit, offset);
+      res.json(checks);
+    });
 
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
+    app.get("/api/health", (req, res) => {
+      res.json({ status: "ok" });
+    });
 
-  app.get("/api/real-users", (req, res) => {
-    const users = db.prepare("SELECT id, username, display_name, avatar_url, role, pin IS NOT NULL AND pin != '' as has_pin FROM users WHERE is_ai = 0 ORDER BY id ASC").all();
-    res.json(users);
-  });
+    app.get("/api/real-users", (req, res) => {
+      const users = db
+        .prepare(
+          "SELECT id, username, display_name, avatar_url, role, pin IS NOT NULL AND pin != '' as has_pin FROM users WHERE is_ai = 0 ORDER BY id ASC",
+        )
+        .all();
+      res.json(users);
+    });
 
-  app.get("/api/me", (req, res) => {
-    const userId = req.headers['x-user-id'];
-    if (!userId) return res.status(401).json({ error: "Not logged in" });
-    const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
-    res.json(user);
-  });
+    app.get("/api/me", (req, res) => {
+      const userId = req.headers["x-user-id"];
+      if (!userId) return res.status(401).json({ error: "Not logged in" });
+      const user = db
+        .prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0")
+        .get(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      res.json(user);
+    });
 
-  app.post("/api/login", (req, res) => {
-    const { userId, pin } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0").get(userId) as any;
-    
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
+    app.post("/api/login", (req, res) => {
+      const { userId, pin } = req.body;
+      const user = db
+        .prepare("SELECT * FROM users WHERE id = ? AND is_ai = 0")
+        .get(userId) as any;
 
-    if (user.pin && user.pin !== pin) {
-      return res.status(401).json({ error: "Invalid PIN" });
-    }
-
-    res.json({ success: true, user: { id: user.id, username: user.username, display_name: user.display_name, avatar_url: user.avatar_url, role: user.role } });
-  });
-
-  app.post("/api/real-users", (req, res) => {
-    const { username, display_name, pin } = req.body;
-    const adminUser = getRealUser(req);
-    
-    if (!adminUser || adminUser.role !== 'admin') {
-      return res.status(403).json({ error: "Only admins can create real users" });
-    }
-
-    try {
-      const stmt = db.prepare("INSERT INTO users (username, display_name, pin, is_ai, role, created_at) VALUES (?, ?, ?, 0, 'user', CURRENT_TIMESTAMP)");
-      const info = stmt.run(username, display_name || username, pin || null);
-      res.json({ success: true, id: info.lastInsertRowid });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
-
-  // Settings
-  app.get("/api/settings", (req, res) => {
-    const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get();
-    res.json(settings);
-  });
-
-  function shouldShowInternalThoughts() {
-    const settings = db.prepare("SELECT show_internal_thoughts FROM settings WHERE id = 1").get() as any;
-    return settings?.show_internal_thoughts === 1;
-  }
-
-  app.get("/api/archetypes", (req, res) => {
-    const archetypes = db.prepare("SELECT * FROM post_archetypes").all();
-    res.json(archetypes);
-  });
-
-  app.post("/api/archetypes", (req, res) => {
-    const { archetypes } = req.body;
-    if (!Array.isArray(archetypes)) {
-      return res.status(400).json({ error: "Invalid archetypes format" });
-    }
-    
-    const updateArchetype = db.prepare("UPDATE post_archetypes SET probability = ? WHERE id = ?");
-    db.transaction(() => {
-      for (const arch of archetypes) {
-        updateArchetype.run(arch.probability, arch.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
       }
-    })();
-    
-    res.json({ success: true });
-  });
 
-  app.post("/api/settings", (req, res) => {
-    const { ai_enabled, model_name, image_model_name, vision_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob, show_internal_thoughts, image_resolutions } = req.body;
-    if (ai_enabled !== undefined) {
-      db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(ai_enabled ? 1 : 0);
-    }
-    if (model_name !== undefined) {
-      db.prepare("UPDATE settings SET model_name = ? WHERE id = 1").run(model_name);
-    }
-    if (image_model_name !== undefined) {
-      db.prepare("UPDATE settings SET image_model_name = ? WHERE id = 1").run(image_model_name);
-    }
-    if (vision_model_name !== undefined) {
-      db.prepare("UPDATE settings SET vision_model_name = ? WHERE id = 1").run(vision_model_name);
-    }
-    if (timezone !== undefined) {
-      db.prepare("UPDATE settings SET timezone = ? WHERE id = 1").run(timezone);
-    }
-    if (api_key !== undefined) {
-      db.prepare("UPDATE settings SET api_key = ? WHERE id = 1").run(api_key);
-    }
-    if (prob_post !== undefined) {
-      db.prepare("UPDATE settings SET prob_post = ? WHERE id = 1").run(prob_post);
-    }
-    if (prob_image_post !== undefined) {
-      db.prepare("UPDATE settings SET prob_image_post = ? WHERE id = 1").run(prob_image_post);
-    }
-    if (prob_comment !== undefined) {
-      db.prepare("UPDATE settings SET prob_comment = ? WHERE id = 1").run(prob_comment);
-    }
-    if (prob_message !== undefined) {
-      db.prepare("UPDATE settings SET prob_message = ? WHERE id = 1").run(prob_message);
-    }
-    if (prob_favorite_dm !== undefined) {
-      db.prepare("UPDATE settings SET prob_favorite_dm = ? WHERE id = 1").run(prob_favorite_dm);
-    }
-    if (cross_universe_prob !== undefined) {
-      db.prepare("UPDATE settings SET cross_universe_prob = ? WHERE id = 1").run(cross_universe_prob);
-    }
-    if (show_internal_thoughts !== undefined) {
-      db.prepare("UPDATE settings SET show_internal_thoughts = ? WHERE id = 1").run(show_internal_thoughts);
-    }
-    if (image_resolutions !== undefined) {
-      db.prepare("UPDATE settings SET image_resolutions = ? WHERE id = 1").run(JSON.stringify(image_resolutions));
-    }
-    res.json({ success: true });
-  });
+      if (user.pin && user.pin !== pin) {
+        return res.status(401).json({ error: "Invalid PIN" });
+      }
 
-  app.post("/api/reset-db", (req, res) => {
-    try {
-      db.prepare("DELETE FROM comment_likes").run();
-      db.prepare("DELETE FROM likes").run();
-      db.prepare("DELETE FROM comments").run();
-      db.prepare("DELETE FROM direct_messages").run();
-      db.prepare("DELETE FROM group_chat_messages").run();
-      db.prepare("DELETE FROM group_chat_members").run();
-      db.prepare("DELETE FROM group_chats").run();
-      db.prepare("DELETE FROM notifications").run();
-      db.prepare("DELETE FROM posts").run();
-      db.prepare("DELETE FROM follows").run();
-      db.prepare("DELETE FROM relationships").run();
-      db.prepare("DELETE FROM users WHERE is_ai = 1").run();
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          display_name: user.display_name,
+          avatar_url: user.avatar_url,
+          role: user.role,
+        },
+      });
+    });
 
-  app.post("/api/reset-content", (req, res) => {
-    try {
-      db.prepare("DELETE FROM comment_likes").run();
-      db.prepare("DELETE FROM likes").run();
-      db.prepare("DELETE FROM comments").run();
-      db.prepare("DELETE FROM direct_messages").run();
-      db.prepare("DELETE FROM group_chat_messages").run();
-      db.prepare("DELETE FROM group_chat_members").run();
-      db.prepare("DELETE FROM group_chats").run();
-      db.prepare("DELETE FROM notifications").run();
-      db.prepare("DELETE FROM posts").run();
-      db.prepare("UPDATE users SET is_active = 0 WHERE is_ai = 1").run();
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    app.post("/api/real-users", (req, res) => {
+      const { username, display_name, pin } = req.body;
+      const adminUser = getRealUser(req);
 
-  app.post("/api/test-ai", async (req, res) => {
-    try {
-      const result = await testConnection();
-      res.json(result);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+      if (!adminUser || adminUser.role !== "admin") {
+        return res
+          .status(403)
+          .json({ error: "Only admins can create real users" });
+      }
 
-  app.post("/api/generate-persona", async (req, res) => {
-    try {
-      const { name, extraInfo } = req.body;
-      logApi(
-        "ROUTE_GENERATE_PERSONA",
-        { name, extraInfo },
-        "Request Received"
+      try {
+        const stmt = db.prepare(
+          "INSERT INTO users (username, display_name, pin, is_ai, role, created_at) VALUES (?, ?, ?, 0, 'user', CURRENT_TIMESTAMP)",
+        );
+        const info = stmt.run(username, display_name || username, pin || null);
+        res.json({ success: true, id: info.lastInsertRowid });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
+
+    // Settings
+    app.get("/api/settings", (req, res) => {
+      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get();
+      res.json(settings);
+    });
+
+    function shouldShowInternalThoughts() {
+      const settings = db
+        .prepare("SELECT show_internal_thoughts FROM settings WHERE id = 1")
+        .get() as any;
+      return settings?.show_internal_thoughts === 1;
+    }
+
+    app.get("/api/archetypes", (req, res) => {
+      const archetypes = db.prepare("SELECT * FROM post_archetypes").all();
+      res.json(archetypes);
+    });
+
+    app.post("/api/archetypes", (req, res) => {
+      const { archetypes } = req.body;
+      if (!Array.isArray(archetypes)) {
+        return res.status(400).json({ error: "Invalid archetypes format" });
+      }
+
+      const updateArchetype = db.prepare(
+        "UPDATE post_archetypes SET probability = ? WHERE id = ?",
       );
-      const universes = db.prepare("SELECT name FROM universes").all().map((u: any) => u.name);
-      
-      const persona = await generatePersona(name, extraInfo, universes);
-      res.json(persona);
-    } catch (e: any) {
-      console.error("Error in generate-persona:", e);
-      res.status(500).json({ error: e.message });
-    }
-  });
+      db.transaction(() => {
+        for (const arch of archetypes) {
+          updateArchetype.run(arch.probability, arch.id);
+        }
+      })();
 
-  // Users
-  app.get("/api/users/:id/posts", (req, res) => {
-    const user = getRealUser(req);
-    const userId = user ? user.id : 0;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const posts = db.prepare(`
+      res.json({ success: true });
+    });
+
+    app.post("/api/settings", (req, res) => {
+      const {
+        ai_enabled,
+        model_name,
+        image_model_name,
+        vision_model_name,
+        timezone,
+        api_key,
+        prob_post,
+        prob_image_post,
+        prob_comment,
+        prob_message,
+        prob_favorite_dm,
+        cross_universe_prob,
+        show_internal_thoughts,
+        image_resolutions,
+      } = req.body;
+      if (ai_enabled !== undefined) {
+        db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(
+          ai_enabled ? 1 : 0,
+        );
+      }
+      if (model_name !== undefined) {
+        db.prepare("UPDATE settings SET model_name = ? WHERE id = 1").run(
+          model_name,
+        );
+      }
+      if (image_model_name !== undefined) {
+        db.prepare("UPDATE settings SET image_model_name = ? WHERE id = 1").run(
+          image_model_name,
+        );
+      }
+      if (vision_model_name !== undefined) {
+        db.prepare(
+          "UPDATE settings SET vision_model_name = ? WHERE id = 1",
+        ).run(vision_model_name);
+      }
+      if (timezone !== undefined) {
+        db.prepare("UPDATE settings SET timezone = ? WHERE id = 1").run(
+          timezone,
+        );
+      }
+      if (api_key !== undefined) {
+        db.prepare("UPDATE settings SET api_key = ? WHERE id = 1").run(api_key);
+      }
+      if (prob_post !== undefined) {
+        db.prepare("UPDATE settings SET prob_post = ? WHERE id = 1").run(
+          prob_post,
+        );
+      }
+      if (prob_image_post !== undefined) {
+        db.prepare("UPDATE settings SET prob_image_post = ? WHERE id = 1").run(
+          prob_image_post,
+        );
+      }
+      if (prob_comment !== undefined) {
+        db.prepare("UPDATE settings SET prob_comment = ? WHERE id = 1").run(
+          prob_comment,
+        );
+      }
+      if (prob_message !== undefined) {
+        db.prepare("UPDATE settings SET prob_message = ? WHERE id = 1").run(
+          prob_message,
+        );
+      }
+      if (prob_favorite_dm !== undefined) {
+        db.prepare("UPDATE settings SET prob_favorite_dm = ? WHERE id = 1").run(
+          prob_favorite_dm,
+        );
+      }
+      if (cross_universe_prob !== undefined) {
+        db.prepare(
+          "UPDATE settings SET cross_universe_prob = ? WHERE id = 1",
+        ).run(cross_universe_prob);
+      }
+      if (show_internal_thoughts !== undefined) {
+        db.prepare(
+          "UPDATE settings SET show_internal_thoughts = ? WHERE id = 1",
+        ).run(show_internal_thoughts);
+      }
+      if (image_resolutions !== undefined) {
+        db.prepare(
+          "UPDATE settings SET image_resolutions = ? WHERE id = 1",
+        ).run(JSON.stringify(image_resolutions));
+      }
+      res.json({ success: true });
+    });
+
+    app.post("/api/reset-db", (req, res) => {
+      try {
+        db.prepare("DELETE FROM comment_likes").run();
+        db.prepare("DELETE FROM likes").run();
+        db.prepare("DELETE FROM comments").run();
+        db.prepare("DELETE FROM direct_messages").run();
+        db.prepare("DELETE FROM group_chat_messages").run();
+        db.prepare("DELETE FROM group_chat_members").run();
+        db.prepare("DELETE FROM group_chats").run();
+        db.prepare("DELETE FROM notifications").run();
+        db.prepare("DELETE FROM posts").run();
+        db.prepare("DELETE FROM follows").run();
+        db.prepare("DELETE FROM relationships").run();
+        db.prepare("DELETE FROM users WHERE is_ai = 1").run();
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.post("/api/reset-content", (req, res) => {
+      try {
+        db.prepare("DELETE FROM comment_likes").run();
+        db.prepare("DELETE FROM likes").run();
+        db.prepare("DELETE FROM comments").run();
+        db.prepare("DELETE FROM direct_messages").run();
+        db.prepare("DELETE FROM group_chat_messages").run();
+        db.prepare("DELETE FROM group_chat_members").run();
+        db.prepare("DELETE FROM group_chats").run();
+        db.prepare("DELETE FROM notifications").run();
+        db.prepare("DELETE FROM posts").run();
+        db.prepare("UPDATE users SET is_active = 0 WHERE is_ai = 1").run();
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.post("/api/test-ai", async (req, res) => {
+      try {
+        const result = await testConnection();
+        res.json(result);
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.post("/api/generate-persona", async (req, res) => {
+      try {
+        const { name, extraInfo } = req.body;
+        logApi(
+          "ROUTE_GENERATE_PERSONA",
+          { name, extraInfo },
+          "Request Received",
+        );
+        const universes = db
+          .prepare("SELECT name FROM universes")
+          .all()
+          .map((u: any) => u.name);
+
+        const persona = await generatePersona(name, extraInfo, universes);
+        res.json(persona);
+      } catch (e: any) {
+        console.error("Error in generate-persona:", e);
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    // Users
+    app.get("/api/users/:id/posts", (req, res) => {
+      const user = getRealUser(req);
+      const userId = user ? user.id : 0;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const posts = db
+        .prepare(
+          `
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
@@ -1608,42 +2495,56 @@ async function startServer() {
       WHERE p.user_id = ? AND p.is_visible = 1
       ORDER BY p.created_at DESC
       LIMIT ? OFFSET ?
-    `).all(userId, req.params.id, limit, offset) as any[];
-    
-    const showThoughts = shouldShowInternalThoughts();
-    if (!showThoughts) {
-      posts.forEach(p => delete p.internal_thought);
-    }
-    res.json(posts);
-  });
+    `,
+        )
+        .all(userId, req.params.id, limit, offset) as any[];
 
-  app.get("/api/users/:id/followers", (req, res) => {
-    const followers = db.prepare(`
+      const showThoughts = shouldShowInternalThoughts();
+      if (!showThoughts) {
+        posts.forEach((p) => delete p.internal_thought);
+      }
+      res.json(posts);
+    });
+
+    app.get("/api/users/:id/followers", (req, res) => {
+      const followers = db
+        .prepare(
+          `
       SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM follows f
       JOIN users u ON f.follower_id = u.id
       WHERE f.followed_id = ?
-    `).all(req.params.id);
-    res.json(followers);
-  });
+    `,
+        )
+        .all(req.params.id);
+      res.json(followers);
+    });
 
-  app.get("/api/users/:id/following", (req, res) => {
-    const following = db.prepare(`
+    app.get("/api/users/:id/following", (req, res) => {
+      const following = db
+        .prepare(
+          `
       SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM follows f
       JOIN users u ON f.followed_id = u.id
       WHERE f.follower_id = ?
-    `).all(req.params.id);
-    res.json(following);
-  });
+    `,
+        )
+        .all(req.params.id);
+      res.json(following);
+    });
 
-  app.get("/api/users/:id", (req, res) => {
-    try {
-      const loggedInUser = getRealUser(req);
-      const targetId = parseInt(req.params.id);
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+    app.get("/api/users/:id", (req, res) => {
+      try {
+        const loggedInUser = getRealUser(req);
+        const targetId = parseInt(req.params.id);
+        const settings = db
+          .prepare("SELECT * FROM settings WHERE id = 1")
+          .get() as any;
 
-      const user = db.prepare(`
+        const user = db
+          .prepare(
+            `
         SELECT u.*, 
         (u.pin IS NOT NULL AND u.pin != '') as has_pin,
         EXISTS (SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = u.id) as is_followed,
@@ -1651,78 +2552,94 @@ async function startServer() {
         (SELECT COUNT(*) FROM follows WHERE followed_id = u.id) as follower_count
         FROM users u 
         WHERE u.id = ?
-      `).get(loggedInUser?.id || 0, targetId) as any;
+      `,
+          )
+          .get(loggedInUser?.id || 0, targetId) as any;
 
-      if (!user) return res.status(404).json({ error: "User not found" });
-      
-      // Calculate live online status
-      const isOnline = getDeterministicOnlineStatus(user, settings?.timezone || 'UTC');
-      user.current_online_status = isOnline ? 1 : 0;
-      user.status_expires_at = Date.now() + (15 * 60 * 1000);
+        if (!user) return res.status(404).json({ error: "User not found" });
 
-      // Remove sensitive data
-      delete user.pin;
-      
-      res.json(user);
-    } catch (e: any) {
-      console.error("Error in /api/users/:id:", e);
-      res.status(500).json({ error: e.message });
-    }
-  });
+        // Calculate live online status
+        const isOnline = getDeterministicOnlineStatus(
+          user,
+          settings?.timezone || "UTC",
+        );
+        user.current_online_status = isOnline ? 1 : 0;
+        user.status_expires_at = Date.now() + 15 * 60 * 1000;
 
-  app.post("/api/users/:id/poke", (req, res) => {
-    try {
-      const targetId = parseInt(req.params.id);
-      if (isNaN(targetId)) return res.status(400).json({ error: "Invalid user ID" });
-      
-      const forcedOnlineUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-      const statusExpiresAt = Date.now() + 30 * 60 * 1000;
-      
-      db.prepare(`
+        // Remove sensitive data
+        delete user.pin;
+
+        res.json(user);
+      } catch (e: any) {
+        console.error("Error in /api/users/:id:", e);
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.post("/api/users/:id/poke", (req, res) => {
+      try {
+        const targetId = parseInt(req.params.id);
+        if (isNaN(targetId))
+          return res.status(400).json({ error: "Invalid user ID" });
+
+        const forcedOnlineUntil = new Date(
+          Date.now() + 30 * 60 * 1000,
+        ).toISOString();
+        const statusExpiresAt = Date.now() + 30 * 60 * 1000;
+
+        db.prepare(
+          `
         UPDATE users 
         SET forced_online_until = ?, 
             current_online_status = 1, 
             status_expires_at = ? 
         WHERE id = ?
-      `).run(forcedOnlineUntil, statusExpiresAt, targetId);
-      
-      res.json({ success: true, forced_online_until: forcedOnlineUntil });
-    } catch (e: any) {
-      console.error("Error in /api/users/:id/poke:", e);
-      res.status(500).json({ error: e.message });
-    }
-  });
+      `,
+        ).run(forcedOnlineUntil, statusExpiresAt, targetId);
 
-  app.get("/api/random-profiles", (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 50;
-      // Fetch only essential data for background gallery, randomizing efficiently
-      const users = db.prepare(`
+        res.json({ success: true, forced_online_until: forcedOnlineUntil });
+      } catch (e: any) {
+        console.error("Error in /api/users/:id/poke:", e);
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.get("/api/random-profiles", (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit as string) || 50;
+        // Fetch only essential data for background gallery, randomizing efficiently
+        const users = db
+          .prepare(
+            `
         SELECT id, avatar_url, account_type
         FROM users
         WHERE account_type IN ('character', 'company', 'news') AND avatar_url IS NOT NULL AND avatar_url != ''
         ORDER BY RANDOM()
         LIMIT ?
-      `).all(limit);
-      res.json(users);
-    } catch (e: any) {
-      console.error("Error fetching random profiles:", e);
-      res.status(500).json({ error: "Failed to fetch random profiles" });
-    }
-  });
+      `,
+          )
+          .all(limit);
+        res.json(users);
+      } catch (e: any) {
+        console.error("Error fetching random profiles:", e);
+        res.status(500).json({ error: "Failed to fetch random profiles" });
+      }
+    });
 
-  app.get("/api/users", (req, res) => {
-    try {
-      const startTime = Date.now();
-      const user = getRealUser(req);
-      const limit = parseInt(req.query.limit as string) || 1000;
-      const offset = parseInt(req.query.offset as string) || 0;
-      const search = req.query.search as string;
-      const isAi = req.query.is_ai;
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
-      const timezone = settings?.timezone || 'UTC';
+    app.get("/api/users", (req, res) => {
+      try {
+        const startTime = Date.now();
+        const user = getRealUser(req);
+        const limit = parseInt(req.query.limit as string) || 1000;
+        const offset = parseInt(req.query.offset as string) || 0;
+        const search = req.query.search as string;
+        const isAi = req.query.is_ai;
+        const settings = db
+          .prepare("SELECT * FROM settings WHERE id = 1")
+          .get() as any;
+        const timezone = settings?.timezone || "UTC";
 
-      let query = `
+        let query = `
         SELECT id, username, display_name, avatar_url, is_ai, is_active, universe_id, account_type, 
                current_online_status, status_expires_at, online_times, activity_level, created_at,
                (pin IS NOT NULL AND pin != '') as has_pin,
@@ -1730,412 +2647,610 @@ async function startServer() {
         FROM users
         WHERE 1=1
       `;
-      const params: any[] = [user?.id || 0];
+        const params: any[] = [user?.id || 0];
 
-      if (search) {
-        query += ` AND (display_name LIKE ? OR username LIKE ?)`;
-        params.push(`%${search}%`, `%${search}%`);
-      }
+        if (search) {
+          query += ` AND (display_name LIKE ? OR username LIKE ?)`;
+          params.push(`%${search}%`, `%${search}%`);
+        }
 
-      if (isAi !== undefined) {
-        query += ` AND is_ai = ?`;
-        params.push(isAi === 'true' ? 1 : 0);
-      }
+        if (isAi !== undefined) {
+          query += ` AND is_ai = ?`;
+          params.push(isAi === "true" ? 1 : 0);
+        }
 
-      query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-      params.push(limit, offset);
+        query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+        params.push(limit, offset);
 
-      const q1Time = Date.now();
-      const users = db.prepare(query).all(...params) as any[];
-      const q2Time = Date.now();
-      
-      // Batch check for recent DMs to optimize online status calculation
-      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      let recentDmUserIds = new Set<number>();
-      try {
-        recentDmUserIds = new Set<number>(db.prepare(`
+        const q1Time = Date.now();
+        const users = db.prepare(query).all(...params) as any[];
+        const q2Time = Date.now();
+
+        // Batch check for recent DMs to optimize online status calculation
+        const fifteenMinsAgo = new Date(
+          Date.now() - 15 * 60 * 1000,
+        ).toISOString();
+        let recentDmUserIds = new Set<number>();
+        try {
+          recentDmUserIds = new Set<number>(
+            db
+              .prepare(
+                `
           SELECT DISTINCT receiver_id FROM direct_messages dm
           JOIN users u ON dm.sender_id = u.id
           WHERE u.is_ai = 0 AND dm.created_at >= ?
-        `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
-      } catch (dmErr) {
-        console.error("Error fetching recent DMs for online status:", dmErr);
-      }
-      const q3Time = Date.now();
-
-      // Pre-calculate time for online status to avoid repeated expensive calls
-      const now = Date.now();
-      const localTime = getFormatter(timezone).format(new Date(now));
-      let [currentHour, currentMinute] = localTime.split(':').map(Number);
-      if (currentHour === 24) currentHour = 0;
-      const precalculatedTime = { currentTimeInMinutes: currentHour * 60 + currentMinute };
-
-      users.forEach(u => {
-        try {
-          const isOnline = getDeterministicOnlineStatus(u, timezone, recentDmUserIds, precalculatedTime);
-          u.current_online_status = isOnline ? 1 : 0;
-          u.status_expires_at = now + (15 * 60 * 1000);
-        } catch (uErr) {
-          console.error(`Error calculating online status for user ${u.id}:`, uErr);
+        `,
+              )
+              .all(fifteenMinsAgo)
+              .map((r: any) => r.receiver_id as number),
+          );
+        } catch (dmErr) {
+          console.error("Error fetching recent DMs for online status:", dmErr);
         }
-      });
-      
-      const q4Time = Date.now();
-      if (q4Time - startTime > 500) {
-        console.log(`Slow /api/users: total=${q4Time - startTime}ms db_users=${q2Time - q1Time}ms db_dms=${q3Time - q2Time}ms online_calc=${q4Time - q3Time}ms`);
+        const q3Time = Date.now();
+
+        // Pre-calculate time for online status to avoid repeated expensive calls
+        const now = Date.now();
+        const localTime = getFormatter(timezone).format(new Date(now));
+        let [currentHour, currentMinute] = localTime.split(":").map(Number);
+        if (currentHour === 24) currentHour = 0;
+        const precalculatedTime = {
+          currentTimeInMinutes: currentHour * 60 + currentMinute,
+        };
+
+        users.forEach((u) => {
+          try {
+            const isOnline = getDeterministicOnlineStatus(
+              u,
+              timezone,
+              recentDmUserIds,
+              precalculatedTime,
+            );
+            u.current_online_status = isOnline ? 1 : 0;
+            u.status_expires_at = now + 15 * 60 * 1000;
+          } catch (uErr) {
+            console.error(
+              `Error calculating online status for user ${u.id}:`,
+              uErr,
+            );
+          }
+        });
+
+        const q4Time = Date.now();
+        if (q4Time - startTime > 500) {
+          console.log(
+            `Slow /api/users: total=${q4Time - startTime}ms db_users=${q2Time - q1Time}ms db_dms=${q3Time - q2Time}ms online_calc=${q4Time - q3Time}ms`,
+          );
+        }
+
+        res.json(users);
+      } catch (e: any) {
+        console.error("Error in /api/users:", e);
+        res.status(500).json({ error: e.message || "Internal Server Error" });
       }
+    });
 
-      res.json(users);
-    } catch (e: any) {
-      console.error("Error in /api/users:", e);
-      res.status(500).json({ error: e.message || "Internal Server Error" });
-    }
-  });
+    app.get("/api/users/:id/arcs", (req, res) => {
+      try {
+        const arcs = db
+          .prepare(
+            "SELECT *, 'character' as arc_type FROM character_arcs WHERE user_id = ? ORDER BY created_at DESC",
+          )
+          .all(req.params.id);
+        res.json(arcs);
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
 
-  app.get("/api/users/:id/arcs", (req, res) => {
-    try {
-      const arcs = db.prepare("SELECT *, 'character' as arc_type FROM character_arcs WHERE user_id = ? ORDER BY created_at DESC").all(req.params.id);
-      res.json(arcs);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    app.get("/api/users/:id/relationships", (req, res) => {
+      const loggedInUser = getRealUser(req);
 
-  app.get("/api/users/:id/relationships", (req, res) => {
-    const loggedInUser = getRealUser(req);
-    
-    const relationships = db.prepare(`
+      const relationships = db
+        .prepare(
+          `
       SELECT r.*, u.display_name as other_name, u.username as other_username, u.avatar_url as other_avatar, u.account_type as other_account_type, u.role as other_role, u1.role as user1_role, u.is_verified as other_is_verified
       FROM relationships r
       JOIN users u ON r.user_id_2 = u.id
       JOIN users u1 ON r.user_id_1 = u1.id
       WHERE r.user_id_1 = ?
-    `).all(req.params.id);
-    
-    const filteredRelationships = relationships.filter((rel: any) => {
-      if (loggedInUser && loggedInUser.role === 'admin') return true;
-      if (rel.other_role === 'admin' || rel.user1_role === 'admin') return false;
-      return true;
+    `,
+        )
+        .all(req.params.id);
+
+      const filteredRelationships = relationships.filter((rel: any) => {
+        if (loggedInUser && loggedInUser.role === "admin") return true;
+        if (rel.other_role === "admin" || rel.user1_role === "admin")
+          return false;
+        return true;
+      });
+
+      res.json(filteredRelationships);
     });
-    
-    res.json(filteredRelationships);
-  });
 
-  app.post("/api/users/:id/relationships", (req, res) => {
-    const { user_id_2, description } = req.body;
-    const user_id_1 = req.params.id;
-    try {
-      const user1 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user_id_1) as any;
-      const user2 = db.prepare("SELECT account_type, universe_id FROM users WHERE id = ?").get(user_id_2) as any;
+    app.post("/api/users/:id/relationships", (req, res) => {
+      const { user_id_2, description } = req.body;
+      const user_id_1 = req.params.id;
+      try {
+        const user1 = db
+          .prepare("SELECT account_type, universe_id FROM users WHERE id = ?")
+          .get(user_id_1) as any;
+        const user2 = db
+          .prepare("SELECT account_type, universe_id FROM users WHERE id = ?")
+          .get(user_id_2) as any;
 
-      if (!user1 || !user2) {
-        return res.status(404).json({ error: "User not found" });
+        if (!user1 || !user2) {
+          return res.status(404).json({ error: "User not found" });
+        }
+
+        const isUser1Company = user1.account_type === "company";
+        const isUser2Company = user2.account_type === "company";
+
+        // Companies cannot form relationships with characters
+        if (isUser1Company && !isUser2Company) {
+          return res
+            .status(400)
+            .json({
+              error: "Companies cannot form relationships with characters.",
+            });
+        }
+
+        // If either is a company, they must be from the same universe
+        if (
+          (isUser1Company || isUser2Company) &&
+          user1.universe_id !== user2.universe_id
+        ) {
+          return res
+            .status(400)
+            .json({
+              error:
+                "Relationships involving companies must be within the same universe.",
+            });
+        }
+
+        // Insert relationship for user 1 -> user 2
+        db.prepare(
+          "INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)",
+        ).run(user_id_1, user_id_2, description);
+        db.prepare(
+          "INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)",
+        ).run(user_id_1, user_id_2);
+
+        // If it's Character -> Company, it's one-sided. Otherwise, it's two-sided.
+        if (!(!isUser1Company && isUser2Company)) {
+          db.prepare(
+            "INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)",
+          ).run(user_id_2, user_id_1, description);
+          db.prepare(
+            "INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)",
+          ).run(user_id_2, user_id_1);
+        }
+
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
       }
+    });
 
-      const isUser1Company = user1.account_type === 'company';
-      const isUser2Company = user2.account_type === 'company';
-
-      // Companies cannot form relationships with characters
-      if (isUser1Company && !isUser2Company) {
-        return res.status(400).json({ error: "Companies cannot form relationships with characters." });
+    app.delete("/api/users/:id/relationships/:otherId", (req, res) => {
+      const user_id_1 = req.params.id;
+      const user_id_2 = req.params.otherId;
+      try {
+        db.prepare(
+          "DELETE FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+        ).run(user_id_1, user_id_2);
+        db.prepare(
+          "DELETE FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+        ).run(user_id_2, user_id_1);
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
       }
+    });
 
-      // If either is a company, they must be from the same universe
-      if ((isUser1Company || isUser2Company) && user1.universe_id !== user2.universe_id) {
-        return res.status(400).json({ error: "Relationships involving companies must be within the same universe." });
+    app.delete("/api/users/:id", (req, res) => {
+      const userId = req.params.id;
+      try {
+        // Don't delete the real user
+        const user = db
+          .prepare("SELECT is_ai FROM users WHERE id = ?")
+          .get(userId) as any;
+        if (!user || user.is_ai === 0) {
+          return res.status(400).json({ error: "Cannot delete real user" });
+        }
+
+        // Delete all related data
+        db.prepare("DELETE FROM comment_likes WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM likes WHERE user_id = ?").run(userId);
+        db.prepare(
+          "DELETE FROM notifications WHERE user_id = ? OR actor_id = ?",
+        ).run(userId, userId);
+        db.prepare(
+          "DELETE FROM follows WHERE follower_id = ? OR followed_id = ?",
+        ).run(userId, userId);
+        db.prepare(
+          "DELETE FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?",
+        ).run(userId, userId);
+
+        // Delete comments and their likes/notifications
+        const comments = db
+          .prepare("SELECT id FROM comments WHERE user_id = ?")
+          .all(userId) as any[];
+        for (const c of comments) {
+          db.prepare("DELETE FROM comment_likes WHERE comment_id = ?").run(
+            c.id,
+          );
+          db.prepare(
+            "DELETE FROM notifications WHERE type = 'like_comment' AND reference_id = ?",
+          ).run(c.id);
+          db.prepare("DELETE FROM comments WHERE parent_id = ?").run(c.id);
+          db.prepare("DELETE FROM comments WHERE id = ?").run(c.id);
+        }
+
+        // Delete posts and their comments/likes/notifications
+        const posts = db
+          .prepare("SELECT id FROM posts WHERE user_id = ?")
+          .all(userId) as any[];
+        for (const p of posts) {
+          db.prepare(
+            "DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)",
+          ).run(p.id);
+          db.prepare(
+            "DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)",
+          ).run(p.id);
+          db.prepare("DELETE FROM comments WHERE post_id = ?").run(p.id);
+          db.prepare("DELETE FROM likes WHERE post_id = ?").run(p.id);
+          db.prepare(
+            "DELETE FROM notifications WHERE type IN ('like_post', 'comment', 'reply') AND reference_id = ?",
+          ).run(p.id);
+          db.prepare("DELETE FROM posts WHERE id = ?").run(p.id);
+        }
+
+        // Delete DMs
+        db.prepare(
+          "DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?",
+        ).run(userId, userId);
+
+        // Finally delete user
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
       }
+    });
 
-      // Insert relationship for user 1 -> user 2
-      db.prepare("INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(user_id_1, user_id_2, description);
-      db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user_id_1, user_id_2);
-
-      // If it's Character -> Company, it's one-sided. Otherwise, it's two-sided.
-      if (!(!isUser1Company && isUser2Company)) {
-        db.prepare("INSERT OR REPLACE INTO relationships (user_id_1, user_id_2, description) VALUES (?, ?, ?)").run(user_id_2, user_id_1, description);
-        db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user_id_2, user_id_1);
-      }
-      
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.delete("/api/users/:id/relationships/:otherId", (req, res) => {
-    const user_id_1 = req.params.id;
-    const user_id_2 = req.params.otherId;
-    try {
-      db.prepare("DELETE FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").run(user_id_1, user_id_2);
-      db.prepare("DELETE FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").run(user_id_2, user_id_1);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.delete("/api/users/:id", (req, res) => {
-    const userId = req.params.id;
-    try {
-      // Don't delete the real user
-      const user = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(userId) as any;
-      if (!user || user.is_ai === 0) {
-        return res.status(400).json({ error: "Cannot delete real user" });
-      }
-
-      // Delete all related data
-      db.prepare("DELETE FROM comment_likes WHERE user_id = ?").run(userId);
-      db.prepare("DELETE FROM likes WHERE user_id = ?").run(userId);
-      db.prepare("DELETE FROM notifications WHERE user_id = ? OR actor_id = ?").run(userId, userId);
-      db.prepare("DELETE FROM follows WHERE follower_id = ? OR followed_id = ?").run(userId, userId);
-      db.prepare("DELETE FROM relationships WHERE user_id_1 = ? OR user_id_2 = ?").run(userId, userId);
-      
-      // Delete comments and their likes/notifications
-      const comments = db.prepare("SELECT id FROM comments WHERE user_id = ?").all(userId) as any[];
-      for (const c of comments) {
-        db.prepare("DELETE FROM comment_likes WHERE comment_id = ?").run(c.id);
-        db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id = ?").run(c.id);
-        db.prepare("DELETE FROM comments WHERE parent_id = ?").run(c.id);
-        db.prepare("DELETE FROM comments WHERE id = ?").run(c.id);
-      }
-
-      // Delete posts and their comments/likes/notifications
-      const posts = db.prepare("SELECT id FROM posts WHERE user_id = ?").all(userId) as any[];
-      for (const p of posts) {
-        db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)").run(p.id);
-        db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)").run(p.id);
-        db.prepare("DELETE FROM comments WHERE post_id = ?").run(p.id);
-        db.prepare("DELETE FROM likes WHERE post_id = ?").run(p.id);
-        db.prepare("DELETE FROM notifications WHERE type IN ('like_post', 'comment', 'reply') AND reference_id = ?").run(p.id);
-        db.prepare("DELETE FROM posts WHERE id = ?").run(p.id);
-      }
-
-      // Delete DMs
-      db.prepare("DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?").run(userId, userId);
-
-      // Finally delete user
-      db.prepare("DELETE FROM users WHERE id = ?").run(userId);
-
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Universes
-  app.get("/api/universes", (req, res) => {
-    const universes = db.prepare(`
+    // Universes
+    app.get("/api/universes", (req, res) => {
+      const universes = db
+        .prepare(
+          `
       SELECT u.*, (SELECT COUNT(*) FROM users WHERE universe_id = u.id) as character_count
       FROM universes u
       ORDER BY u.name ASC
-    `).all();
-    res.json(universes);
-  });
+    `,
+        )
+        .all();
+      res.json(universes);
+    });
 
-  app.post("/api/universes", (req, res) => {
-    const { name, description, image_url } = req.body;
-    try {
-      const info = db.prepare("INSERT INTO universes (name, description, image_url, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)").run(name, description || '', image_url || '');
-      res.json({ id: info.lastInsertRowid, name, description, image_url });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+    app.post("/api/universes", (req, res) => {
+      const { name, description, image_url } = req.body;
+      try {
+        const info = db
+          .prepare(
+            "INSERT INTO universes (name, description, image_url, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+          )
+          .run(name, description || "", image_url || "");
+        res.json({ id: info.lastInsertRowid, name, description, image_url });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
 
-  app.put("/api/universes/:id", (req, res) => {
-    const { description, image_url } = req.body;
-    try {
-      db.prepare("UPDATE universes SET description = ?, image_url = ? WHERE id = ?").run(description || '', image_url || '', req.params.id);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+    app.put("/api/universes/:id", (req, res) => {
+      const { description, image_url } = req.body;
+      try {
+        db.prepare(
+          "UPDATE universes SET description = ?, image_url = ? WHERE id = ?",
+        ).run(description || "", image_url || "", req.params.id);
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
 
-  app.post("/api/universes/:id/pause", (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
+    app.post("/api/universes/:id/pause", (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
 
-    const { is_paused } = req.body;
-    try {
-      if (is_paused) {
-        db.prepare("UPDATE universes SET is_paused = 1, paused_at = ? WHERE id = ?").run(new Date().toISOString(), req.params.id);
-      } else {
-        const universe = db.prepare("SELECT paused_at FROM universes WHERE id = ?").get(req.params.id) as any;
-        if (universe && universe.paused_at) {
-          // Javascript new Date() can parse ISO strings cleanly.
-          const pausedTimeMs = Date.now() - new Date(universe.paused_at).getTime();
-          const pausedSeconds = Math.max(0, Math.floor(pausedTimeMs / 1000));
-          
-          // Adjust Universe Arcs
-          db.prepare(`
+      const { is_paused } = req.body;
+      try {
+        if (is_paused) {
+          db.prepare(
+            "UPDATE universes SET is_paused = 1, paused_at = ? WHERE id = ?",
+          ).run(new Date().toISOString(), req.params.id);
+        } else {
+          const universe = db
+            .prepare("SELECT paused_at FROM universes WHERE id = ?")
+            .get(req.params.id) as any;
+          if (universe && universe.paused_at) {
+            // Javascript new Date() can parse ISO strings cleanly.
+            const pausedTimeMs =
+              Date.now() - new Date(universe.paused_at).getTime();
+            const pausedSeconds = Math.max(0, Math.floor(pausedTimeMs / 1000));
+
+            // Adjust Universe Arcs
+            db.prepare(
+              `
             UPDATE universe_arcs 
             SET target_end_date = datetime(target_end_date, '+' || ? || ' seconds'),
                 last_update_date = datetime(last_update_date, '+' || ? || ' seconds')
             WHERE universe_id = ? AND status = 'active'
-          `).run(pausedSeconds, pausedSeconds, req.params.id);
+          `,
+            ).run(pausedSeconds, pausedSeconds, req.params.id);
 
-          // Adjust Character Arcs
-          db.prepare(`
+            // Adjust Character Arcs
+            db.prepare(
+              `
             UPDATE character_arcs 
             SET target_end_date = datetime(target_end_date, '+' || ? || ' seconds'),
                 last_update_date = datetime(last_update_date, '+' || ? || ' seconds')
             WHERE status = 'active' AND user_id IN (SELECT id FROM users WHERE universe_id = ?)
-          `).run(pausedSeconds, pausedSeconds, req.params.id);
+          `,
+            ).run(pausedSeconds, pausedSeconds, req.params.id);
+          }
+          db.prepare(
+            "UPDATE universes SET is_paused = 0, paused_at = NULL WHERE id = ?",
+          ).run(req.params.id);
         }
-        db.prepare("UPDATE universes SET is_paused = 0, paused_at = NULL WHERE id = ?").run(req.params.id);
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
       }
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+    });
 
-  app.post("/api/universes/:id/arcs", (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    const { title, description, current_status_text, duration_days } = req.body;
-    try {
-      const info = db.prepare(`
+    app.post("/api/universes/:id/arcs", (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const { title, description, current_status_text, duration_days } =
+        req.body;
+      try {
+        const info = db
+          .prepare(
+            `
         INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at)
         VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)
-      `).run(req.params.id, title, description, current_status_text, duration_days || 42);
-      res.json({ success: true, id: info.lastInsertRowid });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
-
-  app.post("/api/universes/:id/arcs/generate", async (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    const universe = db.prepare("SELECT * FROM universes WHERE id = ?").get(req.params.id) as any;
-    if (!universe) return res.status(404).json({ error: "Universe not found" });
-    
-    try {
-      const newUniverseArcData = await generateNewUniverseArc(universe);
-      if (newUniverseArcData && newUniverseArcData.title && newUniverseArcData.description && newUniverseArcData.duration_days) {
-        const info = db.prepare("INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(universe.id, newUniverseArcData.title, newUniverseArcData.description, newUniverseArcData.current_status_text, newUniverseArcData.duration_days);
+      `,
+          )
+          .run(
+            req.params.id,
+            title,
+            description,
+            current_status_text,
+            duration_days || 42,
+          );
         res.json({ success: true, id: info.lastInsertRowid });
-      } else {
-        res.status(500).json({ error: "Failed to generate arc data" });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
       }
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    });
 
-  app.post("/api/users/:id/arcs", (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    const { title, description, duration_days } = req.body;
-    try {
-      const info = db.prepare(`
+    app.post("/api/universes/:id/arcs/generate", async (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const universe = db
+        .prepare("SELECT * FROM universes WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!universe)
+        return res.status(404).json({ error: "Universe not found" });
+
+      try {
+        const newUniverseArcData = await generateNewUniverseArc(universe);
+        if (
+          newUniverseArcData &&
+          newUniverseArcData.title &&
+          newUniverseArcData.description &&
+          newUniverseArcData.duration_days
+        ) {
+          const info = db
+            .prepare(
+              "INSERT INTO universe_arcs (universe_id, title, description, current_status_text, target_end_date, created_at) VALUES (?, ?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)",
+            )
+            .run(
+              universe.id,
+              newUniverseArcData.title,
+              newUniverseArcData.description,
+              newUniverseArcData.current_status_text,
+              newUniverseArcData.duration_days,
+            );
+          res.json({ success: true, id: info.lastInsertRowid });
+        } else {
+          res.status(500).json({ error: "Failed to generate arc data" });
+        }
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.post("/api/users/:id/arcs", (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const { title, description, duration_days } = req.body;
+      try {
+        const info = db
+          .prepare(
+            `
         INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at)
         VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)
-      `).run(req.params.id, title, description, duration_days || 21);
-      res.json({ success: true, id: info.lastInsertRowid });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
-
-  app.post("/api/users/:id/arcs/generate", async (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    const aiUser = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id) as any;
-    if (!aiUser) return res.status(404).json({ error: "User not found" });
-    
-    try {
-      const newArcData = await generateNewArc(aiUser);
-      if (newArcData && newArcData.title && newArcData.description && newArcData.duration_days) {
-        const info = db.prepare("INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)").run(aiUser.id, newArcData.title, newArcData.description, newArcData.duration_days);
+      `,
+          )
+          .run(req.params.id, title, description, duration_days || 21);
         res.json({ success: true, id: info.lastInsertRowid });
-      } else {
-        res.status(500).json({ error: "Failed to generate arc data" });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
       }
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    });
 
-  app.get("/api/universes/:id/characters", (req, res) => {
-    const characters = db.prepare("SELECT id, username, display_name, avatar_url, bio, is_ai, is_active, online_times, current_online_status, status_expires_at FROM users WHERE universe_id = ?").all(req.params.id);
-    res.json(characters);
-  });
+    app.post("/api/users/:id/arcs/generate", async (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
 
-  app.get("/api/universes/:id/arcs", (req, res) => {
-    const arcs = db.prepare("SELECT *, 'universe' as arc_type FROM universe_arcs WHERE universe_id = ? ORDER BY created_at DESC").all(req.params.id);
-    res.json(arcs);
-  });
+      const aiUser = db
+        .prepare("SELECT * FROM users WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!aiUser) return res.status(404).json({ error: "User not found" });
 
-  app.put("/api/universes/arcs/:arcId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    const { title, description, current_status_text, status, completion_summary } = req.body;
-    try {
-      db.prepare(`
+      try {
+        const newArcData = await generateNewArc(aiUser);
+        if (
+          newArcData &&
+          newArcData.title &&
+          newArcData.description &&
+          newArcData.duration_days
+        ) {
+          const info = db
+            .prepare(
+              "INSERT INTO character_arcs (user_id, title, description, target_end_date, created_at) VALUES (?, ?, ?, datetime('now', '+' || ? || ' days'), CURRENT_TIMESTAMP)",
+            )
+            .run(
+              aiUser.id,
+              newArcData.title,
+              newArcData.description,
+              newArcData.duration_days,
+            );
+          res.json({ success: true, id: info.lastInsertRowid });
+        } else {
+          res.status(500).json({ error: "Failed to generate arc data" });
+        }
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.get("/api/universes/:id/characters", (req, res) => {
+      const characters = db
+        .prepare(
+          "SELECT id, username, display_name, avatar_url, bio, is_ai, is_active, online_times, current_online_status, status_expires_at FROM users WHERE universe_id = ?",
+        )
+        .all(req.params.id);
+      res.json(characters);
+    });
+
+    app.get("/api/universes/:id/arcs", (req, res) => {
+      const arcs = db
+        .prepare(
+          "SELECT *, 'universe' as arc_type FROM universe_arcs WHERE universe_id = ? ORDER BY created_at DESC",
+        )
+        .all(req.params.id);
+      res.json(arcs);
+    });
+
+    app.put("/api/universes/arcs/:arcId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const {
+        title,
+        description,
+        current_status_text,
+        status,
+        completion_summary,
+      } = req.body;
+      try {
+        db.prepare(
+          `
         UPDATE universe_arcs 
         SET title = ?, description = ?, current_status_text = ?, status = ?, completion_summary = ?
         WHERE id = ?
-      `).run(title, description, current_status_text, status, completion_summary || null, req.params.arcId);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+      `,
+        ).run(
+          title,
+          description,
+          current_status_text,
+          status,
+          completion_summary || null,
+          req.params.arcId,
+        );
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
 
-  app.delete("/api/universes/arcs/:arcId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    try {
-      db.prepare("DELETE FROM universe_arcs WHERE id = ?").run(req.params.arcId);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+    app.delete("/api/universes/arcs/:arcId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
 
-  app.put("/api/users/arcs/:arcId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    const { title, description, status, completion_summary } = req.body;
-    try {
-      db.prepare(`
+      try {
+        db.prepare("DELETE FROM universe_arcs WHERE id = ?").run(
+          req.params.arcId,
+        );
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
+
+    app.put("/api/users/arcs/:arcId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
+
+      const { title, description, status, completion_summary } = req.body;
+      try {
+        db.prepare(
+          `
         UPDATE character_arcs 
         SET title = ?, description = ?, status = ?, completion_summary = ?
         WHERE id = ?
-      `).run(title, description, status, completion_summary || null, req.params.arcId);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+      `,
+        ).run(
+          title,
+          description,
+          status,
+          completion_summary || null,
+          req.params.arcId,
+        );
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
 
-  app.delete("/api/users/arcs/:arcId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: "Unauthorized" });
-    
-    try {
-      db.prepare("DELETE FROM character_arcs WHERE id = ?").run(req.params.arcId);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+    app.delete("/api/users/arcs/:arcId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user || user.role !== "admin")
+        return res.status(403).json({ error: "Unauthorized" });
 
-  app.get("/api/arcs", (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit as string) || 20;
-      const offset = parseInt(req.query.offset as string) || 0;
+      try {
+        db.prepare("DELETE FROM character_arcs WHERE id = ?").run(
+          req.params.arcId,
+        );
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
 
-      const allArcs = db.prepare(`
+    app.get("/api/arcs", (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit as string) || 20;
+        const offset = parseInt(req.query.offset as string) || 0;
+
+        const allArcs = db
+          .prepare(
+            `
         SELECT 
           ca.id, ca.user_id, ca.title, ca.description, ca.current_status_text, ca.status, 
           ca.start_date, ca.target_end_date, ca.last_update_date, ca.completion_summary, ca.created_at,
@@ -2160,166 +3275,293 @@ async function startServer() {
 
         ORDER BY COALESCE(last_update_date, created_at) DESC
         LIMIT ? OFFSET ?
-      `).all(limit, offset) as any[];
+      `,
+          )
+          .all(limit, offset) as any[];
 
-      res.json(allArcs);
-    } catch (e) {
-      console.error("Failed to fetch arcs:", e);
-      res.status(500).json({ error: "Failed to fetch arcs" });
-    }
-  });
+        res.json(allArcs);
+      } catch (e) {
+        console.error("Failed to fetch arcs:", e);
+        res.status(500).json({ error: "Failed to fetch arcs" });
+      }
+    });
 
-  app.put("/api/users/:id", (req, res) => {
-    const { display_name, username, bio, avatar_url, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, pin, dm_frequency, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, is_verified } = req.body;
-    try {
-      const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
-      const finalReferenceImages = reference_images ? reference_images.map((img: string) => saveBase64Image(img)) : [];
+    app.put("/api/users/:id", (req, res) => {
+      const {
+        display_name,
+        username,
+        bio,
+        avatar_url,
+        description,
+        writing_style,
+        physical_appearance,
+        clothing_style,
+        artstyle,
+        universe_id,
+        online_times,
+        activity_level,
+        pin,
+        dm_frequency,
+        reference_images,
+        account_type,
+        company_name,
+        brand_identity,
+        products_services,
+        target_audience,
+        run_by_character_id,
+        is_verified,
+      } = req.body;
+      try {
+        const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
+        const finalReferenceImages = reference_images
+          ? reference_images.map((img: string) => saveBase64Image(img))
+          : [];
 
-      db.prepare(`
+        db.prepare(
+          `
         UPDATE users 
         SET display_name = ?, username = ?, bio = ?, avatar_url = ?, description = ?, writing_style = ?, physical_appearance = ?, clothing_style = ?, artstyle = ?, universe_id = ?, online_times = ?, activity_level = ?, pin = ?, dm_frequency = COALESCE(?, dm_frequency), reference_images = ?, account_type = COALESCE(?, account_type), company_name = ?, brand_identity = ?, products_services = ?, target_audience = ?, run_by_character_id = ?, is_verified = COALESCE(?, is_verified)
         WHERE id = ?
-      `).run(display_name, username, bio, finalAvatarUrl, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, pin || null, dm_frequency, JSON.stringify(finalReferenceImages), account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id || null, is_verified === undefined ? null : is_verified ? 1 : 0, req.params.id);
+      `,
+        ).run(
+          display_name,
+          username,
+          bio,
+          finalAvatarUrl,
+          description,
+          writing_style,
+          physical_appearance,
+          clothing_style,
+          artstyle,
+          universe_id || null,
+          online_times || "[]",
+          activity_level ?? 5,
+          pin || null,
+          dm_frequency,
+          JSON.stringify(finalReferenceImages),
+          account_type,
+          company_name,
+          brand_identity,
+          products_services,
+          target_audience,
+          run_by_character_id || null,
+          is_verified === undefined ? null : is_verified ? 1 : 0,
+          req.params.id,
+        );
 
-      syncNewsFollowers(parseInt(req.params.id));
+        syncNewsFollowers(parseInt(req.params.id));
 
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
 
-  app.put("/api/users/:id/pin", (req, res) => {
-    const { pin } = req.body;
-    const userId = req.params.id;
-    const loggedInUser = getRealUser(req);
+    app.put("/api/users/:id/pin", (req, res) => {
+      const { pin } = req.body;
+      const userId = req.params.id;
+      const loggedInUser = getRealUser(req);
 
-    if (!loggedInUser || (loggedInUser.id !== parseInt(userId) && loggedInUser.role !== 'admin')) {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-
-    try {
-      db.prepare("UPDATE users SET pin = ? WHERE id = ?").run(pin || null, userId);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
-
-  app.post("/api/users", (req, res) => {
-    const { username, display_name, bio, avatar_url, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, is_verified } = req.body;
-    logApi(
-      "ROUTE_ADD_USER",
-      { username, display_name, universe_id, account_type },
-      "Request Received"
-    );
-    try {
-      const existingUser = db.prepare("SELECT id FROM users WHERE username = ?").get(username);
-      if (existingUser) {
-        return res.status(400).json({ error: "Username already taken. Please choose another one." });
+      if (
+        !loggedInUser ||
+        (loggedInUser.id !== parseInt(userId) && loggedInUser.role !== "admin")
+      ) {
+        return res.status(403).json({ error: "Unauthorized" });
       }
 
-      const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
-      const finalReferenceImages = reference_images ? reference_images.map((img: string) => saveBase64Image(img)) : [];
+      try {
+        db.prepare("UPDATE users SET pin = ? WHERE id = ?").run(
+          pin || null,
+          userId,
+        );
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
+      }
+    });
 
-      const stmt = db.prepare(`
+    app.post("/api/users", (req, res) => {
+      const {
+        username,
+        display_name,
+        bio,
+        avatar_url,
+        ai_persona,
+        description,
+        writing_style,
+        physical_appearance,
+        clothing_style,
+        artstyle,
+        universe_id,
+        online_times,
+        activity_level,
+        reference_images,
+        account_type,
+        company_name,
+        brand_identity,
+        products_services,
+        target_audience,
+        run_by_character_id,
+        is_verified,
+      } = req.body;
+      logApi(
+        "ROUTE_ADD_USER",
+        { username, display_name, universe_id, account_type },
+        "Request Received",
+      );
+      try {
+        const existingUser = db
+          .prepare("SELECT id FROM users WHERE username = ?")
+          .get(username);
+        if (existingUser) {
+          return res
+            .status(400)
+            .json({
+              error: "Username already taken. Please choose another one.",
+            });
+        }
+
+        const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
+        const finalReferenceImages = reference_images
+          ? reference_images.map((img: string) => saveBase64Image(img))
+          : [];
+
+        const stmt = db.prepare(`
         INSERT INTO users (username, display_name, bio, avatar_url, is_ai, is_active, is_verified, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id, online_times, activity_level, reference_images, account_type, company_name, brand_identity, products_services, target_audience, run_by_character_id, created_at)
         VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       `);
-      const isActive = account_type === 'news' ? 1 : 0;
-      const verifiedInt = is_verified ? 1 : 0;
-      const info = stmt.run(username, display_name, bio, finalAvatarUrl, isActive, verifiedInt, ai_persona, description, writing_style, physical_appearance, clothing_style, artstyle, universe_id || null, online_times || '[]', activity_level ?? 5, JSON.stringify(finalReferenceImages), account_type || 'character', company_name || null, brand_identity || null, products_services || null, target_audience || null, run_by_character_id || null);
-      const userId = info.lastInsertRowid;
-      
-      // AI character follows real user by default, but real user does NOT follow AI character by default
-      const user = getRealUser(req);
-      if (user) {
-        db.prepare("INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)").run(userId, user.id);
+        const isActive = account_type === "news" ? 1 : 0;
+        const verifiedInt = is_verified ? 1 : 0;
+        const info = stmt.run(
+          username,
+          display_name,
+          bio,
+          finalAvatarUrl,
+          isActive,
+          verifiedInt,
+          ai_persona,
+          description,
+          writing_style,
+          physical_appearance,
+          clothing_style,
+          artstyle,
+          universe_id || null,
+          online_times || "[]",
+          activity_level ?? 5,
+          JSON.stringify(finalReferenceImages),
+          account_type || "character",
+          company_name || null,
+          brand_identity || null,
+          products_services || null,
+          target_audience || null,
+          run_by_character_id || null,
+        );
+        const userId = info.lastInsertRowid;
+
+        // AI character follows real user by default, but real user does NOT follow AI character by default
+        const user = getRealUser(req);
+        if (user) {
+          db.prepare(
+            "INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)",
+          ).run(userId, user.id);
+        }
+
+        syncNewsFollowers(userId);
+
+        res.json({ id: userId });
+      } catch (e: any) {
+        res.status(400).json({ error: e.message });
       }
+    });
 
-      syncNewsFollowers(userId);
+    app.post("/api/users/:id/follow", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-      res.json({ id: userId });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
+      try {
+        db.prepare(
+          "INSERT INTO follows (follower_id, followed_id) VALUES (?, ?)",
+        ).run(user.id, req.params.id);
+        res.json({ success: true, followed: true });
+      } catch (e) {
+        db.prepare(
+          "DELETE FROM follows WHERE follower_id = ? AND followed_id = ?",
+        ).run(user.id, req.params.id);
+        res.json({ success: true, followed: false });
+      }
+    });
 
-  app.post("/api/users/:id/follow", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    // Notifications
+    app.get("/api/notifications", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    try {
-      db.prepare("INSERT INTO follows (follower_id, followed_id) VALUES (?, ?)").run(user.id, req.params.id);
-      res.json({ success: true, followed: true });
-    } catch (e) {
-      db.prepare("DELETE FROM follows WHERE follower_id = ? AND followed_id = ?").run(user.id, req.params.id);
-      res.json({ success: true, followed: false });
-    }
-  });
-
-  // Notifications
-  app.get("/api/notifications", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-
-    const notifications = db.prepare(`
+      const notifications = db
+        .prepare(
+          `
       SELECT n.*, u.display_name as actor_name, u.avatar_url as actor_avatar, u.account_type as actor_account_type, u.is_verified as actor_is_verified
       FROM notifications n
       JOIN users u ON n.actor_id = u.id
       WHERE n.user_id = ?
       ORDER BY n.created_at DESC
       LIMIT 50
-    `).all(user.id);
-    res.json(notifications);
-  });
+    `,
+        )
+        .all(user.id);
+      res.json(notifications);
+    });
 
-  app.post("/api/notifications/read", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    app.post("/api/notifications/read", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    db.prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?").run(user.id);
-    res.json({ success: true });
-  });
+      db.prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?").run(
+        user.id,
+      );
+      res.json({ success: true });
+    });
 
-  app.post("/api/users/:id/force-post", async (req, res) => {
-    try {
-      const { type, archetypeId } = req.body; // 'text' or 'image', optional archetypeId
-      const aiUser = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1").get(req.params.id) as any;
-      if (!aiUser) return res.status(404).json({ error: "AI User not found" });
+    app.post("/api/users/:id/force-post", async (req, res) => {
+      try {
+        const { type, archetypeId } = req.body; // 'text' or 'image', optional archetypeId
+        const aiUser = db
+          .prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1")
+          .get(req.params.id) as any;
+        if (!aiUser)
+          return res.status(404).json({ error: "AI User not found" });
 
-      const success = await doAiPost(aiUser, type, archetypeId);
-      if (success) {
-        res.json({ success: true });
-      } else {
-        res.status(500).json({ error: "Failed to generate post" });
+        const success = await doAiPost(aiUser, type, archetypeId);
+        if (success) {
+          res.json({ success: true });
+        } else {
+          res.status(500).json({ error: "Failed to generate post" });
+        }
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
       }
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    });
 
-  // Posts
-  app.get("/api/posts", (req, res) => {
-    const user = getRealUser(req);
-    const userId = user ? user.id : 0;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const type = req.query.type as string;
-    const universeId = req.query.universe_id as string;
-    const accountType = req.query.account_type as string;
-    
-    // Optimize query hints
-    let indexHint = "";
-    if (universeId && !type) {
-      indexHint = "INDEXED BY idx_posts_universe_created";
-    } else if (type && !universeId) {
-      indexHint = "INDEXED BY idx_posts_visible_type_created";
-    } else if (!type && !accountType && !universeId) {
-      indexHint = "INDEXED BY idx_posts_visible_created";
-    } 
-    // If multiple filters, let SQLite planner decide.
+    // Posts
+    app.get("/api/posts", (req, res) => {
+      const user = getRealUser(req);
+      const userId = user ? user.id : 0;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const type = req.query.type as string;
+      const universeId = req.query.universe_id as string;
+      const accountType = req.query.account_type as string;
 
-    let query = `
+      // Optimize query hints
+      let indexHint = "";
+      if (universeId && !type) {
+        indexHint = "INDEXED BY idx_posts_universe_created";
+      } else if (type && !universeId) {
+        indexHint = "INDEXED BY idx_posts_visible_type_created";
+      } else if (!type && !accountType && !universeId) {
+        indexHint = "INDEXED BY idx_posts_visible_created";
+      }
+      // If multiple filters, let SQLite planner decide.
+
+      let query = `
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comment_count,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as like_count,
@@ -2328,106 +3570,132 @@ async function startServer() {
       JOIN users u ON p.user_id = u.id
       WHERE p.is_visible = 1
     `;
-    const params: any[] = [userId];
+      const params: any[] = [userId];
 
-    // Restrict to followed users only on the home feed
-    if (!type && !accountType && !universeId) {
-      query += ` AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)`;
-      params.push(userId, userId);
-    }
-    
-    // For specific feeds, filter efficiently
-    if (type) {
-      query += ` AND p.post_type = ?`;
-      params.push(type);
-    }
-
-    if (universeId) {
-      query += ` AND p.universe_id = ?`;
-      params.push(universeId);
-    }
-
-    if (accountType) {
-      if (accountType === 'news') {
-        // Use subquery so SQLite can optimize the user filtering
-        query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type IN ('news', 'faux_news'))`;
-      } else {
-        query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type = ?)`;
-        params.push(accountType);
+      // Restrict to followed users only on the home feed
+      if (!type && !accountType && !universeId) {
+        query += ` AND p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ? UNION SELECT ?)`;
+        params.push(userId, userId);
       }
-    }
 
-    query += ` ORDER BY p.created_at DESC LIMIT ?`;
-    params.push(limit);
-
-    const posts = db.prepare(query).all(...params) as any[];
-    const showThoughts = shouldShowInternalThoughts();
-    if (!showThoughts) {
-      posts.forEach(p => delete p.internal_thought);
-    }
-    res.json(posts);
-  });
-
-  app.post("/api/posts", async (req, res) => {
-    const { content, post_type, image_url, universe_id } = req.body;
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-
-    const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
-
-    const isVisible = (post_type === 'image_post' && !finalImageUrl) ? 0 : 1;
-    const stmt = db.prepare("INSERT INTO posts (user_id, content, post_type, is_visible, image_url, universe_id) VALUES (?, ?, ?, ?, ?, ?)");
-    const info = stmt.run(user.id, content, post_type || 'life_update', isVisible, finalImageUrl, universe_id || null);
-    const postId = info.lastInsertRowid;
-    
-    res.json({ id: postId });
-
-    if (finalImageUrl) {
-      try {
-        const description = await analyzeImage(finalImageUrl);
-        db.prepare("UPDATE posts SET image_prompt = ? WHERE id = ?").run(description, postId);
-      } catch (e) {
-        console.error(e);
+      // For specific feeds, filter efficiently
+      if (type) {
+        query += ` AND p.post_type = ?`;
+        params.push(type);
       }
-    }
 
-    if (post_type === 'image_post' && !image_url) {
-      try {
-        const { prompt: positivePrompt, characterVisible } = await generateImagePrompt(user, content);
-        const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
-        
-        let referenceImageUrls: string[] | undefined = undefined;
-        if (characterVisible) {
-          const refImages = JSON.parse(user.reference_images || '[]');
-          if (refImages.length > 0) {
-            referenceImageUrls = refImages;
-          } else if (user.avatar_url) {
-            referenceImageUrls = [user.avatar_url];
-          }
-        }
-        
-        const generatedImageUrl = await generateImage(positivePrompt, negativePrompt, referenceImageUrls);
-        if (generatedImageUrl) {
-          db.prepare("UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?").run(generatedImageUrl, positivePrompt, postId);
-          triggerPostComments(postId as number, post_type || 'life_update', true);
+      if (universeId) {
+        query += ` AND p.universe_id = ?`;
+        params.push(universeId);
+      }
+
+      if (accountType) {
+        if (accountType === "news") {
+          // Use subquery so SQLite can optimize the user filtering
+          query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type IN ('news', 'faux_news'))`;
         } else {
+          query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type = ?)`;
+          params.push(accountType);
+        }
+      }
+
+      query += ` ORDER BY p.created_at DESC LIMIT ?`;
+      params.push(limit);
+
+      const posts = db.prepare(query).all(...params) as any[];
+      const showThoughts = shouldShowInternalThoughts();
+      if (!showThoughts) {
+        posts.forEach((p) => delete p.internal_thought);
+      }
+      res.json(posts);
+    });
+
+    app.post("/api/posts", async (req, res) => {
+      const { content, post_type, image_url, universe_id } = req.body;
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
+
+      const isVisible = post_type === "image_post" && !finalImageUrl ? 0 : 1;
+      const stmt = db.prepare(
+        "INSERT INTO posts (user_id, content, post_type, is_visible, image_url, universe_id) VALUES (?, ?, ?, ?, ?, ?)",
+      );
+      const info = stmt.run(
+        user.id,
+        content,
+        post_type || "life_update",
+        isVisible,
+        finalImageUrl,
+        universe_id || null,
+      );
+      const postId = info.lastInsertRowid;
+
+      res.json({ id: postId });
+
+      if (finalImageUrl) {
+        try {
+          const description = await analyzeImage(finalImageUrl);
+          db.prepare("UPDATE posts SET image_prompt = ? WHERE id = ?").run(
+            description,
+            postId,
+          );
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      if (post_type === "image_post" && !image_url) {
+        try {
+          const { prompt: positivePrompt, characterVisible } =
+            await generateImagePrompt(user, content);
+          const negativePrompt =
+            await generateNegativeImagePrompt(positivePrompt);
+
+          let referenceImageUrls: string[] | undefined = undefined;
+          if (characterVisible) {
+            const refImages = JSON.parse(user.reference_images || "[]");
+            if (refImages.length > 0) {
+              referenceImageUrls = refImages;
+            } else if (user.avatar_url) {
+              referenceImageUrls = [user.avatar_url];
+            }
+          }
+
+          const generatedImageUrl = await generateImage(
+            positivePrompt,
+            negativePrompt,
+            referenceImageUrls,
+          );
+          if (generatedImageUrl) {
+            db.prepare(
+              "UPDATE posts SET image_url = ?, image_prompt = ?, is_visible = 1 WHERE id = ?",
+            ).run(generatedImageUrl, positivePrompt, postId);
+            triggerPostComments(
+              postId as number,
+              post_type || "life_update",
+              true,
+            );
+          } else {
+            db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+          }
+        } catch (e) {
+          console.error("Failed to generate image for user post:", e);
           db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
         }
-      } catch (e) {
-        console.error("Failed to generate image for user post:", e);
-        db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+      } else {
+        triggerPostComments(postId as number, post_type || "life_update", true);
       }
-    } else {
-      triggerPostComments(postId as number, post_type || 'life_update', true);
-    }
-  });
+    });
 
-  // Comments
-  app.get("/api/posts/:id/comments", (req, res) => {
-    const user = getRealUser(req);
-    const userId = user ? user.id : 0;
+    // Comments
+    app.get("/api/posts/:id/comments", (req, res) => {
+      const user = getRealUser(req);
+      const userId = user ? user.id : 0;
 
-    const comments = db.prepare(`
+      const comments = db
+        .prepare(
+          `
       SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM comment_likes WHERE comment_id = c.id) as like_count,
       EXISTS(SELECT 1 FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as is_liked
@@ -2435,61 +3703,79 @@ async function startServer() {
       JOIN users u ON c.user_id = u.id
       WHERE c.post_id = ?
       ORDER BY c.created_at ASC
-    `).all(userId, req.params.id) as any[];
+    `,
+        )
+        .all(userId, req.params.id) as any[];
 
-    const showThoughts = shouldShowInternalThoughts();
-    if (!showThoughts) {
-      comments.forEach(c => delete c.internal_thought);
-    }
-    res.json(comments);
-  });
+      const showThoughts = shouldShowInternalThoughts();
+      if (!showThoughts) {
+        comments.forEach((c) => delete c.internal_thought);
+      }
+      res.json(comments);
+    });
 
-  app.post("/api/posts/:id/comments", (req, res) => {
-    const { content, parent_id } = req.body;
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    app.post("/api/posts/:id/comments", (req, res) => {
+      const { content, parent_id } = req.body;
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    const stmt = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)");
-    const info = stmt.run(req.params.id, user.id, content, parent_id || null);
-    res.json({ id: info.lastInsertRowid });
+      const stmt = db.prepare(
+        "INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)",
+      );
+      const info = stmt.run(req.params.id, user.id, content, parent_id || null);
+      res.json({ id: info.lastInsertRowid });
 
-    let targetUserId = null;
-    if (parent_id) {
-      const parentComment = db.prepare("SELECT user_id FROM comments WHERE id = ?").get(parent_id) as any;
-      if (parentComment) targetUserId = parentComment.user_id;
-    } else {
-      const post = db.prepare("SELECT user_id FROM posts WHERE id = ?").get(req.params.id) as any;
-      if (post) targetUserId = post.user_id;
-    }
-    if (targetUserId) {
-      checkDynamicRelationship(user.id, targetUserId).catch(console.error);
-    }
-  });
+      let targetUserId = null;
+      if (parent_id) {
+        const parentComment = db
+          .prepare("SELECT user_id FROM comments WHERE id = ?")
+          .get(parent_id) as any;
+        if (parentComment) targetUserId = parentComment.user_id;
+      } else {
+        const post = db
+          .prepare("SELECT user_id FROM posts WHERE id = ?")
+          .get(req.params.id) as any;
+        if (post) targetUserId = post.user_id;
+      }
+      if (targetUserId) {
+        checkDynamicRelationship(user.id, targetUserId).catch(console.error);
+      }
+    });
 
-  app.get("/api/posts/:id/likers", (req, res) => {
-    const likers = db.prepare(`
+    app.get("/api/posts/:id/likers", (req, res) => {
+      const likers = db
+        .prepare(
+          `
       SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM likes l
       JOIN users u ON l.user_id = u.id
       WHERE l.post_id = ?
-    `).all(req.params.id);
-    res.json(likers);
-  });
+    `,
+        )
+        .all(req.params.id);
+      res.json(likers);
+    });
 
-  app.get("/api/comments/:id/likers", (req, res) => {
-    const likers = db.prepare(`
+    app.get("/api/comments/:id/likers", (req, res) => {
+      const likers = db
+        .prepare(
+          `
       SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM comment_likes cl
       JOIN users u ON cl.user_id = u.id
       WHERE cl.comment_id = ?
-    `).all(req.params.id);
-    res.json(likers);
-  });
+    `,
+        )
+        .all(req.params.id);
+      res.json(likers);
+    });
 
-  // Delete and Edit Posts
-  app.get("/api/posts/:id", (req, res) => {
-    const user = getRealUser(req);
-    const post = db.prepare(`
+    // Delete and Edit Posts
+    app.get("/api/posts/:id", (req, res) => {
+      const user = getRealUser(req);
+      const post = db
+        .prepare(
+          `
       SELECT p.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified,
       (SELECT COUNT(id) FROM likes WHERE post_id = p.id) as likes,
       (SELECT COUNT(id) FROM comments WHERE post_id = p.id) as comments,
@@ -2497,117 +3783,155 @@ async function startServer() {
       FROM posts p
       JOIN users u ON p.user_id = u.id
       WHERE p.id = ? AND p.is_visible = 1
-    `).get(user?.id || 0, req.params.id) as any;
-    if (post) {
-      const showThoughts = shouldShowInternalThoughts();
-      if (!showThoughts) {
-        delete post.internal_thought;
+    `,
+        )
+        .get(user?.id || 0, req.params.id) as any;
+      if (post) {
+        const showThoughts = shouldShowInternalThoughts();
+        if (!showThoughts) {
+          delete post.internal_thought;
+        }
+        res.json(post);
+      } else {
+        res.status(404).json({ error: "Post not found" });
       }
-      res.json(post);
-    } else {
-      res.status(404).json({ error: "Post not found" });
-    }
-  });
+    });
 
-  app.delete("/api/posts/:id", (req, res) => {
-    try {
-      const postId = req.params.id;
-      db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)").run(postId);
-      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)").run(postId);
-      db.prepare("DELETE FROM comments WHERE post_id = ?").run(postId);
-      db.prepare("DELETE FROM likes WHERE post_id = ?").run(postId);
-      db.prepare("DELETE FROM notifications WHERE type IN ('like_post', 'comment', 'reply') AND reference_id = ?").run(postId);
-      db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    app.delete("/api/posts/:id", (req, res) => {
+      try {
+        const postId = req.params.id;
+        db.prepare(
+          "DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)",
+        ).run(postId);
+        db.prepare(
+          "DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE post_id = ?)",
+        ).run(postId);
+        db.prepare("DELETE FROM comments WHERE post_id = ?").run(postId);
+        db.prepare("DELETE FROM likes WHERE post_id = ?").run(postId);
+        db.prepare(
+          "DELETE FROM notifications WHERE type IN ('like_post', 'comment', 'reply') AND reference_id = ?",
+        ).run(postId);
+        db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
 
-  app.put("/api/posts/:id", (req, res) => {
-    try {
-      const { content } = req.body;
-      db.prepare("UPDATE posts SET content = ? WHERE id = ?").run(content, req.params.id);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    app.put("/api/posts/:id", (req, res) => {
+      try {
+        const { content } = req.body;
+        db.prepare("UPDATE posts SET content = ? WHERE id = ?").run(
+          content,
+          req.params.id,
+        );
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
 
-  // Delete and Edit Comments
-  app.get("/api/comments/:id", (req, res) => {
-    const comment = db.prepare(`
+    // Delete and Edit Comments
+    app.get("/api/comments/:id", (req, res) => {
+      const comment = db
+        .prepare(
+          `
       SELECT c.*, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified
       FROM comments c
       JOIN users u ON c.user_id = u.id
       WHERE c.id = ?
-    `).get(req.params.id);
-    if (comment) {
-      res.json(comment);
-    } else {
-      res.status(404).json({ error: "Comment not found" });
-    }
-  });
+    `,
+        )
+        .get(req.params.id);
+      if (comment) {
+        res.json(comment);
+      } else {
+        res.status(404).json({ error: "Comment not found" });
+      }
+    });
 
-  app.delete("/api/comments/:id", (req, res) => {
-    try {
-      const commentId = req.params.id;
-      db.prepare("DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE parent_id = ?)").run(commentId);
-      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE parent_id = ?)").run(commentId);
-      db.prepare("DELETE FROM comment_likes WHERE comment_id = ?").run(commentId);
-      db.prepare("DELETE FROM notifications WHERE type = 'like_comment' AND reference_id = ?").run(commentId);
-      db.prepare("DELETE FROM comments WHERE parent_id = ?").run(commentId);
-      db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    app.delete("/api/comments/:id", (req, res) => {
+      try {
+        const commentId = req.params.id;
+        db.prepare(
+          "DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE parent_id = ?)",
+        ).run(commentId);
+        db.prepare(
+          "DELETE FROM notifications WHERE type = 'like_comment' AND reference_id IN (SELECT id FROM comments WHERE parent_id = ?)",
+        ).run(commentId);
+        db.prepare("DELETE FROM comment_likes WHERE comment_id = ?").run(
+          commentId,
+        );
+        db.prepare(
+          "DELETE FROM notifications WHERE type = 'like_comment' AND reference_id = ?",
+        ).run(commentId);
+        db.prepare("DELETE FROM comments WHERE parent_id = ?").run(commentId);
+        db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
 
-  app.put("/api/comments/:id", (req, res) => {
-    try {
-      const { content } = req.body;
-      db.prepare("UPDATE comments SET content = ? WHERE id = ?").run(content, req.params.id);
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+    app.put("/api/comments/:id", (req, res) => {
+      try {
+        const { content } = req.body;
+        db.prepare("UPDATE comments SET content = ? WHERE id = ?").run(
+          content,
+          req.params.id,
+        );
+        res.json({ success: true });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
 
-  // Likes
-  app.post("/api/posts/:id/like", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    // Likes
+    app.post("/api/posts/:id/like", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    try {
-      db.prepare("INSERT INTO likes (post_id, user_id) VALUES (?, ?)").run(req.params.id, user.id);
-      res.json({ success: true });
-    } catch (e) {
-      // Already liked, so unlike
-      db.prepare("DELETE FROM likes WHERE post_id = ? AND user_id = ?").run(req.params.id, user.id);
-      res.json({ success: true, unliked: true });
-    }
-  });
+      try {
+        db.prepare("INSERT INTO likes (post_id, user_id) VALUES (?, ?)").run(
+          req.params.id,
+          user.id,
+        );
+        res.json({ success: true });
+      } catch (e) {
+        // Already liked, so unlike
+        db.prepare("DELETE FROM likes WHERE post_id = ? AND user_id = ?").run(
+          req.params.id,
+          user.id,
+        );
+        res.json({ success: true, unliked: true });
+      }
+    });
 
-  app.post("/api/comments/:id/like", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    app.post("/api/comments/:id/like", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    try {
-      db.prepare("INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)").run(req.params.id, user.id);
-      res.json({ success: true });
-    } catch (e) {
-      db.prepare("DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ?").run(req.params.id, user.id);
-      res.json({ success: true, unliked: true });
-    }
-  });
+      try {
+        db.prepare(
+          "INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)",
+        ).run(req.params.id, user.id);
+        res.json({ success: true });
+      } catch (e) {
+        db.prepare(
+          "DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ?",
+        ).run(req.params.id, user.id);
+        res.json({ success: true, unliked: true });
+      }
+    });
 
-  // Group Chats
-  app.get("/api/group-chats", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    // Group Chats
+    app.get("/api/group-chats", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    const groups = db.prepare(`
+      const groups = db
+        .prepare(
+          `
       SELECT gc.*, 
       (SELECT content FROM group_chat_messages WHERE group_chat_id = gc.id ORDER BY created_at DESC LIMIT 1) as last_message,
       (SELECT created_at FROM group_chat_messages WHERE group_chat_id = gc.id ORDER BY created_at DESC LIMIT 1) as last_message_time,
@@ -2616,226 +3940,293 @@ async function startServer() {
       JOIN group_chat_members gcm ON gc.id = gcm.group_chat_id
       WHERE gcm.user_id = ?
       ORDER BY last_message_time DESC NULLS LAST, gc.created_at DESC
-    `).all(user.id);
+    `,
+        )
+        .all(user.id);
 
-    for (const group of groups as any[]) {
-      group.members = db.prepare(`
+      for (const group of groups as any[]) {
+        group.members = db
+          .prepare(
+            `
         SELECT u.id, u.username, u.display_name, u.avatar_url, u.account_type, u.is_verified, u.is_ai, u.online_times, u.current_online_status, u.status_expires_at
         FROM users u
         JOIN group_chat_members gcm ON u.id = gcm.user_id
         WHERE gcm.group_chat_id = ?
-      `).all(group.id);
-    }
-
-    res.json(groups);
-  });
-
-  app.post("/api/group-chats", (req, res) => {
-    const { name, member_ids } = req.body;
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-
-    try {
-      const stmt = db.prepare("INSERT INTO group_chats (name) VALUES (?)");
-      const info = stmt.run(name);
-      const groupId = info.lastInsertRowid;
-
-      const insertMember = db.prepare("INSERT INTO group_chat_members (group_chat_id, user_id) VALUES (?, ?)");
-      insertMember.run(groupId, user.id);
-      for (const memberId of member_ids) {
-        insertMember.run(groupId, memberId);
+      `,
+          )
+          .all(group.id);
       }
 
-      res.json({ id: groupId });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
+      res.json(groups);
+    });
 
-  app.get("/api/group-chats/:id/messages", (req, res) => {
-    const user = getRealUser(req);
-    if (user) {
-      db.prepare("UPDATE group_chat_members SET last_read_at = CURRENT_TIMESTAMP WHERE group_chat_id = ? AND user_id = ?").run(req.params.id, user.id);
-    }
+    app.post("/api/group-chats", (req, res) => {
+      const { name, member_ids } = req.body;
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    const limit = parseInt(req.query.limit as string) || 40;
-    const beforeId = req.query.before_id ? parseInt(req.query.before_id as string) : null;
+      try {
+        const stmt = db.prepare("INSERT INTO group_chats (name) VALUES (?)");
+        const info = stmt.run(name);
+        const groupId = info.lastInsertRowid;
 
-    let query = `
+        const insertMember = db.prepare(
+          "INSERT INTO group_chat_members (group_chat_id, user_id) VALUES (?, ?)",
+        );
+        insertMember.run(groupId, user.id);
+        for (const memberId of member_ids) {
+          insertMember.run(groupId, memberId);
+        }
+
+        res.json({ id: groupId });
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.get("/api/group-chats/:id/messages", (req, res) => {
+      const user = getRealUser(req);
+      if (user) {
+        db.prepare(
+          "UPDATE group_chat_members SET last_read_at = CURRENT_TIMESTAMP WHERE group_chat_id = ? AND user_id = ?",
+        ).run(req.params.id, user.id);
+      }
+
+      const limit = parseInt(req.query.limit as string) || 40;
+      const beforeId = req.query.before_id
+        ? parseInt(req.query.before_id as string)
+        : null;
+
+      let query = `
       SELECT m.*, u.display_name, u.username, u.avatar_url, u.account_type, u.is_verified
       FROM group_chat_messages m
       JOIN users u ON m.sender_id = u.id
       WHERE m.group_chat_id = ?
     `;
-    const params: any[] = [req.params.id];
+      const params: any[] = [req.params.id];
 
-    if (beforeId) {
-      query += " AND m.id < ?";
-      params.push(beforeId);
-    }
+      if (beforeId) {
+        query += " AND m.id < ?";
+        params.push(beforeId);
+      }
 
-    query += ` ORDER BY m.id DESC LIMIT ?`;
-    params.push(limit);
+      query += ` ORDER BY m.id DESC LIMIT ?`;
+      params.push(limit);
 
-    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params) as any[];
-    const showThoughts = shouldShowInternalThoughts();
-    if (!showThoughts) {
-      messages.forEach(m => delete m.internal_thought);
-    }
-    res.json(messages);
-  });
+      const messages = db
+        .prepare(`SELECT * FROM (${query}) ORDER BY id ASC`)
+        .all(...params) as any[];
+      const showThoughts = shouldShowInternalThoughts();
+      if (!showThoughts) {
+        messages.forEach((m) => delete m.internal_thought);
+      }
+      res.json(messages);
+    });
 
-  app.put("/api/group-chats/messages/:id", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    const { content } = req.body;
-    
-    const msg = db.prepare("SELECT * FROM group_chat_messages WHERE id = ?").get(req.params.id) as any;
-    if (!msg) return res.status(404).json({ error: "Message not found" });
-    
-    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(msg.group_chat_id, user.id);
-    if (!isMember && user.role !== 'admin') {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-    
-    db.prepare("UPDATE group_chat_messages SET content = ? WHERE id = ?").run(content, req.params.id);
-    res.json({ success: true });
-  });
+    app.put("/api/group-chats/messages/:id", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+      const { content } = req.body;
 
-  app.delete("/api/group-chats/messages/:id", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    
-    const msg = db.prepare("SELECT * FROM group_chat_messages WHERE id = ?").get(req.params.id) as any;
-    if (!msg) return res.status(404).json({ error: "Message not found" });
-    
-    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(msg.group_chat_id, user.id);
-    if (!isMember && user.role !== 'admin') {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-    
-    db.prepare("DELETE FROM group_chat_messages WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
-  });
+      const msg = db
+        .prepare("SELECT * FROM group_chat_messages WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!msg) return res.status(404).json({ error: "Message not found" });
 
-  app.post("/api/group-chats/:id/messages", async (req, res) => {
-    const { content } = req.body;
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+      const isMember = db
+        .prepare(
+          "SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?",
+        )
+        .get(msg.group_chat_id, user.id);
+      if (!isMember && user.role !== "admin") {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
 
-    const groupId = req.params.id;
-    try {
-      db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)")
-        .run(groupId, user.id, content);
-      
+      db.prepare("UPDATE group_chat_messages SET content = ? WHERE id = ?").run(
+        content,
+        req.params.id,
+      );
       res.json({ success: true });
+    });
 
-      // AI Reply logic
-      const group = db.prepare("SELECT * FROM group_chats WHERE id = ?").get(groupId) as any;
-      if (!group) return;
+    app.delete("/api/group-chats/messages/:id", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-      const members = db.prepare(`
+      const msg = db
+        .prepare("SELECT * FROM group_chat_messages WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!msg) return res.status(404).json({ error: "Message not found" });
+
+      const isMember = db
+        .prepare(
+          "SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?",
+        )
+        .get(msg.group_chat_id, user.id);
+      if (!isMember && user.role !== "admin") {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+
+      db.prepare("DELETE FROM group_chat_messages WHERE id = ?").run(
+        req.params.id,
+      );
+      res.json({ success: true });
+    });
+
+    app.post("/api/group-chats/:id/messages", async (req, res) => {
+      const { content } = req.body;
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const groupId = req.params.id;
+      try {
+        db.prepare(
+          "INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)",
+        ).run(groupId, user.id, content);
+
+        res.json({ success: true });
+
+        // AI Reply logic
+        const group = db
+          .prepare("SELECT * FROM group_chats WHERE id = ?")
+          .get(groupId) as any;
+        if (!group) return;
+
+        const members = db
+          .prepare(
+            `
         SELECT u.* FROM users u
         JOIN group_chat_members gcm ON u.id = gcm.user_id
         WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1
-      `).all(groupId) as any[];
+      `,
+          )
+          .all(groupId) as any[];
 
-      const history = db.prepare(`
+        const history = db
+          .prepare(
+            `
         SELECT m.sender_id, m.content, u.display_name, m.created_at
         FROM group_chat_messages m
         JOIN users u ON m.sender_id = u.id
         WHERE m.group_chat_id = ?
         ORDER BY m.created_at DESC LIMIT 15
-      `).all(groupId).reverse();
+      `,
+          )
+          .all(groupId)
+          .reverse();
 
-      const formattedHistory = history.map((msg: any) => ({
-        role: msg.sender_id === user.id ? 'user' : 'assistant',
-        content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`
-      }));
+        const formattedHistory = history.map((msg: any) => ({
+          role: msg.sender_id === user.id ? "user" : "assistant",
+          content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`,
+        }));
 
-      // Let each AI decide if they want to reply (e.g. based on activity level or if mentioned)
-      const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
-      const timezone = settings?.timezone || 'UTC';
+        // Let each AI decide if they want to reply (e.g. based on activity level or if mentioned)
+        const settings = db
+          .prepare("SELECT timezone FROM settings WHERE id = 1")
+          .get() as any;
+        const timezone = settings?.timezone || "UTC";
 
-      for (const aiUser of members) {
-        if (!isUserOnline(aiUser, timezone)) continue;
+        for (const aiUser of members) {
+          if (!isUserOnline(aiUser, timezone)) continue;
 
-        const isMentioned = content.toLowerCase().includes(aiUser.display_name.toLowerCase()) || content.toLowerCase().includes(aiUser.username.toLowerCase());
-        const activityLevel = aiUser.activity_level ?? 5;
-        // Base probability between 5% and 50% depending on activity level
-        const baseProb = (activityLevel / 10) * 0.5;
-        const shouldReply = isMentioned || Math.random() < baseProb;
-        
-        if (shouldReply) {
-          const gcKey = `${groupId}:${aiUser.id}`;
-          if (pendingGroupChats.has(gcKey)) continue;
-          pendingGroupChats.add(gcKey);
+          const isMentioned =
+            content.toLowerCase().includes(aiUser.display_name.toLowerCase()) ||
+            content.toLowerCase().includes(aiUser.username.toLowerCase());
+          const activityLevel = aiUser.activity_level ?? 5;
+          // Base probability between 5% and 50% depending on activity level
+          const baseProb = (activityLevel / 10) * 0.5;
+          const shouldReply = isMentioned || Math.random() < baseProb;
 
-          try {
-            const otherMembers = db.prepare(`
+          if (shouldReply) {
+            const gcKey = `${groupId}:${aiUser.id}`;
+            if (pendingGroupChats.has(gcKey)) continue;
+            pendingGroupChats.add(gcKey);
+
+            try {
+              const otherMembers = db
+                .prepare(
+                  `
               SELECT u.* FROM users u
               JOIN group_chat_members gcm ON u.id = gcm.user_id
               WHERE gcm.group_chat_id = ? AND u.id != ?
-            `).all(groupId, aiUser.id) as any[];
+            `,
+                )
+                .all(groupId, aiUser.id) as any[];
 
-            const replyData = await generateGroupChatReply(aiUser, group.name, formattedHistory, otherMembers);
-            if (replyData) {
-              db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                .run(groupId, aiUser.id, replyData.content, replyData.internal_thought);
-              
-              // Add this reply to history for the next AI
-              formattedHistory.push({
-                role: 'assistant',
-                content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${replyData.content}`
-              });
+              const replyData = await generateGroupChatReply(
+                aiUser,
+                group.name,
+                formattedHistory,
+                otherMembers,
+              );
+              if (replyData) {
+                db.prepare(
+                  "INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                ).run(
+                  groupId,
+                  aiUser.id,
+                  replyData.content,
+                  replyData.internal_thought,
+                );
+
+                // Add this reply to history for the next AI
+                formattedHistory.push({
+                  role: "assistant",
+                  content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${replyData.content}`,
+                });
+              }
+            } finally {
+              pendingGroupChats.delete(gcKey);
             }
-          } finally {
-            pendingGroupChats.delete(gcKey);
           }
         }
+      } catch (e: any) {
+        console.error("Error in /api/group-chats/:id/messages:", e);
       }
+    });
 
-    } catch (e: any) {
-      console.error("Error in /api/group-chats/:id/messages:", e);
-    }
-  });
+    // Favorites
+    app.get("/api/favorites", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-  // Favorites
-  app.get("/api/favorites", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+      const favorites = db
+        .prepare("SELECT * FROM dm_favorites WHERE user_id = ?")
+        .all(user.id);
+      res.json(favorites);
+    });
 
-    const favorites = db.prepare("SELECT * FROM dm_favorites WHERE user_id = ?").all(user.id);
-    res.json(favorites);
-  });
+    app.post("/api/favorites", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-  app.post("/api/favorites", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+      const { target_id, is_group } = req.body;
+      db.prepare(
+        "INSERT OR IGNORE INTO dm_favorites (user_id, target_id, is_group) VALUES (?, ?, ?)",
+      ).run(user.id, target_id, is_group ? 1 : 0);
+      res.json({ success: true });
+    });
 
-    const { target_id, is_group } = req.body;
-    db.prepare("INSERT OR IGNORE INTO dm_favorites (user_id, target_id, is_group) VALUES (?, ?, ?)")
-      .run(user.id, target_id, is_group ? 1 : 0);
-    res.json({ success: true });
-  });
+    app.delete("/api/favorites/:targetId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-  app.delete("/api/favorites/:targetId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+      const isGroup = req.query.is_group === "true" ? 1 : 0;
+      db.prepare(
+        "DELETE FROM dm_favorites WHERE user_id = ? AND target_id = ? AND is_group = ?",
+      ).run(user.id, req.params.targetId, isGroup);
+      res.json({ success: true });
+    });
 
-    const isGroup = req.query.is_group === 'true' ? 1 : 0;
-    db.prepare("DELETE FROM dm_favorites WHERE user_id = ? AND target_id = ? AND is_group = ?")
-      .run(user.id, req.params.targetId, isGroup);
-    res.json({ success: true });
-  });
+    // DMs
+    app.get("/api/dms", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-  // DMs
-  app.get("/api/dms", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-
-    // Get latest message per conversation using indexed subqueries
-    const conversations = db.prepare(`
+      // Get latest message per conversation using indexed subqueries
+      const conversations = db
+        .prepare(
+          `
       WITH OtherUsers AS (
         SELECT receiver_id as other_user_id FROM direct_messages WHERE sender_id = ?
         UNION
@@ -2866,772 +4257,1227 @@ async function startServer() {
       JOIN users u ON u.id = lm.other_user_id
       LEFT JOIN UnreadCounts uc ON uc.sender_id = u.id
       ORDER BY dm.created_at DESC
-    `).all(user.id, user.id, user.id, user.id, user.id);
-    res.json(conversations);
-  });
+    `,
+        )
+        .all(user.id, user.id, user.id, user.id, user.id);
+      res.json(conversations);
+    });
 
-  app.get("/api/dms/:userId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+    app.get("/api/dms/:userId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    const limit = parseInt(req.query.limit as string) || 40;
-    const beforeId = req.query.before_id ? parseInt(req.query.before_id as string) : null;
+      const limit = parseInt(req.query.limit as string) || 40;
+      const beforeId = req.query.before_id
+        ? parseInt(req.query.before_id as string)
+        : null;
 
-    let query = `
+      let query = `
       SELECT * FROM direct_messages
       WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
     `;
-    const params: any[] = [user.id, req.params.userId, req.params.userId, user.id];
+      const params: any[] = [
+        user.id,
+        req.params.userId,
+        req.params.userId,
+        user.id,
+      ];
 
-    if (beforeId) {
-      query += " AND id < ?";
-      params.push(beforeId);
-    }
+      if (beforeId) {
+        query += " AND id < ?";
+        params.push(beforeId);
+      }
 
-    query += ` ORDER BY id DESC LIMIT ?`;
-    params.push(limit);
+      query += ` ORDER BY id DESC LIMIT ?`;
+      params.push(limit);
 
-    const messages = db.prepare(`SELECT * FROM (${query}) ORDER BY id ASC`).all(...params) as any[];
-    
-    const showThoughts = shouldShowInternalThoughts();
-    if (!showThoughts) {
-      messages.forEach(m => delete m.internal_thought);
-    }
+      const messages = db
+        .prepare(`SELECT * FROM (${query}) ORDER BY id ASC`)
+        .all(...params) as any[];
 
-    // Mark as read
-    db.prepare("UPDATE direct_messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0")
-      .run(req.params.userId, user.id);
+      const showThoughts = shouldShowInternalThoughts();
+      if (!showThoughts) {
+        messages.forEach((m) => delete m.internal_thought);
+      }
 
-    res.json(messages);
-  });
+      // Mark as read
+      db.prepare(
+        "UPDATE direct_messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0",
+      ).run(req.params.userId, user.id);
 
-  app.get("/api/dms/:userId/images", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+      res.json(messages);
+    });
 
-    // Newest first
-    const query = `
+    app.get("/api/dms/:userId/images", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      // Newest first
+      const query = `
       SELECT image_url, created_at, id
       FROM direct_messages
       WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
       AND image_url IS NOT NULL AND image_url != ''
       ORDER BY id DESC
     `;
-    const params = [user.id, req.params.userId, req.params.userId, user.id];
-    
-    const messages = db.prepare(query).all(...params);
-    res.json(messages);
-  });
+      const params = [user.id, req.params.userId, req.params.userId, user.id];
 
-  app.get("/api/group-chats/:id/images", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
+      const messages = db.prepare(query).all(...params);
+      res.json(messages);
+    });
 
-    // Validate membership
-    const isMember = db.prepare("SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?").get(req.params.id, user.id);
-    if (!isMember && user.role !== 'admin') {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
+    app.get("/api/group-chats/:id/images", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    const query = `
+      // Validate membership
+      const isMember = db
+        .prepare(
+          "SELECT 1 FROM group_chat_members WHERE group_chat_id = ? AND user_id = ?",
+        )
+        .get(req.params.id, user.id);
+      if (!isMember && user.role !== "admin") {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+
+      const query = `
       SELECT image_url, created_at, id
       FROM group_chat_messages
       WHERE group_chat_id = ? AND image_url IS NOT NULL AND image_url != ''
       ORDER BY id DESC
     `;
-    const messages = db.prepare(query).all(req.params.id);
-    res.json(messages);
-  });
+      const messages = db.prepare(query).all(req.params.id);
+      res.json(messages);
+    });
 
-  app.get("/api/dms/settings/:targetId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    const isGroup = req.query.isGroup === 'true';
-    const settings = db.prepare("SELECT * FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = ?").get(user.id, req.params.targetId, isGroup ? 1 : 0) as any;
-    res.json(settings || { allow_image_gen: 0 });
-  });
+    app.get("/api/dms/settings/:targetId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+      const isGroup = req.query.isGroup === "true";
+      const settings = db
+        .prepare(
+          "SELECT * FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = ?",
+        )
+        .get(user.id, req.params.targetId, isGroup ? 1 : 0) as any;
+      res.json(settings || { allow_image_gen: 0 });
+    });
 
-  app.post("/api/dms/settings/:targetId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    const { allow_image_gen } = req.body;
-    const isGroup = req.query.isGroup === 'true';
-    db.prepare(`
+    app.post("/api/dms/settings/:targetId", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+      const { allow_image_gen } = req.body;
+      const isGroup = req.query.isGroup === "true";
+      db.prepare(
+        `
       INSERT INTO dm_settings (user_id, target_id, is_group, allow_image_gen)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(user_id, target_id, is_group) DO UPDATE SET allow_image_gen = excluded.allow_image_gen
-    `).run(user.id, req.params.targetId, isGroup ? 1 : 0, allow_image_gen ? 1 : 0);
-    res.json({ success: true });
-  });
+    `,
+      ).run(
+        user.id,
+        req.params.targetId,
+        isGroup ? 1 : 0,
+        allow_image_gen ? 1 : 0,
+      );
+      res.json({ success: true });
+    });
 
-  app.delete("/api/dms/:userId", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-
-    db.prepare("DELETE FROM direct_messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)")
-      .run(user.id, req.params.userId, req.params.userId, user.id);
-    
-    res.json({ success: true });
-  });
-
-  app.put("/api/dms/messages/:id", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    const { content } = req.body;
-    
-    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
-    if (!msg) return res.status(404).json({ error: "Message not found" });
-    
-    if (msg.sender_id !== user.id && msg.receiver_id !== user.id) {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-    
-    db.prepare("UPDATE direct_messages SET content = ? WHERE id = ?").run(content, req.params.id);
-    res.json({ success: true });
-  });
-
-  app.delete("/api/dms/messages/:id", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    
-    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
-    if (!msg) return res.status(404).json({ error: "Message not found" });
-    
-    if (msg.sender_id !== user.id && msg.receiver_id !== user.id) {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-    
-    db.prepare("DELETE FROM direct_messages WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
-  });
-
-  app.post("/api/dms/messages/:id/accept-image", async (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    
-    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
-    if (!msg || msg.receiver_id !== user.id) return res.status(403).json({ error: "Unauthorized" });
-    if (!msg.is_image_request || msg.image_request_status !== 'pending') return res.status(400).json({ error: "Invalid request" });
-
-    db.prepare("UPDATE direct_messages SET image_request_status = 'generating' WHERE id = ?").run(req.params.id);
-    res.json({ success: true, status: 'generating' });
-
-    try {
-      const aiUser = db.prepare("SELECT * FROM users WHERE id = ?").get(msg.sender_id) as any;
-      const formattedHistory = await getDMSummaryAndHistory(user.id, aiUser.id, aiUser.id);
-      
-      const lastTextMsg = db.prepare("SELECT content FROM direct_messages WHERE sender_id = ? AND receiver_id = ? AND is_image_request = 0 ORDER BY id DESC LIMIT 1").get(aiUser.id, user.id) as any;
-      const lastTextContent = lastTextMsg ? lastTextMsg.content : "";
-
-      const rawPrompt = await createDMImageRequestPrompt(aiUser, formattedHistory, lastTextContent);
-      const enriched = await enrichDMImagePrompt(aiUser, rawPrompt);
-      
-      const refImagesStr = aiUser.reference_images || '[]';
-      let refImages: string[] = [];
-      try {
-        const parsed = JSON.parse(refImagesStr);
-        if (Array.isArray(parsed)) refImages.push(...parsed);
-      } catch(e) {}
-      
-      if (aiUser.avatar_url && enriched.characterVisible) refImages.push(aiUser.avatar_url);
-
-      const imageUrl = await generateImage(enriched.prompt, "", refImages.length > 0 ? refImages : undefined);
-      if (imageUrl) {
-         db.prepare("UPDATE direct_messages SET image_url = ?, image_prompt = ?, image_request_status = 'accepted' WHERE id = ?")
-           .run(imageUrl, enriched.prompt, req.params.id);
-      } else {
-         db.prepare("UPDATE direct_messages SET image_request_status = 'failed' WHERE id = ?").run(req.params.id);
-      }
-    } catch (e) {
-      console.error("Error generating requested image:", e);
-      db.prepare("UPDATE direct_messages SET image_request_status = 'failed' WHERE id = ?").run(req.params.id);
-    }
-  });
-
-  app.post("/api/dms/messages/:id/decline-image", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.status(401).json({ error: "User not found" });
-    
-    const msg = db.prepare("SELECT * FROM direct_messages WHERE id = ?").get(req.params.id) as any;
-    if (!msg || msg.receiver_id !== user.id) return res.status(403).json({ error: "Unauthorized" });
-
-    db.prepare("UPDATE direct_messages SET image_request_status = 'declined' WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
-  });
-
-  app.post("/api/dms/:userId", async (req, res) => {
-    try {
-      const { content, image_url } = req.body;
+    app.delete("/api/dms/:userId", (req, res) => {
       const user = getRealUser(req);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      const receiverId = parseInt(req.params.userId);
-      
-      let finalContent = content?.trim() || "";
-      const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
+      db.prepare(
+        "DELETE FROM direct_messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)",
+      ).run(user.id, req.params.userId, req.params.userId, user.id);
 
-      const info = db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)")
-        .run(user.id, receiverId, finalContent, finalImageUrl);
-      
-      const messageId = info.lastInsertRowid;
-      
-      res.json({ success: true, messageId });
+      res.json({ success: true });
+    });
 
-      // Background processing
-      (async () => {
-        try {
-          if (finalImageUrl) {
-            try {
-              const description = await analyzeImage(finalImageUrl);
-              db.prepare("UPDATE direct_messages SET image_description = ? WHERE id = ?")
-                .run(description, messageId);
-            } catch (imgErr) {
-              console.error("Error analyzing image:", imgErr);
-            }
-          }
+    app.put("/api/dms/messages/:id", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+      const { content } = req.body;
 
-          checkDynamicRelationship(user.id, receiverId).catch(console.error);
+      const msg = db
+        .prepare("SELECT * FROM direct_messages WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!msg) return res.status(404).json({ error: "Message not found" });
 
-          // AI Reply logic
-          const receiver = db.prepare("SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1").get(receiverId) as any;
-          const settings = db.prepare("SELECT timezone FROM settings WHERE id = 1").get() as any;
-          if (receiver && isUserOnline(receiver, settings?.timezone || 'UTC')) {
-            const dmKey = `${receiverId}:${user.id}`;
-            if (pendingDMs.has(dmKey)) return;
-            pendingDMs.add(dmKey);
-            
-            try {
-              // Get dm settings for allow_image_gen
-              const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(user.id, receiverId) as any;
-              const allowImageGen = dmSettings?.allow_image_gen === 1;
-
-              const formattedHistory = await getDMSummaryAndHistory(user.id, receiverId, receiverId);
-
-              const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(receiverId, user.id) as any;
-              const relContext = rel ? rel.description : '';
-
-              const replyData = await replyToDM(receiver, user.display_name, formattedHistory, relContext, user.id, false, allowImageGen);
-              if (replyData) {
-                const { content: replyContent, internal_thought } = replyData;
-                
-                db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                  .run(receiverId, user.id, replyContent.trim(), internal_thought);
-                
-                if (allowImageGen) {
-                  const wantsImage = await checkIfWantsToSendImage(receiver, formattedHistory, replyContent);
-                  if (wantsImage) {
-                    db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')")
-                      .run(receiverId, user.id);
-                  }
-                }
-
-                checkDynamicRelationship(receiver.id, user.id).catch(console.error);
-              }
-            } finally {
-              pendingDMs.delete(dmKey);
-            }
-          }
-        } catch (err) {
-          console.error("Error in background DM processing:", err);
-        }
-      })();
-    } catch (e: any) {
-      console.error("Error in /api/dms/:userId:", e);
-      if (!res.headersSent) {
-        res.status(500).json({ error: e.message });
+      if (msg.sender_id !== user.id && msg.receiver_id !== user.id) {
+        return res.status(403).json({ error: "Unauthorized" });
       }
-    }
-  });
 
-  app.get("/api/typing-status/:id", (req, res) => {
-    const user = getRealUser(req);
-    if (!user) return res.json({ typing: [] });
+      db.prepare("UPDATE direct_messages SET content = ? WHERE id = ?").run(
+        content,
+        req.params.id,
+      );
+      res.json({ success: true });
+    });
 
-    const isGroup = req.query.isGroup === 'true';
-    const chatId = parseInt(req.params.id);
-    const typing: string[] = [];
+    app.delete("/api/dms/messages/:id", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
 
-    if (isGroup) {
-      for (const key of pendingGroupChats) {
-        if (key.startsWith(`${chatId}:`)) {
-          const aiId = parseInt(key.split(':')[1]);
-          const ai = db.prepare("SELECT display_name FROM users WHERE id = ?").get(aiId) as any;
+      const msg = db
+        .prepare("SELECT * FROM direct_messages WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!msg) return res.status(404).json({ error: "Message not found" });
+
+      if (msg.sender_id !== user.id && msg.receiver_id !== user.id) {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+
+      db.prepare("DELETE FROM direct_messages WHERE id = ?").run(req.params.id);
+      res.json({ success: true });
+    });
+
+    app.post("/api/dms/messages/:id/accept-image", async (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const msg = db
+        .prepare("SELECT * FROM direct_messages WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!msg || msg.receiver_id !== user.id)
+        return res.status(403).json({ error: "Unauthorized" });
+      if (!msg.is_image_request || msg.image_request_status !== "pending")
+        return res.status(400).json({ error: "Invalid request" });
+
+      db.prepare(
+        "UPDATE direct_messages SET image_request_status = 'generating' WHERE id = ?",
+      ).run(req.params.id);
+      res.json({ success: true, status: "generating" });
+
+      try {
+        const aiUser = db
+          .prepare("SELECT * FROM users WHERE id = ?")
+          .get(msg.sender_id) as any;
+        const formattedHistory = await getDMSummaryAndHistory(
+          user.id,
+          aiUser.id,
+          aiUser.id,
+        );
+
+        const lastTextMsg = db
+          .prepare(
+            "SELECT content FROM direct_messages WHERE sender_id = ? AND receiver_id = ? AND is_image_request = 0 ORDER BY id DESC LIMIT 1",
+          )
+          .get(aiUser.id, user.id) as any;
+        const lastTextContent = lastTextMsg ? lastTextMsg.content : "";
+
+        const rawPrompt = await createDMImageRequestPrompt(
+          aiUser,
+          formattedHistory,
+          lastTextContent,
+        );
+        const enriched = await enrichDMImagePrompt(aiUser, rawPrompt);
+
+        const refImagesStr = aiUser.reference_images || "[]";
+        let refImages: string[] = [];
+        try {
+          const parsed = JSON.parse(refImagesStr);
+          if (Array.isArray(parsed)) refImages.push(...parsed);
+        } catch (e) {}
+
+        if (aiUser.avatar_url && enriched.characterVisible)
+          refImages.push(aiUser.avatar_url);
+
+        const imageUrl = await generateImage(
+          enriched.prompt,
+          "",
+          refImages.length > 0 ? refImages : undefined,
+        );
+        if (imageUrl) {
+          db.prepare(
+            "UPDATE direct_messages SET image_url = ?, image_prompt = ?, image_request_status = 'accepted' WHERE id = ?",
+          ).run(imageUrl, enriched.prompt, req.params.id);
+        } else {
+          db.prepare(
+            "UPDATE direct_messages SET image_request_status = 'failed' WHERE id = ?",
+          ).run(req.params.id);
+        }
+      } catch (e) {
+        console.error("Error generating requested image:", e);
+        db.prepare(
+          "UPDATE direct_messages SET image_request_status = 'failed' WHERE id = ?",
+        ).run(req.params.id);
+      }
+    });
+
+    app.post("/api/dms/messages/:id/decline-image", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const msg = db
+        .prepare("SELECT * FROM direct_messages WHERE id = ?")
+        .get(req.params.id) as any;
+      if (!msg || msg.receiver_id !== user.id)
+        return res.status(403).json({ error: "Unauthorized" });
+
+      db.prepare(
+        "UPDATE direct_messages SET image_request_status = 'declined' WHERE id = ?",
+      ).run(req.params.id);
+      res.json({ success: true });
+    });
+
+    app.post("/api/dms/:userId", async (req, res) => {
+      try {
+        const { content, image_url } = req.body;
+        const user = getRealUser(req);
+        if (!user) return res.status(401).json({ error: "User not found" });
+
+        const receiverId = parseInt(req.params.userId);
+
+        let finalContent = content?.trim() || "";
+        const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
+
+        const info = db
+          .prepare(
+            "INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)",
+          )
+          .run(user.id, receiverId, finalContent, finalImageUrl);
+
+        const messageId = info.lastInsertRowid;
+
+        res.json({ success: true, messageId });
+
+        // Background processing
+        (async () => {
+          try {
+            if (finalImageUrl) {
+              try {
+                const description = await analyzeImage(finalImageUrl);
+                db.prepare(
+                  "UPDATE direct_messages SET image_description = ? WHERE id = ?",
+                ).run(description, messageId);
+              } catch (imgErr) {
+                console.error("Error analyzing image:", imgErr);
+              }
+            }
+
+            checkDynamicRelationship(user.id, receiverId).catch(console.error);
+
+            // AI Reply logic
+            const receiver = db
+              .prepare(
+                "SELECT * FROM users WHERE id = ? AND is_ai = 1 AND is_active = 1",
+              )
+              .get(receiverId) as any;
+            const settings = db
+              .prepare("SELECT timezone FROM settings WHERE id = 1")
+              .get() as any;
+            if (
+              receiver &&
+              isUserOnline(receiver, settings?.timezone || "UTC")
+            ) {
+              const dmKey = `${receiverId}:${user.id}`;
+              if (pendingDMs.has(dmKey)) return;
+              pendingDMs.add(dmKey);
+
+              try {
+                // Get dm settings for allow_image_gen
+                const dmSettings = db
+                  .prepare(
+                    "SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0",
+                  )
+                  .get(user.id, receiverId) as any;
+                const allowImageGen = dmSettings?.allow_image_gen === 1;
+
+                const formattedHistory = await getDMSummaryAndHistory(
+                  user.id,
+                  receiverId,
+                  receiverId,
+                );
+
+                const rel = db
+                  .prepare(
+                    "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                  )
+                  .get(receiverId, user.id) as any;
+                const relContext = rel ? rel.description : "";
+
+                const replyData = await replyToDM(
+                  receiver,
+                  user.display_name,
+                  formattedHistory,
+                  relContext,
+                  user.id,
+                  false,
+                  allowImageGen,
+                );
+                if (replyData) {
+                  const { content: replyContent, internal_thought } = replyData;
+
+                  db.prepare(
+                    "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                  ).run(
+                    receiverId,
+                    user.id,
+                    replyContent.trim(),
+                    internal_thought,
+                  );
+
+                  if (allowImageGen) {
+                    const wantsImage = await checkIfWantsToSendImage(
+                      receiver,
+                      formattedHistory,
+                      replyContent,
+                    );
+                    if (wantsImage) {
+                      db.prepare(
+                        "INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')",
+                      ).run(receiverId, user.id);
+                    }
+                  }
+
+                  checkDynamicRelationship(receiver.id, user.id).catch(
+                    console.error,
+                  );
+                }
+              } finally {
+                pendingDMs.delete(dmKey);
+              }
+            }
+          } catch (err) {
+            console.error("Error in background DM processing:", err);
+          }
+        })();
+      } catch (e: any) {
+        console.error("Error in /api/dms/:userId:", e);
+        if (!res.headersSent) {
+          res.status(500).json({ error: e.message });
+        }
+      }
+    });
+
+    app.get("/api/typing-status/:id", (req, res) => {
+      const user = getRealUser(req);
+      if (!user) return res.json({ typing: [] });
+
+      const isGroup = req.query.isGroup === "true";
+      const chatId = parseInt(req.params.id);
+      const typing: string[] = [];
+
+      if (isGroup) {
+        for (const key of pendingGroupChats) {
+          if (key.startsWith(`${chatId}:`)) {
+            const aiId = parseInt(key.split(":")[1]);
+            const ai = db
+              .prepare("SELECT display_name FROM users WHERE id = ?")
+              .get(aiId) as any;
+            if (ai) typing.push(ai.display_name);
+          }
+        }
+      } else {
+        const dmKey = `${chatId}:${user.id}`;
+        if (pendingDMs.has(dmKey)) {
+          const ai = db
+            .prepare("SELECT display_name FROM users WHERE id = ?")
+            .get(chatId) as any;
           if (ai) typing.push(ai.display_name);
         }
       }
-    } else {
-      const dmKey = `${chatId}:${user.id}`;
-      if (pendingDMs.has(dmKey)) {
-        const ai = db.prepare("SELECT display_name FROM users WHERE id = ?").get(chatId) as any;
-        if (ai) typing.push(ai.display_name);
+
+      res.json({ typing });
+    });
+
+    // --- Recap Endpoints ---
+    app.get("/api/recaps", (req, res) => {
+      try {
+        const recaps = db
+          .prepare(
+            "SELECT id, month_year, title, created_at FROM monthly_recaps ORDER BY month_year DESC",
+          )
+          .all();
+        res.json(recaps);
+      } catch (error) {
+        console.error("Error fetching recaps:", error);
+        res.status(500).json({ error: "Failed to fetch recaps" });
       }
-    }
+    });
 
-    res.json({ typing });
-  });
+    app.get("/api/recaps/:monthYear", (req, res) => {
+      try {
+        const recap = db
+          .prepare("SELECT * FROM monthly_recaps WHERE month_year = ?")
+          .get(req.params.monthYear) as any;
+        if (!recap) {
+          return res.status(404).json({ error: "Recap not found" });
+        }
 
-  // --- Recap Endpoints ---
-  app.get("/api/recaps", (req, res) => {
-    try {
-      const recaps = db.prepare("SELECT id, month_year, title, created_at FROM monthly_recaps ORDER BY month_year DESC").all();
-      res.json(recaps);
-    } catch (error) {
-      console.error("Error fetching recaps:", error);
-      res.status(500).json({ error: "Failed to fetch recaps" });
-    }
-  });
+        const data = JSON.parse(recap.data);
 
-  app.get("/api/recaps/:monthYear", (req, res) => {
-    try {
-      const recap = db.prepare("SELECT * FROM monthly_recaps WHERE month_year = ?").get(req.params.monthYear) as any;
-      if (!recap) {
-        return res.status(404).json({ error: "Recap not found" });
+        res.json({
+          ...recap,
+          data,
+        });
+      } catch (error) {
+        console.error("Error fetching recap:", error);
+        res.status(500).json({ error: "Failed to fetch recap" });
       }
-      
-      const data = JSON.parse(recap.data);
+    });
 
-      res.json({
-        ...recap,
-        data
-      });
-    } catch (error) {
-      console.error("Error fetching recap:", error);
-      res.status(500).json({ error: "Failed to fetch recap" });
-    }
-  });
+    // --- End Recap Endpoints ---
 
-  // --- End Recap Endpoints ---
+    // Background Worker for AI Activity
+    let isWorkerRunning = false;
+    setInterval(async () => {
+      if (isWorkerRunning) return;
+      isWorkerRunning = true;
+      try {
+        await handleOPReplies();
 
-  // Background Worker for AI Activity
-  let isWorkerRunning = false;
-  setInterval(async () => {
-    if (isWorkerRunning) return;
-    isWorkerRunning = true;
-    try {
-      await handleOPReplies();
-      
-      const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
-      if (!settings || !settings.ai_enabled) return;
+        const settings = db
+          .prepare("SELECT * FROM settings WHERE id = 1")
+          .get() as any;
+        if (!settings || !settings.ai_enabled) return;
 
-      const allUsers = db.prepare("SELECT * FROM users").all() as any[];
-      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      const recentDmUserIds = new Set<number>(db.prepare(`
+        const allUsers = db.prepare("SELECT * FROM users").all() as any[];
+        const fifteenMinsAgo = new Date(
+          Date.now() - 15 * 60 * 1000,
+        ).toISOString();
+        const recentDmUserIds = new Set<number>(
+          db
+            .prepare(
+              `
         SELECT DISTINCT receiver_id FROM direct_messages dm
         JOIN users u ON dm.sender_id = u.id
         WHERE u.is_ai = 0 AND dm.created_at >= ?
-      `).all(fifteenMinsAgo).map((r: any) => r.receiver_id as number));
+      `,
+            )
+            .all(fifteenMinsAgo)
+            .map((r: any) => r.receiver_id as number),
+        );
 
-      const now = Date.now();
-      const timezone = settings.timezone || 'UTC';
-      const localTime = getFormatter(timezone).format(new Date(now));
-      let [currentHour, currentMinute] = localTime.split(':').map(Number);
-      if (currentHour === 24) currentHour = 0;
-      const precalculatedTime = { currentTimeInMinutes: currentHour * 60 + currentMinute };
+        const now = Date.now();
+        const timezone = settings.timezone || "UTC";
+        const localTime = getFormatter(timezone).format(new Date(now));
+        let [currentHour, currentMinute] = localTime.split(":").map(Number);
+        if (currentHour === 24) currentHour = 0;
+        const precalculatedTime = {
+          currentTimeInMinutes: currentHour * 60 + currentMinute,
+        };
 
-      const onlineUsers = allUsers.filter(u => isUserOnline(u, timezone, recentDmUserIds, precalculatedTime));
-      const onlineRatio = allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
+        const onlineUsers = allUsers.filter((u) =>
+          isUserOnline(u, timezone, recentDmUserIds, precalculatedTime),
+        );
+        const onlineRatio =
+          allUsers.length > 0 ? onlineUsers.length / allUsers.length : 0;
 
-      const pausedUniverses = new Set(db.prepare("SELECT id FROM universes WHERE is_paused = 1").all().map((u: any) => u.id));
+        const pausedUniverses = new Set(
+          db
+            .prepare("SELECT id FROM universes WHERE is_paused = 1")
+            .all()
+            .map((u: any) => u.id),
+        );
 
-      const allAiUsers = allUsers.filter(u => u.is_ai === 1 && (!u.universe_id || !pausedUniverses.has(u.universe_id)));
-      const onlineAiUsers = onlineUsers.filter(u => u.is_ai === 1 && u.account_type !== 'news' && (!u.universe_id || !pausedUniverses.has(u.universe_id)));
-      const activeAiUsers = onlineAiUsers.filter(u => u.is_active === 1);
-      if (allAiUsers.length === 0) return;
+        const allAiUsers = allUsers.filter(
+          (u) =>
+            u.is_ai === 1 &&
+            (!u.universe_id || !pausedUniverses.has(u.universe_id)),
+        );
+        const onlineAiUsers = onlineUsers.filter(
+          (u) =>
+            u.is_ai === 1 &&
+            u.account_type !== "news" &&
+            (!u.universe_id || !pausedUniverses.has(u.universe_id)),
+        );
+        const activeAiUsers = onlineAiUsers.filter((u) => u.is_active === 1);
+        if (allAiUsers.length === 0) return;
 
-      // --- News Accounts Logic ---
-      const newsAccounts = allAiUsers.filter(u => u.account_type === 'news');
-      for (const newsAccount of newsAccounts) {
-        let shouldPost = false;
-        const nowMs = Date.now();
-        
-        if (!newsAccount.next_scheduled_post) {
-          // Schedule it for today or tomorrow if missed
-          scheduleNextNewsPost(newsAccount, settings.timezone || 'UTC');
-        } else {
-          const scheduledTime = new Date(newsAccount.next_scheduled_post).getTime();
-          if (nowMs >= scheduledTime) {
-            // Atomically lock the post by updating the scheduled time to a far future date
-            const lockDate = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
-            const result = db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ? AND next_scheduled_post = ?").run(lockDate, newsAccount.id, newsAccount.next_scheduled_post);
-            if (result.changes > 0) {
-              shouldPost = true;
+        // --- News Accounts Logic ---
+        const newsAccounts = allAiUsers.filter(
+          (u) => u.account_type === "news",
+        );
+        for (const newsAccount of newsAccounts) {
+          let shouldPost = false;
+          const nowMs = Date.now();
+
+          if (!newsAccount.next_scheduled_post) {
+            // Schedule it for today or tomorrow if missed
+            scheduleNextNewsPost(newsAccount, settings.timezone || "UTC");
+          } else {
+            const scheduledTime = new Date(
+              newsAccount.next_scheduled_post,
+            ).getTime();
+            if (nowMs >= scheduledTime) {
+              // Atomically lock the post by updating the scheduled time to a far future date
+              const lockDate = new Date(
+                nowMs + 24 * 60 * 60 * 1000,
+              ).toISOString();
+              const result = db
+                .prepare(
+                  "UPDATE users SET next_scheduled_post = ? WHERE id = ? AND next_scheduled_post = ?",
+                )
+                .run(lockDate, newsAccount.id, newsAccount.next_scheduled_post);
+              if (result.changes > 0) {
+                shouldPost = true;
+              }
             }
           }
-        }
 
-        if (shouldPost) {
-          try {
-            // Get last post date to filter posts since then
-            const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(newsAccount.id) as any;
-            const sinceDate = lastPost ? lastPost.created_at : new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+          if (shouldPost) {
+            try {
+              // Get last post date to filter posts since then
+              const lastPost = db
+                .prepare(
+                  "SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                )
+                .get(newsAccount.id) as any;
+              const sinceDate = lastPost
+                ? lastPost.created_at
+                : new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
 
-            // Get recent posts from this universe since last news post, excluding comments
-            const recentPosts = db.prepare(`
+              // Get recent posts from this universe since last news post, excluding comments
+              const recentPosts = db
+                .prepare(
+                  `
               SELECT p.content, p.created_at, u.display_name
               FROM posts p
               JOIN users u ON p.user_id = u.id
               WHERE u.universe_id = ? AND p.created_at > ? AND u.account_type != 'news'
               ORDER BY p.created_at ASC
-            `).all(newsAccount.universe_id, sinceDate) as any[];
+            `,
+                )
+                .all(newsAccount.universe_id, sinceDate) as any[];
 
-            if (recentPosts.length >= 6) {
-              // Get active universe arc
-              const activeArc = db.prepare(`
+              if (recentPosts.length >= 6) {
+                // Get active universe arc
+                const activeArc = db
+                  .prepare(
+                    `
                 SELECT * FROM universe_arcs
                 WHERE universe_id = ? AND status = 'active'
                 ORDER BY created_at DESC LIMIT 1
-              `).get(newsAccount.universe_id) as any;
+              `,
+                  )
+                  .get(newsAccount.universe_id) as any;
 
-              // Get other news posts from today in this universe
-              const otherNewsPosts = db.prepare(`
+                // Get other news posts from today in this universe
+                const otherNewsPosts = db
+                  .prepare(
+                    `
                 SELECT p.content, p.created_at, u.display_name
                 FROM posts p
                 JOIN users u ON p.user_id = u.id
                 WHERE u.universe_id = ? AND u.account_type = 'news' AND u.id != ? AND p.created_at >= datetime('now', 'start of day')
                 ORDER BY p.created_at ASC
-              `).all(newsAccount.universe_id, newsAccount.id) as any[];
+              `,
+                  )
+                  .all(newsAccount.universe_id, newsAccount.id) as any[];
 
-              // Get last 10 news posts from this account for continuity
-              const pastNewsPosts = db.prepare(`
+                // Get last 10 news posts from this account for continuity
+                const pastNewsPosts = db
+                  .prepare(
+                    `
                 SELECT content, created_at
                 FROM posts
                 WHERE user_id = ?
                 ORDER BY created_at DESC LIMIT 10
-              `).all(newsAccount.id).reverse() as any[];
+              `,
+                  )
+                  .all(newsAccount.id)
+                  .reverse() as any[];
 
-              const newsData = await generateNewsPost(newsAccount, recentPosts, activeArc, otherNewsPosts, pastNewsPosts);
-              if (newsData) {
-                const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)").run(newsAccount.id, newsData.content, newsData.internal_thought);
-                const postId = info.lastInsertRowid as number;
-                triggerPostComments(postId, 'news');
-                console.log(`News Account ${newsAccount.display_name} posted their daily news.`);
+                const newsData = await generateNewsPost(
+                  newsAccount,
+                  recentPosts,
+                  activeArc,
+                  otherNewsPosts,
+                  pastNewsPosts,
+                );
+                if (newsData) {
+                  const info = db
+                    .prepare(
+                      "INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)",
+                    )
+                    .run(
+                      newsAccount.id,
+                      newsData.content,
+                      newsData.internal_thought,
+                    );
+                  const postId = info.lastInsertRowid as number;
+                  triggerPostComments(postId, "news");
+                  console.log(
+                    `News Account ${newsAccount.display_name} posted their daily news.`,
+                  );
+                }
+              } else {
+                console.log(
+                  `News Account ${newsAccount.display_name} skipped post: only ${recentPosts.length} posts found since ${sinceDate}.`,
+                );
               }
-            } else {
-              console.log(`News Account ${newsAccount.display_name} skipped post: only ${recentPosts.length} posts found since ${sinceDate}.`);
-            }
-          } catch (e) {
-            console.error(`Error generating news post for ${newsAccount.display_name}:`, e);
-          } finally {
-            scheduleNextNewsPost(newsAccount, settings.timezone || 'UTC', true);
-          }
-        }
-      }
-      // --- End News Accounts Logic ---
-      
-      // --- Faux News Logic ---
-      const fauxNewsAccounts = allAiUsers.filter(u => u.account_type === 'faux_news');
-      for (const fnAccount of fauxNewsAccounts) {
-        let shouldPost = false;
-        const nowMs = Date.now();
-        
-        if (!fnAccount.next_scheduled_post) {
-          scheduleNextFauxNewsPost(fnAccount, settings.timezone || 'UTC');
-        } else {
-          const scheduledTime = new Date(fnAccount.next_scheduled_post).getTime();
-          if (nowMs >= scheduledTime) {
-            const lockDate = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
-            const result = db.prepare("UPDATE users SET next_scheduled_post = ? WHERE id = ? AND next_scheduled_post = ?").run(lockDate, fnAccount.id, fnAccount.next_scheduled_post);
-            if (result.changes > 0) {
-              shouldPost = true;
+            } catch (e) {
+              console.error(
+                `Error generating news post for ${newsAccount.display_name}:`,
+                e,
+              );
+            } finally {
+              scheduleNextNewsPost(
+                newsAccount,
+                settings.timezone || "UTC",
+                true,
+              );
             }
           }
         }
+        // --- End News Accounts Logic ---
 
-        if (shouldPost) {
-          try {
-            // Get last post date to filter news posts since then
-            const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(fnAccount.id) as any;
-            const sinceDate = lastPost ? lastPost.created_at : new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+        // --- Faux News Logic ---
+        const fauxNewsAccounts = allAiUsers.filter(
+          (u) => u.account_type === "faux_news",
+        );
+        for (const fnAccount of fauxNewsAccounts) {
+          let shouldPost = false;
+          const nowMs = Date.now();
 
-            // Get news posts since last update
-            const newsPosts = db.prepare(`
+          if (!fnAccount.next_scheduled_post) {
+            scheduleNextFauxNewsPost(fnAccount, settings.timezone || "UTC");
+          } else {
+            const scheduledTime = new Date(
+              fnAccount.next_scheduled_post,
+            ).getTime();
+            if (nowMs >= scheduledTime) {
+              const lockDate = new Date(
+                nowMs + 24 * 60 * 60 * 1000,
+              ).toISOString();
+              const result = db
+                .prepare(
+                  "UPDATE users SET next_scheduled_post = ? WHERE id = ? AND next_scheduled_post = ?",
+                )
+                .run(lockDate, fnAccount.id, fnAccount.next_scheduled_post);
+              if (result.changes > 0) {
+                shouldPost = true;
+              }
+            }
+          }
+
+          if (shouldPost) {
+            try {
+              // Get last post date to filter news posts since then
+              const lastPost = db
+                .prepare(
+                  "SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                )
+                .get(fnAccount.id) as any;
+              const sinceDate = lastPost
+                ? lastPost.created_at
+                : new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+
+              // Get news posts since last update
+              const newsPosts = db
+                .prepare(
+                  `
               SELECT p.content, p.created_at, u.display_name, univ.name as universe_name
               FROM posts p
               JOIN users u ON p.user_id = u.id
               LEFT JOIN universes univ ON u.universe_id = univ.id
               WHERE u.account_type = 'news' AND p.created_at > ? AND u.id != ?
               ORDER BY p.created_at ASC
-            `).all(sinceDate, fnAccount.id) as any[];
+            `,
+                )
+                .all(sinceDate, fnAccount.id) as any[];
 
-            if (newsPosts.length >= 2) {
-              // Get last 10 faux news posts from this account for continuity
-              const pastNewsPosts = db.prepare(`
+              if (newsPosts.length >= 2) {
+                // Get last 10 faux news posts from this account for continuity
+                const pastNewsPosts = db
+                  .prepare(
+                    `
                 SELECT content, created_at
                 FROM posts
                 WHERE user_id = ?
                 ORDER BY created_at DESC LIMIT 10
-              `).all(fnAccount.id).reverse() as any[];
+              `,
+                  )
+                  .all(fnAccount.id)
+                  .reverse() as any[];
 
-              const localTimeStr = getFormatter(settings.timezone || 'UTC').format(new Date(nowMs));
-              const newsData = await generateFauxNewsPost(fnAccount, newsPosts, pastNewsPosts, localTimeStr);
-              if (newsData) {
-                const info = db.prepare("INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)").run(fnAccount.id, newsData.content, newsData.internal_thought);
-                const postId = info.lastInsertRowid as number;
-                triggerPostComments(postId, 'news');
-                console.log(`Faux News Account ${fnAccount.display_name} posted a platform-wide recap.`);
-              }
-            } else {
-              console.log(`Faux News Account ${fnAccount.display_name} skipped post: only ${newsPosts.length} news posts found since ${sinceDate}.`);
-            }
-          } catch (e) {
-            console.error(`Error generating faux news post for ${fnAccount.display_name}:`, e);
-          } finally {
-            scheduleNextFauxNewsPost(fnAccount, settings.timezone || 'UTC');
-          }
-        }
-      }
-      // --- End Faux News Logic ---
-
-      const probPost = ((settings.prob_post ?? 100) / 1440) * onlineRatio;
-      const probComment = ((settings.prob_comment ?? 1000) / 1440) * onlineRatio;
-      const probMessage = ((settings.prob_message ?? 5) / 1440) * onlineRatio;
-
-      // Local actions (Likes & Follows) - Doesn't use API tokens
-      if (Math.random() < 0.3 && activeAiUsers.length > 0) {
-        const randomAi = pickWeightedRandomUser(activeAiUsers);
-        // 30% chance to do some local actions
-        const recentPosts = db.prepare("SELECT id, user_id FROM posts WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 10").all() as any[];
-        if (recentPosts.length > 0) {
-          const postToLike = recentPosts[Math.floor(Math.random() * recentPosts.length)];
-          try {
-            db.prepare("INSERT INTO likes (post_id, user_id) VALUES (?, ?)").run(postToLike.id, randomAi.id);
-          } catch (e) {} // Already liked
-        }
-
-        const recentComments = db.prepare("SELECT id, user_id FROM comments ORDER BY created_at DESC LIMIT 10").all() as any[];
-        if (recentComments.length > 0) {
-          const commentToLike = recentComments[Math.floor(Math.random() * recentComments.length)];
-          try {
-            db.prepare("INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)").run(commentToLike.id, randomAi.id);
-          } catch (e) {} // Already liked
-        }
-
-        // Randomly follow someone
-        const otherAiUsers = activeAiUsers.filter(u => u.id !== randomAi.id);
-        if (otherAiUsers.length > 0) {
-          const totalAiUsersCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE is_ai = 1").get() as any;
-          const followingCountA = db.prepare("SELECT COUNT(*) as c FROM follows WHERE follower_id = ? AND followed_id IN (SELECT id FROM users WHERE is_ai = 1)").get(randomAi.id) as any;
-          
-          const followingRatio = followingCountA.c / Math.max(1, totalAiUsersCount.c);
-          
-          let shouldFollow = false;
-          if (followingRatio < 0.01) {
-              shouldFollow = true;
-          } else if (followingRatio < 0.40) {
-              if (followingRatio < 0.10) {
-                  shouldFollow = Math.random() < 0.8;
-              } else if (followingRatio < 0.30) {
-                  shouldFollow = Math.random() < 0.3;
+                const localTimeStr = getFormatter(
+                  settings.timezone || "UTC",
+                ).format(new Date(nowMs));
+                const newsData = await generateFauxNewsPost(
+                  fnAccount,
+                  newsPosts,
+                  pastNewsPosts,
+                  localTimeStr,
+                );
+                if (newsData) {
+                  const info = db
+                    .prepare(
+                      "INSERT INTO posts (user_id, content, post_type, internal_thought) VALUES (?, ?, 'news', ?)",
+                    )
+                    .run(
+                      fnAccount.id,
+                      newsData.content,
+                      newsData.internal_thought,
+                    );
+                  const postId = info.lastInsertRowid as number;
+                  triggerPostComments(postId, "news");
+                  console.log(
+                    `Faux News Account ${fnAccount.display_name} posted a platform-wide recap.`,
+                  );
+                }
               } else {
-                  shouldFollow = Math.random() < 0.05;
+                console.log(
+                  `Faux News Account ${fnAccount.display_name} skipped post: only ${newsPosts.length} news posts found since ${sinceDate}.`,
+                );
               }
+            } catch (e) {
+              console.error(
+                `Error generating faux news post for ${fnAccount.display_name}:`,
+                e,
+              );
+            } finally {
+              scheduleNextFauxNewsPost(fnAccount, settings.timezone || "UTC");
+            }
+          }
+        }
+        // --- End Faux News Logic ---
+
+        const probPost = ((settings.prob_post ?? 100) / 1440) * onlineRatio;
+        const probComment =
+          ((settings.prob_comment ?? 1000) / 1440) * onlineRatio;
+        const probMessage = ((settings.prob_message ?? 5) / 1440) * onlineRatio;
+
+        // Local actions (Likes & Follows) - Doesn't use API tokens
+        if (Math.random() < 0.3 && activeAiUsers.length > 0) {
+          const randomAi = pickWeightedRandomUser(activeAiUsers);
+          // 30% chance to do some local actions
+          const recentPosts = db
+            .prepare(
+              "SELECT id, user_id FROM posts WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 10",
+            )
+            .all() as any[];
+          if (recentPosts.length > 0) {
+            const postToLike =
+              recentPosts[Math.floor(Math.random() * recentPosts.length)];
+            try {
+              db.prepare(
+                "INSERT INTO likes (post_id, user_id) VALUES (?, ?)",
+              ).run(postToLike.id, randomAi.id);
+            } catch (e) {} // Already liked
           }
 
-          if (shouldFollow) {
-            let userToFollow = pickWeightedRandomUser(otherAiUsers);
-            
-            // Try to find someone from the same universe
-            if (randomAi.universe_id) {
-              const sameUniverseUsers = db.prepare(`
+          const recentComments = db
+            .prepare(
+              "SELECT id, user_id FROM comments ORDER BY created_at DESC LIMIT 10",
+            )
+            .all() as any[];
+          if (recentComments.length > 0) {
+            const commentToLike =
+              recentComments[Math.floor(Math.random() * recentComments.length)];
+            try {
+              db.prepare(
+                "INSERT INTO comment_likes (comment_id, user_id) VALUES (?, ?)",
+              ).run(commentToLike.id, randomAi.id);
+            } catch (e) {} // Already liked
+          }
+
+          // Randomly follow someone
+          const otherAiUsers = activeAiUsers.filter(
+            (u) => u.id !== randomAi.id,
+          );
+          if (otherAiUsers.length > 0) {
+            const totalAiUsersCount = db
+              .prepare("SELECT COUNT(*) as c FROM users WHERE is_ai = 1")
+              .get() as any;
+            const followingCountA = db
+              .prepare(
+                "SELECT COUNT(*) as c FROM follows WHERE follower_id = ? AND followed_id IN (SELECT id FROM users WHERE is_ai = 1)",
+              )
+              .get(randomAi.id) as any;
+
+            const followingRatio =
+              followingCountA.c / Math.max(1, totalAiUsersCount.c);
+
+            let shouldFollow = false;
+            if (followingRatio < 0.01) {
+              shouldFollow = true;
+            } else if (followingRatio < 0.4) {
+              if (followingRatio < 0.1) {
+                shouldFollow = Math.random() < 0.8;
+              } else if (followingRatio < 0.3) {
+                shouldFollow = Math.random() < 0.3;
+              } else {
+                shouldFollow = Math.random() < 0.05;
+              }
+            }
+
+            if (shouldFollow) {
+              let userToFollow = pickWeightedRandomUser(otherAiUsers);
+
+              // Try to find someone from the same universe
+              if (randomAi.universe_id) {
+                const sameUniverseUsers = db
+                  .prepare(
+                    `
                 SELECT id as user_id
                 FROM users 
                 WHERE universe_id = ? AND id != ? AND is_ai = 1
                 LIMIT 5
-              `).all(randomAi.universe_id, randomAi.id) as any[];
-              
-              if (sameUniverseUsers.length > 0) {
-                const crossUniverseProb = (settings.cross_universe_prob ?? 50.0) / 100;
-                if (Math.random() > crossUniverseProb) {
-                  const pickedSimilar = sameUniverseUsers[Math.floor(Math.random() * sameUniverseUsers.length)];
-                  const foundUser = otherAiUsers.find(u => u.id === pickedSimilar.user_id);
-                  if (foundUser) userToFollow = foundUser;
+              `,
+                  )
+                  .all(randomAi.universe_id, randomAi.id) as any[];
+
+                if (sameUniverseUsers.length > 0) {
+                  const crossUniverseProb =
+                    (settings.cross_universe_prob ?? 50.0) / 100;
+                  if (Math.random() > crossUniverseProb) {
+                    const pickedSimilar =
+                      sameUniverseUsers[
+                        Math.floor(Math.random() * sameUniverseUsers.length)
+                      ];
+                    const foundUser = otherAiUsers.find(
+                      (u) => u.id === pickedSimilar.user_id,
+                    );
+                    if (foundUser) userToFollow = foundUser;
+                  }
                 }
               }
-            }
 
-            if (userToFollow) {
-              // Follower scaling for userToFollow
-              const followerCountB = db.prepare("SELECT COUNT(*) as c FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)").get(userToFollow.id) as any;
-              const followedRatio = followerCountB.c / Math.max(1, totalAiUsersCount.c);
-              
-              // The more followers, the harder to gain new ones.
-              const followSuccessProb = Math.max(0.01, 1 - followedRatio);
+              if (userToFollow) {
+                // Follower scaling for userToFollow
+                const followerCountB = db
+                  .prepare(
+                    "SELECT COUNT(*) as c FROM follows WHERE followed_id = ? AND follower_id IN (SELECT id FROM users WHERE is_ai = 1)",
+                  )
+                  .get(userToFollow.id) as any;
+                const followedRatio =
+                  followerCountB.c / Math.max(1, totalAiUsersCount.c);
 
-              if (Math.random() < followSuccessProb) {
-                try {
-                  db.prepare("INSERT INTO follows (follower_id, followed_id) VALUES (?, ?)").run(randomAi.id, userToFollow.id);
-                } catch (e) {} // Already following
+                // The more followers, the harder to gain new ones.
+                const followSuccessProb = Math.max(0.01, 1 - followedRatio);
+
+                if (Math.random() < followSuccessProb) {
+                  try {
+                    db.prepare(
+                      "INSERT INTO follows (follower_id, followed_id) VALUES (?, ?)",
+                    ).run(randomAi.id, userToFollow.id);
+                  } catch (e) {} // Already following
+                }
               }
             }
           }
         }
-      }
 
+        const realUsers = db
+          .prepare("SELECT * FROM users WHERE is_ai = 0")
+          .all() as any[];
+        if (realUsers.length > 0 && activeAiUsers.length > 0) {
+          const realUser =
+            realUsers[Math.floor(Math.random() * realUsers.length)];
 
-      const realUsers = db.prepare("SELECT * FROM users WHERE is_ai = 0").all() as any[];
-      if (realUsers.length > 0 && activeAiUsers.length > 0) {
-        const realUser = realUsers[Math.floor(Math.random() * realUsers.length)];
-        
-        let userProbMessage = probMessage;
-        if (realUser.dm_frequency === 'never') userProbMessage = 0;
-        else if (realUser.dm_frequency === 'low') userProbMessage *= 0.2;
-        else if (realUser.dm_frequency === 'high') userProbMessage *= 3.0;
+          let userProbMessage = probMessage;
+          if (realUser.dm_frequency === "never") userProbMessage = 0;
+          else if (realUser.dm_frequency === "low") userProbMessage *= 0.2;
+          else if (realUser.dm_frequency === "high") userProbMessage *= 3.0;
 
-        if (Math.random() < userProbMessage) {
-          const followedAis = db.prepare(`
+          if (Math.random() < userProbMessage) {
+            const followedAis = db
+              .prepare(
+                `
             SELECT u.* FROM users u
             JOIN follows f ON f.followed_id = u.id
             WHERE f.follower_id = ? AND u.is_ai = 1 AND u.is_active = 1
-          `).all(realUser.id) as any[];
-          
-          const onlineFollowedAis = followedAis.filter(u => isUserOnline(u, settings.timezone || 'UTC') && (!u.universe_id || !pausedUniverses.has(u.universe_id)));
+          `,
+              )
+              .all(realUser.id) as any[];
 
-          if (onlineFollowedAis.length > 0) {
-            const probFavoriteDm = (settings.prob_favorite_dm ?? 50.0) / 100;
-            
-            if (Math.random() < probFavoriteDm) {
-              const favorites = db.prepare("SELECT target_id, is_group FROM dm_favorites WHERE user_id = ?").all(realUser.id) as any[];
-              if (favorites.length > 0) {
-                const randomFav = favorites[Math.floor(Math.random() * favorites.length)];
-                if (randomFav.is_group) {
-                  let aiMembers = db.prepare(`
+            const onlineFollowedAis = followedAis.filter(
+              (u) =>
+                isUserOnline(u, settings.timezone || "UTC") &&
+                (!u.universe_id || !pausedUniverses.has(u.universe_id)),
+            );
+
+            if (onlineFollowedAis.length > 0) {
+              const probFavoriteDm = (settings.prob_favorite_dm ?? 50.0) / 100;
+
+              if (Math.random() < probFavoriteDm) {
+                const favorites = db
+                  .prepare(
+                    "SELECT target_id, is_group FROM dm_favorites WHERE user_id = ?",
+                  )
+                  .all(realUser.id) as any[];
+                if (favorites.length > 0) {
+                  const randomFav =
+                    favorites[Math.floor(Math.random() * favorites.length)];
+                  if (randomFav.is_group) {
+                    let aiMembers = db
+                      .prepare(
+                        `
                     SELECT u.* FROM users u
                     JOIN group_chat_members gcm ON gcm.user_id = u.id
                     JOIN follows f ON f.followed_id = u.id
                     WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
-                  `).all(randomFav.target_id, realUser.id) as any[];
-                  aiMembers = aiMembers.filter(u => (!u.universe_id || !pausedUniverses.has(u.universe_id)));
-                  
-                  if (aiMembers.length > 0) {
-                    const randomAi = pickWeightedRandomUser(aiMembers);
-                    const groupChat = db.prepare("SELECT name FROM group_chats WHERE id = ?").get(randomFav.target_id) as any;
-                    const recentMessages = db.prepare(`
+                  `,
+                      )
+                      .all(randomFav.target_id, realUser.id) as any[];
+                    aiMembers = aiMembers.filter(
+                      (u) =>
+                        !u.universe_id || !pausedUniverses.has(u.universe_id),
+                    );
+
+                    if (aiMembers.length > 0) {
+                      const randomAi = pickWeightedRandomUser(aiMembers);
+                      const groupChat = db
+                        .prepare("SELECT name FROM group_chats WHERE id = ?")
+                        .get(randomFav.target_id) as any;
+                      const recentMessages = db
+                        .prepare(
+                          `
                       SELECT sender_id, content, created_at FROM group_chat_messages
                       WHERE group_chat_id = ?
                       ORDER BY created_at DESC LIMIT 15
-                    `).all(randomFav.target_id).reverse();
-                    
-                    const formattedHistory = recentMessages.map((msg: any) => {
-                      const sender = db.prepare("SELECT display_name FROM users WHERE id = ?").get(msg.sender_id) as any;
-                      return {
-                        role: msg.sender_id === randomAi.id ? 'assistant' : 'user',
-                        name: sender ? sender.display_name : 'Unknown',
-                        content: msg.content,
-                        created_at: msg.created_at
-                      };
-                    });
-                    
-                    const gcKey = `${randomFav.target_id}:${randomAi.id}`;
-                    if (!pendingGroupChats.has(gcKey)) {
-                      pendingGroupChats.add(gcKey);
+                    `,
+                        )
+                        .all(randomFav.target_id)
+                        .reverse();
 
-                      try {
-                        const otherMembers = db.prepare(`
+                      const formattedHistory = recentMessages.map(
+                        (msg: any) => {
+                          const sender = db
+                            .prepare(
+                              "SELECT display_name FROM users WHERE id = ?",
+                            )
+                            .get(msg.sender_id) as any;
+                          return {
+                            role:
+                              msg.sender_id === randomAi.id
+                                ? "assistant"
+                                : "user",
+                            name: sender ? sender.display_name : "Unknown",
+                            content: msg.content,
+                            created_at: msg.created_at,
+                          };
+                        },
+                      );
+
+                      const gcKey = `${randomFav.target_id}:${randomAi.id}`;
+                      if (!pendingGroupChats.has(gcKey)) {
+                        pendingGroupChats.add(gcKey);
+
+                        try {
+                          const otherMembers = db
+                            .prepare(
+                              `
                           SELECT u.display_name, u.description FROM users u
                           JOIN group_chat_members gcm ON gcm.user_id = u.id
                           WHERE gcm.group_chat_id = ? AND u.id != ?
-                        `).all(randomFav.target_id, randomAi.id) as any[];
-                        
-                        const replyData = await generateGroupChatReply(randomAi, groupChat.name, formattedHistory, otherMembers);
-                        if (replyData) {
-                          db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                            .run(randomFav.target_id, randomAi.id, replyData.content.trim(), replyData.internal_thought);
-                          console.log(`${randomAi.display_name} sent a message to group chat ${groupChat.name}`);
+                        `,
+                            )
+                            .all(randomFav.target_id, randomAi.id) as any[];
+
+                          const replyData = await generateGroupChatReply(
+                            randomAi,
+                            groupChat.name,
+                            formattedHistory,
+                            otherMembers,
+                          );
+                          if (replyData) {
+                            db.prepare(
+                              "INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                            ).run(
+                              randomFav.target_id,
+                              randomAi.id,
+                              replyData.content.trim(),
+                              replyData.internal_thought,
+                            );
+                            console.log(
+                              `${randomAi.display_name} sent a message to group chat ${groupChat.name}`,
+                            );
+                          }
+                        } finally {
+                          pendingGroupChats.delete(gcKey);
                         }
-                      } finally {
-                        pendingGroupChats.delete(gcKey);
+                      }
+                    }
+                  } else {
+                    const randomAi = db
+                      .prepare(
+                        `
+                    SELECT u.* FROM users u 
+                    JOIN follows f ON f.followed_id = u.id
+                    WHERE u.id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
+                  `,
+                      )
+                      .get(randomFav.target_id, realUser.id) as any;
+                    if (
+                      randomAi &&
+                      (!randomAi.universe_id ||
+                        !pausedUniverses.has(randomAi.universe_id))
+                    ) {
+                      const dmKey = `${randomAi.id}:${realUser.id}`;
+                      if (
+                        !isAITooSoonToDM(randomAi.id, realUser.id) &&
+                        !pendingDMs.has(dmKey)
+                      ) {
+                        pendingDMs.add(dmKey);
+
+                        try {
+                          const rel = db
+                            .prepare(
+                              "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                            )
+                            .get(randomAi.id, realUser.id) as any;
+                          const relContext = rel ? rel.description : "";
+
+                          const messageHistory = await getDMSummaryAndHistory(
+                            randomAi.id,
+                            realUser.id,
+                            randomAi.id,
+                          );
+
+                          const dmData = await generateDM(
+                            randomAi,
+                            realUser.display_name,
+                            relContext,
+                            realUser.id,
+                            "",
+                            messageHistory,
+                          );
+                          if (dmData) {
+                            db.prepare(
+                              "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                            ).run(
+                              randomAi.id,
+                              realUser.id,
+                              dmData.content.trim(),
+                              dmData.internal_thought,
+                            );
+                            checkDynamicRelationship(
+                              randomAi.id,
+                              realUser.id,
+                            ).catch(console.error);
+                            console.log(
+                              `${randomAi.display_name} sent a DM to ${realUser.display_name}`,
+                            );
+                          }
+                        } finally {
+                          pendingDMs.delete(dmKey);
+                        }
                       }
                     }
                   }
                 } else {
-                  const randomAi = db.prepare(`
-                    SELECT u.* FROM users u 
-                    JOIN follows f ON f.followed_id = u.id
-                    WHERE u.id = ? AND u.is_ai = 1 AND u.is_active = 1 AND f.follower_id = ?
-                  `).get(randomFav.target_id, realUser.id) as any;
-                  if (randomAi && (!randomAi.universe_id || !pausedUniverses.has(randomAi.universe_id))) {
-                    const dmKey = `${randomAi.id}:${realUser.id}`;
-                    if (!isAITooSoonToDM(randomAi.id, realUser.id) && !pendingDMs.has(dmKey)) {
-                      pendingDMs.add(dmKey);
+                  // Fallback if no favorites
+                  const randomAi = pickWeightedRandomUser(onlineFollowedAis);
+                  const dmKey = `${randomAi.id}:${realUser.id}`;
+                  if (
+                    !isAITooSoonToDM(randomAi.id, realUser.id) &&
+                    !pendingDMs.has(dmKey)
+                  ) {
+                    pendingDMs.add(dmKey);
 
-                      try {
-                        const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
-                        const relContext = rel ? rel.description : '';
-                        
-                        const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
+                    try {
+                      const rel = db
+                        .prepare(
+                          "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                        )
+                        .get(randomAi.id, realUser.id) as any;
+                      const relContext = rel ? rel.description : "";
 
-                        const dmData = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-                        if (dmData) {
-                          db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                            .run(randomAi.id, realUser.id, dmData.content.trim(), dmData.internal_thought);
-                          checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
-                          console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
-                        }
-                      } finally {
-                        pendingDMs.delete(dmKey);
+                      const messageHistory = await getDMSummaryAndHistory(
+                        randomAi.id,
+                        realUser.id,
+                        randomAi.id,
+                      );
+
+                      const dmData = await generateDM(
+                        randomAi,
+                        realUser.display_name,
+                        relContext,
+                        realUser.id,
+                        "",
+                        messageHistory,
+                      );
+                      if (dmData) {
+                        db.prepare(
+                          "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                        ).run(
+                          randomAi.id,
+                          realUser.id,
+                          dmData.content.trim(),
+                          dmData.internal_thought,
+                        );
+                        checkDynamicRelationship(
+                          randomAi.id,
+                          realUser.id,
+                        ).catch(console.error);
+                        console.log(
+                          `${randomAi.display_name} sent a DM to ${realUser.display_name}`,
+                        );
                       }
+                    } finally {
+                      pendingDMs.delete(dmKey);
                     }
                   }
                 }
               } else {
-                // Fallback if no favorites
+                // Random AI
                 const randomAi = pickWeightedRandomUser(onlineFollowedAis);
                 const dmKey = `${randomAi.id}:${realUser.id}`;
-                if (!isAITooSoonToDM(randomAi.id, realUser.id) && !pendingDMs.has(dmKey)) {
+                if (
+                  !isAITooSoonToDM(randomAi.id, realUser.id) &&
+                  !pendingDMs.has(dmKey)
+                ) {
                   pendingDMs.add(dmKey);
 
                   try {
-                    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
-                    const relContext = rel ? rel.description : '';
-                    
-                    const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
+                    const rel = db
+                      .prepare(
+                        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                      )
+                      .get(randomAi.id, realUser.id) as any;
+                    const relContext = rel ? rel.description : "";
 
-                    const dmData = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
+                    const messageHistory = await getDMSummaryAndHistory(
+                      randomAi.id,
+                      realUser.id,
+                      randomAi.id,
+                    );
+
+                    const dmData = await generateDM(
+                      randomAi,
+                      realUser.display_name,
+                      relContext,
+                      realUser.id,
+                      "",
+                      messageHistory,
+                    );
                     if (dmData) {
-                      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                        .run(randomAi.id, realUser.id, dmData.content.trim(), dmData.internal_thought);
-                      checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
-                      console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
+                      db.prepare(
+                        "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                      ).run(
+                        randomAi.id,
+                        realUser.id,
+                        dmData.content.trim(),
+                        dmData.internal_thought,
+                      );
+                      checkDynamicRelationship(randomAi.id, realUser.id).catch(
+                        console.error,
+                      );
+                      console.log(
+                        `${randomAi.display_name} sent a DM to ${realUser.display_name}`,
+                      );
                     }
                   } finally {
                     pendingDMs.delete(dmKey);
                   }
                 }
               }
-            } else {
-              // Random AI
-              const randomAi = pickWeightedRandomUser(onlineFollowedAis);
-              const dmKey = `${randomAi.id}:${realUser.id}`;
-              if (!isAITooSoonToDM(randomAi.id, realUser.id) && !pendingDMs.has(dmKey)) {
-                pendingDMs.add(dmKey);
-
-                try {
-                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, realUser.id) as any;
-                  const relContext = rel ? rel.description : '';
-                  
-                  const messageHistory = await getDMSummaryAndHistory(randomAi.id, realUser.id, randomAi.id);
-
-                  const dmData = await generateDM(randomAi, realUser.display_name, relContext, realUser.id, '', messageHistory);
-                  if (dmData) {
-                    db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                      .run(randomAi.id, realUser.id, dmData.content.trim(), dmData.internal_thought);
-                    checkDynamicRelationship(randomAi.id, realUser.id).catch(console.error);
-                    console.log(`${randomAi.display_name} sent a DM to ${realUser.display_name}`);
-                  }
-                } finally {
-                  pendingDMs.delete(dmKey);
-                }
-              }
             }
           }
         }
-      } 
 
-      // Handle unreplied DMs from real user
-      const allRealUsers = db.prepare("SELECT id, display_name FROM users WHERE is_ai = 0").all() as any[];
-      for (const realUser of allRealUsers) {
-        if (activeAiUsers.length > 0) {
-          const unrepliedDms = db.prepare(`
+        // Handle unreplied DMs from real user
+        const allRealUsers = db
+          .prepare("SELECT id, display_name FROM users WHERE is_ai = 0")
+          .all() as any[];
+        for (const realUser of allRealUsers) {
+          if (activeAiUsers.length > 0) {
+            const unrepliedDms = db
+              .prepare(
+                `
           SELECT dm.*, u.online_times
           FROM direct_messages dm
           JOIN users u ON dm.receiver_id = u.id
@@ -3641,213 +5487,331 @@ async function startServer() {
             SELECT 1 FROM direct_messages reply 
             WHERE reply.sender_id = dm.receiver_id AND reply.receiver_id = dm.sender_id AND reply.id > dm.id
           )
-        `).all(realUser.id) as any[];
+        `,
+              )
+              .all(realUser.id) as any[];
 
-        const onlineUnrepliedDms = unrepliedDms.filter(dm => isUserOnline(dm, settings.timezone || 'UTC'));
-        
-        for (const dm of onlineUnrepliedDms) {
-          if (Math.random() < 0.5) { // 50% chance to reply per worker tick to not spam
-            const aiUser = activeAiUsers.find(u => u.id === dm.receiver_id);
-            if (aiUser) {
-              const dmKey = `${aiUser.id}:${realUser.id}`;
-              if (pendingDMs.has(dmKey)) continue;
-              pendingDMs.add(dmKey);
+            const onlineUnrepliedDms = unrepliedDms.filter((dm) =>
+              isUserOnline(dm, settings.timezone || "UTC"),
+            );
 
-              try {
-                const formattedHistory = await getDMSummaryAndHistory(realUser.id, aiUser.id, aiUser.id);
+            for (const dm of onlineUnrepliedDms) {
+              if (Math.random() < 0.5) {
+                // 50% chance to reply per worker tick to not spam
+                const aiUser = activeAiUsers.find(
+                  (u) => u.id === dm.receiver_id,
+                );
+                if (aiUser) {
+                  const dmKey = `${aiUser.id}:${realUser.id}`;
+                  if (pendingDMs.has(dmKey)) continue;
+                  pendingDMs.add(dmKey);
 
-                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(aiUser.id, realUser.id) as any;
-                const relContext = rel ? rel.description : '';
+                  try {
+                    const formattedHistory = await getDMSummaryAndHistory(
+                      realUser.id,
+                      aiUser.id,
+                      aiUser.id,
+                    );
 
-                const dmSettings = db.prepare("SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0").get(realUser.id, aiUser.id) as any;
-                const allowImageGen = dmSettings ? dmSettings.allow_image_gen === 1 : false;
+                    const rel = db
+                      .prepare(
+                        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                      )
+                      .get(aiUser.id, realUser.id) as any;
+                    const relContext = rel ? rel.description : "";
 
-                const replyData = await replyToDM(aiUser, realUser.display_name, formattedHistory, relContext, realUser.id, true, allowImageGen);
-                if (replyData && replyData.content) {
-                  const { content: replyContent, internal_thought } = replyData;
+                    const dmSettings = db
+                      .prepare(
+                        "SELECT allow_image_gen FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0",
+                      )
+                      .get(realUser.id, aiUser.id) as any;
+                    const allowImageGen = dmSettings
+                      ? dmSettings.allow_image_gen === 1
+                      : false;
 
-                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                    .run(aiUser.id, realUser.id, replyContent.trim(), internal_thought);
+                    const replyData = await replyToDM(
+                      aiUser,
+                      realUser.display_name,
+                      formattedHistory,
+                      relContext,
+                      realUser.id,
+                      true,
+                      allowImageGen,
+                    );
+                    if (replyData && replyData.content) {
+                      const { content: replyContent, internal_thought } =
+                        replyData;
 
-                  if (allowImageGen) {
-                    const wantsImage = await checkIfWantsToSendImage(aiUser, formattedHistory, replyContent);
-                    if (wantsImage) {
-                      db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')")
-                        .run(aiUser.id, realUser.id);
+                      db.prepare(
+                        "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                      ).run(
+                        aiUser.id,
+                        realUser.id,
+                        replyContent.trim(),
+                        internal_thought,
+                      );
+
+                      if (allowImageGen) {
+                        const wantsImage = await checkIfWantsToSendImage(
+                          aiUser,
+                          formattedHistory,
+                          replyContent,
+                        );
+                        if (wantsImage) {
+                          db.prepare(
+                            "INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')",
+                          ).run(aiUser.id, realUser.id);
+                        }
+                      }
+
+                      checkDynamicRelationship(aiUser.id, realUser.id).catch(
+                        console.error,
+                      );
+                      console.log(
+                        `${aiUser.display_name} replied to pending DM from ${realUser.display_name}`,
+                      );
                     }
+                  } finally {
+                    pendingDMs.delete(dmKey);
                   }
-
-                  checkDynamicRelationship(aiUser.id, realUser.id).catch(console.error);
-                  console.log(`${aiUser.display_name} replied to pending DM from ${realUser.display_name}`);
                 }
-              } finally {
-                pendingDMs.delete(dmKey);
               }
             }
           }
         }
-      }
-    }
-      
-      if (onlineAiUsers.length > 0) {
-        const randomAi = pickWeightedRandomUser(onlineAiUsers);
-        const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(randomAi.id) as any).count;
-        
-        let multiplier = 0.5;
-        if (followersCount === 0) multiplier = 0;
-        else if (followersCount === 1) multiplier = 1.0;
-        else if (followersCount === 2) multiplier = 1.5;
-        else if (followersCount === 3) multiplier = 1.7;
-        else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
 
-        if (Math.random() < probPost * multiplier) {
-          await doAiPost(randomAi, null);
-        }
-      }
+        if (onlineAiUsers.length > 0) {
+          const randomAi = pickWeightedRandomUser(onlineAiUsers);
+          const followersCount = (
+            db
+              .prepare(
+                "SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0",
+              )
+              .get(randomAi.id) as any
+          ).count;
 
-      // Independent chance for inactive users to post their intro to ensure scalability
-      let introPostsThisMinute = 0;
-      const inactiveAiUsers = onlineAiUsers.filter(u => u.is_active === 0);
-      for (const inactiveUser of inactiveAiUsers) {
-        if (introPostsThisMinute >= 3) break; // Limit to 3 intro posts per minute to avoid rate limits
-        
-        const createdAt = new Date(inactiveUser.created_at + 'Z').getTime();
-        const daysSinceCreation = (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
-        
-        let introProb = 0;
-        if (daysSinceCreation > 7) {
-          introProb = 0.05; // 5% chance per minute while online
-        } else if (daysSinceCreation > 3) {
-          introProb = ((daysSinceCreation - 3) / 4) * 0.02; // Scales 0 to 2% chance per minute
-        }
-        
-        const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(inactiveUser.id) as any).count;
-        let multiplier = 0.5;
-        if (followersCount === 0) multiplier = 0;
-        else if (followersCount === 1) multiplier = 1.0;
-        else if (followersCount === 2) multiplier = 1.5;
-        else if (followersCount === 3) multiplier = 1.7;
-        else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
-
-        if (introProb > 0 && Math.random() < introProb * multiplier) {
-          await doAiPost(inactiveUser, null);
-          introPostsThisMinute++;
-        }
-      }
-
-      // Independent chance for active users who haven't posted in a while to ensure they don't go inactive
-      let catchupPostsThisMinute = 0;
-      for (const activeUser of activeAiUsers) {
-        if (catchupPostsThisMinute >= 3) break; // Limit to avoid rate limits
-        
-        const lastPost = db.prepare("SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(activeUser.id) as any;
-        const referenceTime = lastPost ? new Date(lastPost.created_at + 'Z').getTime() : new Date(activeUser.created_at + 'Z').getTime();
-        const daysSinceLastPost = (Date.now() - referenceTime) / (1000 * 60 * 60 * 24);
-        
-        if (daysSinceLastPost > 7) {
-          let catchupProb = 0;
-          if (daysSinceLastPost > 14) {
-            catchupProb = 0.05; // 5% chance per minute while online
-          } else {
-            catchupProb = ((daysSinceLastPost - 7) / 7) * 0.02; // Scales 0 to 2% chance per minute
-          }
-          
-          const followersCount = (db.prepare("SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0").get(activeUser.id) as any).count;
           let multiplier = 0.5;
           if (followersCount === 0) multiplier = 0;
           else if (followersCount === 1) multiplier = 1.0;
           else if (followersCount === 2) multiplier = 1.5;
           else if (followersCount === 3) multiplier = 1.7;
-          else if (followersCount > 3) multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
+          else if (followersCount > 3)
+            multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
 
-          if (catchupProb > 0 && Math.random() < catchupProb * multiplier) {
-            await doAiPost(activeUser, null);
-            catchupPostsThisMinute++;
+          if (Math.random() < probPost * multiplier) {
+            await doAiPost(randomAi, null);
           }
         }
-      }
 
-      // Handle Group Chat Replies (AI talking to AI or continuing conversation)
-      if (Math.random() < 0.3 && activeAiUsers.length > 0) {
-        // Find a recent group chat
-        const recentGroups = db.prepare(`
+        // Independent chance for inactive users to post their intro to ensure scalability
+        let introPostsThisMinute = 0;
+        const inactiveAiUsers = onlineAiUsers.filter((u) => u.is_active === 0);
+        for (const inactiveUser of inactiveAiUsers) {
+          if (introPostsThisMinute >= 3) break; // Limit to 3 intro posts per minute to avoid rate limits
+
+          const createdAt = new Date(inactiveUser.created_at + "Z").getTime();
+          const daysSinceCreation =
+            (Date.now() - createdAt) / (1000 * 60 * 60 * 24);
+
+          let introProb = 0;
+          if (daysSinceCreation > 7) {
+            introProb = 0.05; // 5% chance per minute while online
+          } else if (daysSinceCreation > 3) {
+            introProb = ((daysSinceCreation - 3) / 4) * 0.02; // Scales 0 to 2% chance per minute
+          }
+
+          const followersCount = (
+            db
+              .prepare(
+                "SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0",
+              )
+              .get(inactiveUser.id) as any
+          ).count;
+          let multiplier = 0.5;
+          if (followersCount === 0) multiplier = 0;
+          else if (followersCount === 1) multiplier = 1.0;
+          else if (followersCount === 2) multiplier = 1.5;
+          else if (followersCount === 3) multiplier = 1.7;
+          else if (followersCount > 3)
+            multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
+
+          if (introProb > 0 && Math.random() < introProb * multiplier) {
+            await doAiPost(inactiveUser, null);
+            introPostsThisMinute++;
+          }
+        }
+
+        // Independent chance for active users who haven't posted in a while to ensure they don't go inactive
+        let catchupPostsThisMinute = 0;
+        for (const activeUser of activeAiUsers) {
+          if (catchupPostsThisMinute >= 3) break; // Limit to avoid rate limits
+
+          const lastPost = db
+            .prepare(
+              "SELECT created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            )
+            .get(activeUser.id) as any;
+          const referenceTime = lastPost
+            ? new Date(lastPost.created_at + "Z").getTime()
+            : new Date(activeUser.created_at + "Z").getTime();
+          const daysSinceLastPost =
+            (Date.now() - referenceTime) / (1000 * 60 * 60 * 24);
+
+          if (daysSinceLastPost > 7) {
+            let catchupProb = 0;
+            if (daysSinceLastPost > 14) {
+              catchupProb = 0.05; // 5% chance per minute while online
+            } else {
+              catchupProb = ((daysSinceLastPost - 7) / 7) * 0.02; // Scales 0 to 2% chance per minute
+            }
+
+            const followersCount = (
+              db
+                .prepare(
+                  "SELECT COUNT(*) as count FROM follows f JOIN users u ON f.follower_id = u.id WHERE f.followed_id = ? AND u.is_ai = 0",
+                )
+                .get(activeUser.id) as any
+            ).count;
+            let multiplier = 0.5;
+            if (followersCount === 0) multiplier = 0;
+            else if (followersCount === 1) multiplier = 1.0;
+            else if (followersCount === 2) multiplier = 1.5;
+            else if (followersCount === 3) multiplier = 1.7;
+            else if (followersCount > 3)
+              multiplier = 1.7 + Math.log10(followersCount - 2) * 0.5;
+
+            if (catchupProb > 0 && Math.random() < catchupProb * multiplier) {
+              await doAiPost(activeUser, null);
+              catchupPostsThisMinute++;
+            }
+          }
+        }
+
+        // Handle Group Chat Replies (AI talking to AI or continuing conversation)
+        if (Math.random() < 0.3 && activeAiUsers.length > 0) {
+          // Find a recent group chat
+          const recentGroups = db
+            .prepare(
+              `
           SELECT gc.id, gc.name, MAX(gcm.created_at) as last_msg_time
           FROM group_chats gc
           JOIN group_chat_messages gcm ON gc.id = gcm.group_chat_id
           GROUP BY gc.id
           ORDER BY last_msg_time DESC LIMIT 5
-        `).all() as any[];
+        `,
+            )
+            .all() as any[];
 
-        if (recentGroups.length > 0) {
-          const group = recentGroups[Math.floor(Math.random() * recentGroups.length)];
-          
-          // Get members
-          const members = db.prepare(`
+          if (recentGroups.length > 0) {
+            const group =
+              recentGroups[Math.floor(Math.random() * recentGroups.length)];
+
+            // Get members
+            const members = db
+              .prepare(
+                `
             SELECT u.* FROM users u
             JOIN group_chat_members gcm ON u.id = gcm.user_id
             WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1
-          `).all(group.id) as any[];
+          `,
+              )
+              .all(group.id) as any[];
 
-          const onlineMembers = members.filter(m => isUserOnline(m, settings.timezone || 'UTC') && (!m.universe_id || !pausedUniverses.has(m.universe_id)));
-          
-          if (onlineMembers.length > 0) {
-            // Pick an AI to reply based on activity level
-            const totalActivity = onlineMembers.reduce((sum, m) => sum + (m.activity_level ?? 5), 0);
-            let random = Math.random() * totalActivity;
-            let selectedAi = onlineMembers[0];
-            for (const m of onlineMembers) {
-              random -= (m.activity_level ?? 5);
-              if (random <= 0) {
-                selectedAi = m;
-                break;
+            const onlineMembers = members.filter(
+              (m) =>
+                isUserOnline(m, settings.timezone || "UTC") &&
+                (!m.universe_id || !pausedUniverses.has(m.universe_id)),
+            );
+
+            if (onlineMembers.length > 0) {
+              // Pick an AI to reply based on activity level
+              const totalActivity = onlineMembers.reduce(
+                (sum, m) => sum + (m.activity_level ?? 5),
+                0,
+              );
+              let random = Math.random() * totalActivity;
+              let selectedAi = onlineMembers[0];
+              for (const m of onlineMembers) {
+                random -= m.activity_level ?? 5;
+                if (random <= 0) {
+                  selectedAi = m;
+                  break;
+                }
               }
-            }
 
-            // Check if the last message was already from this AI
-            const lastMsg = db.prepare("SELECT sender_id FROM group_chat_messages WHERE group_chat_id = ? ORDER BY created_at DESC LIMIT 1").get(group.id) as any;
-            
-            if (lastMsg && lastMsg.sender_id !== selectedAi.id) {
-              const gcKey = `${group.id}:${selectedAi.id}`;
-              if (!pendingGroupChats.has(gcKey)) {
-                pendingGroupChats.add(gcKey);
+              // Check if the last message was already from this AI
+              const lastMsg = db
+                .prepare(
+                  "SELECT sender_id FROM group_chat_messages WHERE group_chat_id = ? ORDER BY created_at DESC LIMIT 1",
+                )
+                .get(group.id) as any;
 
-                try {
-                const history = db.prepare(`
+              if (lastMsg && lastMsg.sender_id !== selectedAi.id) {
+                const gcKey = `${group.id}:${selectedAi.id}`;
+                if (!pendingGroupChats.has(gcKey)) {
+                  pendingGroupChats.add(gcKey);
+
+                  try {
+                    const history = db
+                      .prepare(
+                        `
                   SELECT m.sender_id, m.content, u.display_name, m.created_at, u.is_ai
                   FROM group_chat_messages m
                   JOIN users u ON m.sender_id = u.id
                   WHERE m.group_chat_id = ?
                   ORDER BY m.created_at DESC LIMIT 15
-                `).all(group.id).reverse();
+                `,
+                      )
+                      .all(group.id)
+                      .reverse();
 
-                const formattedHistory = history.map((msg: any) => ({
-                  role: msg.is_ai === 0 ? 'user' : 'assistant',
-                  content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`
-                }));
+                    const formattedHistory = history.map((msg: any) => ({
+                      role: msg.is_ai === 0 ? "user" : "assistant",
+                      content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`,
+                    }));
 
-                const otherMembers = db.prepare(`
+                    const otherMembers = db
+                      .prepare(
+                        `
                   SELECT u.* FROM users u
                   JOIN group_chat_members gcm ON u.id = gcm.user_id
                   WHERE gcm.group_chat_id = ? AND u.id != ?
-                `).all(group.id, selectedAi.id) as any[];
+                `,
+                      )
+                      .all(group.id, selectedAi.id) as any[];
 
-                const replyData = await generateGroupChatReply(selectedAi, group.name, formattedHistory, otherMembers);
-                if (replyData) {
-                  db.prepare("INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                    .run(group.id, selectedAi.id, replyData.content, replyData.internal_thought);
-                  console.log(`${selectedAi.display_name} replied in group chat ${group.name}`);
+                    const replyData = await generateGroupChatReply(
+                      selectedAi,
+                      group.name,
+                      formattedHistory,
+                      otherMembers,
+                    );
+                    if (replyData) {
+                      db.prepare(
+                        "INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                      ).run(
+                        group.id,
+                        selectedAi.id,
+                        replyData.content,
+                        replyData.internal_thought,
+                      );
+                      console.log(
+                        `${selectedAi.display_name} replied in group chat ${group.name}`,
+                      );
+                    }
+                  } finally {
+                    pendingGroupChats.delete(gcKey);
+                  }
                 }
-              } finally {
-                pendingGroupChats.delete(gcKey);
               }
             }
           }
         }
-      }
-    }
-      
-      // Handle mentions
-      const unrepliedMentions = db.prepare(`
+
+        // Handle mentions
+        const unrepliedMentions = db
+          .prepare(
+            `
         SELECT p.id as post_id, NULL as comment_id, p.content, u.id as ai_user_id, p.user_id as author_id, u.online_times
         FROM posts p
         JOIN users u ON p.content LIKE '%@' || u.username || '%'
@@ -3863,150 +5827,289 @@ async function startServer() {
         AND NOT EXISTS (
           SELECT 1 FROM comments c2 WHERE c2.parent_id = c.id AND c2.user_id = u.id
         )
-      `).all() as any[];
+      `,
+          )
+          .all() as any[];
 
-      const onlineMentions = [];
-      for (const m of unrepliedMentions) {
-        if (isUserOnline(m, settings.timezone || 'UTC')) {
-          onlineMentions.push(m);
+        const onlineMentions = [];
+        for (const m of unrepliedMentions) {
+          if (isUserOnline(m, settings.timezone || "UTC")) {
+            onlineMentions.push(m);
+          }
         }
-      }
 
-      let handledMention = false;
-      if (onlineMentions.length > 0 && Math.random() < 0.8 && activeAiUsers.length > 0) { // 80% chance to prioritize a mention if one exists
-        const mention = onlineMentions[Math.floor(Math.random() * onlineMentions.length)];
-        const randomAi = activeAiUsers.find(u => u.id === mention.ai_user_id);
-        if (randomAi && mention.author_id !== randomAi.id) {
-          // Check if this is a news post and if the AI is from the same universe
-          const postAuthor = db.prepare("SELECT u.universe_id, u.account_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?").get(mention.post_id) as any;
-          if (postAuthor?.account_type === 'news' && postAuthor.universe_id !== randomAi.universe_id) {
-            // Ignore mention on news post from different universe
-            if (mention.comment_id) {
-              db.prepare("UPDATE comments SET mention_ignored = 1 WHERE id = ?").run(mention.comment_id);
+        let handledMention = false;
+        if (
+          onlineMentions.length > 0 &&
+          Math.random() < 0.8 &&
+          activeAiUsers.length > 0
+        ) {
+          // 80% chance to prioritize a mention if one exists
+          const mention =
+            onlineMentions[Math.floor(Math.random() * onlineMentions.length)];
+          const randomAi = activeAiUsers.find(
+            (u) => u.id === mention.ai_user_id,
+          );
+          if (randomAi && mention.author_id !== randomAi.id) {
+            // Check if this is a news post and if the AI is from the same universe
+            const postAuthor = db
+              .prepare(
+                "SELECT u.universe_id, u.account_type FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = ?",
+              )
+              .get(mention.post_id) as any;
+            if (
+              postAuthor?.account_type === "news" &&
+              postAuthor.universe_id !== randomAi.universe_id
+            ) {
+              // Ignore mention on news post from different universe
+              if (mention.comment_id) {
+                db.prepare(
+                  "UPDATE comments SET mention_ignored = 1 WHERE id = ?",
+                ).run(mention.comment_id);
+              } else {
+                db.prepare(
+                  "UPDATE posts SET mention_ignored = 1 WHERE id = ?",
+                ).run(mention.post_id);
+              }
+              handledMention = false;
             } else {
-              db.prepare("UPDATE posts SET mention_ignored = 1 WHERE id = ?").run(mention.post_id);
-            }
-            handledMention = false;
-          } else {
-            handledMention = true;
-            
-            if (mention.comment_id) {
-            // Reply to comment
-            const commentData = db.prepare(`
+              handledMention = true;
+
+              if (mention.comment_id) {
+                // Reply to comment
+                const commentData = db
+                  .prepare(
+                    `
               SELECT c.*, u.display_name as author_name, p.content as post_content
               FROM comments c
               JOIN users u ON c.user_id = u.id
               JOIN posts p ON c.post_id = p.id
               WHERE c.id = ?
-            `).get(mention.comment_id) as any;
-            
-            if (commentData) {
-              if (getCommentDepth(commentData.id) >= 5) {
-                db.prepare("UPDATE comments SET mention_ignored = 1 WHERE id = ?").run(commentData.id);
-                handledMention = false;
-              } else if (pendingComments.has(`${randomAi.id}:comment:${commentData.id}`)) {
-                handledMention = false;
-              } else {
-                pendingComments.add(`${randomAi.id}:comment:${commentData.id}`);
-                try {
-                  const threadContext = buildThreadContext(mention.comment_id);
-                  
-                  const rels = db.prepare(`
+            `,
+                  )
+                  .get(mention.comment_id) as any;
+
+                if (commentData) {
+                  if (getCommentDepth(commentData.id) >= 5) {
+                    db.prepare(
+                      "UPDATE comments SET mention_ignored = 1 WHERE id = ?",
+                    ).run(commentData.id);
+                    handledMention = false;
+                  } else if (
+                    pendingComments.has(
+                      `${randomAi.id}:comment:${commentData.id}`,
+                    )
+                  ) {
+                    handledMention = false;
+                  } else {
+                    pendingComments.add(
+                      `${randomAi.id}:comment:${commentData.id}`,
+                    );
+                    try {
+                      const threadContext = buildThreadContext(
+                        mention.comment_id,
+                      );
+
+                      const rels = db
+                        .prepare(
+                          `
                     SELECT u.display_name, r.description 
                     FROM relationships r 
                     JOIN users u ON r.user_id_2 = u.id 
                     WHERE r.user_id_1 = ? AND r.user_id_2 = ?
-                  `).all(randomAi.id, commentData.user_id) as any[];
-                  const relStr = rels.length > 0 ? rels[0].description : '';
+                  `,
+                        )
+                        .all(randomAi.id, commentData.user_id) as any[];
+                      const relStr = rels.length > 0 ? rels[0].description : "";
 
-                  const newCommentData = await generateComment(randomAi, commentData.content, commentData.author_name, threadContext, true, relStr, commentData.user_id, undefined, commentData.created_at);
-                  if (newCommentData) {
-                    const info = db.prepare("INSERT INTO comments (post_id, user_id, parent_id, content, internal_thought) VALUES (?, ?, ?, ?, ?)").run(commentData.post_id, randomAi.id, commentData.id, newCommentData.content, newCommentData.internal_thought);
-                    checkDynamicRelationship(randomAi.id, commentData.user_id).catch(console.error);
-                    console.log(`${randomAi.display_name} replied to mention in comment ${commentData.id}`);
+                      const newCommentData = await generateComment(
+                        randomAi,
+                        commentData.content,
+                        commentData.author_name,
+                        threadContext,
+                        true,
+                        relStr,
+                        commentData.user_id,
+                        undefined,
+                        commentData.created_at,
+                      );
+                      if (newCommentData) {
+                        const info = db
+                          .prepare(
+                            "INSERT INTO comments (post_id, user_id, parent_id, content, internal_thought) VALUES (?, ?, ?, ?, ?)",
+                          )
+                          .run(
+                            commentData.post_id,
+                            randomAi.id,
+                            commentData.id,
+                            newCommentData.content,
+                            newCommentData.internal_thought,
+                          );
+                        checkDynamicRelationship(
+                          randomAi.id,
+                          commentData.user_id,
+                        ).catch(console.error);
+                        console.log(
+                          `${randomAi.display_name} replied to mention in comment ${commentData.id}`,
+                        );
 
-                    // Add 1-5 likes to the comment being replied to
-                    addLikesToPostOrComment(commentData.post_id, commentData.id, Math.floor(Math.random() * 5) + 1);
+                        // Add 1-5 likes to the comment being replied to
+                        addLikesToPostOrComment(
+                          commentData.post_id,
+                          commentData.id,
+                          Math.floor(Math.random() * 5) + 1,
+                        );
 
-                    const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(commentData.user_id) as any;
-                    if (commentAuthor && commentAuthor.is_ai === 0) {
-                      db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-                        .run(commentAuthor.id, randomAi.id, info.lastInsertRowid);
+                        const commentAuthor = db
+                          .prepare("SELECT id, is_ai FROM users WHERE id = ?")
+                          .get(commentData.user_id) as any;
+                        if (commentAuthor && commentAuthor.is_ai === 0) {
+                          db.prepare(
+                            "INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)",
+                          ).run(
+                            commentAuthor.id,
+                            randomAi.id,
+                            info.lastInsertRowid,
+                          );
+                        }
+                      }
+                    } finally {
+                      pendingComments.delete(
+                        `${randomAi.id}:comment:${commentData.id}`,
+                      );
                     }
                   }
-                } finally {
-                  pendingComments.delete(`${randomAi.id}:comment:${commentData.id}`);
                 }
-              }
-            }
-          } else {
-            // Reply to post
-            const postData = db.prepare(`
+              } else {
+                // Reply to post
+                const postData = db
+                  .prepare(
+                    `
               SELECT p.*, u.display_name as author_name, u.bio as author_bio
               FROM posts p 
               JOIN users u ON p.user_id = u.id 
               WHERE p.id = ?
-            `).get(mention.post_id) as any;
+            `,
+                  )
+                  .get(mention.post_id) as any;
 
-            if (postData) {
-              if (pendingComments.has(`${randomAi.id}:post:${postData.id}`)) {
-                handledMention = false;
-              } else {
-                pendingComments.add(`${randomAi.id}:post:${postData.id}`);
-                try {
-                  const otherComments = db.prepare("SELECT c.content, u.display_name FROM comments c JOIN users u ON c.user_id = u.id WHERE c.post_id = ? AND c.parent_id IS NULL").all(mention.post_id) as any[];
-                  const commentsStr = otherComments.map(c => `${c.display_name}: ${c.content}`).join(" | ");
-                  
-                  const rels = db.prepare(`
+                if (postData) {
+                  if (
+                    pendingComments.has(`${randomAi.id}:post:${postData.id}`)
+                  ) {
+                    handledMention = false;
+                  } else {
+                    pendingComments.add(`${randomAi.id}:post:${postData.id}`);
+                    try {
+                      const otherComments = db
+                        .prepare(
+                          "SELECT c.content, u.display_name FROM comments c JOIN users u ON c.user_id = u.id WHERE c.post_id = ? AND c.parent_id IS NULL",
+                        )
+                        .all(mention.post_id) as any[];
+                      const commentsStr = otherComments
+                        .map((c) => `${c.display_name}: ${c.content}`)
+                        .join(" | ");
+
+                      const rels = db
+                        .prepare(
+                          `
                     SELECT u.display_name, r.description 
                     FROM relationships r 
                     JOIN users u ON r.user_id_2 = u.id 
                     WHERE r.user_id_1 = ? AND r.user_id_2 = ?
-                  `).all(randomAi.id, postData.user_id) as any[];
-                  const relStr = rels.length > 0 ? rels[0].description : '';
+                  `,
+                        )
+                        .all(randomAi.id, postData.user_id) as any[];
+                      const relStr = rels.length > 0 ? rels[0].description : "";
 
-                  const commentData = await generateComment(randomAi, postData.content, postData.author_name, commentsStr, false, relStr, postData.user_id, postData.image_prompt, postData.created_at);
-                  if (commentData) {
-                    const info = db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                      .run(postData.id, randomAi.id, commentData.content, commentData.internal_thought);
-                    checkDynamicRelationship(randomAi.id, postData.user_id).catch(console.error);
-                    console.log(`${randomAi.display_name} replied to mention in post ${postData.id}`);
+                      const commentData = await generateComment(
+                        randomAi,
+                        postData.content,
+                        postData.author_name,
+                        commentsStr,
+                        false,
+                        relStr,
+                        postData.user_id,
+                        postData.image_prompt,
+                        postData.created_at,
+                      );
+                      if (commentData) {
+                        const info = db
+                          .prepare(
+                            "INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                          )
+                          .run(
+                            postData.id,
+                            randomAi.id,
+                            commentData.content,
+                            commentData.internal_thought,
+                          );
+                        checkDynamicRelationship(
+                          randomAi.id,
+                          postData.user_id,
+                        ).catch(console.error);
+                        console.log(
+                          `${randomAi.display_name} replied to mention in post ${postData.id}`,
+                        );
 
-                    // Add 1-5 likes to the post being replied to
-                    addLikesToPostOrComment(postData.id, null, Math.floor(Math.random() * 5) + 1);
+                        // Add 1-5 likes to the post being replied to
+                        addLikesToPostOrComment(
+                          postData.id,
+                          null,
+                          Math.floor(Math.random() * 5) + 1,
+                        );
 
-                    const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(postData.user_id) as any;
-                    if (postAuthor && postAuthor.is_ai === 0) {
-                      db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-                        .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
+                        const postAuthor = db
+                          .prepare("SELECT id, is_ai FROM users WHERE id = ?")
+                          .get(postData.user_id) as any;
+                        if (postAuthor && postAuthor.is_ai === 0) {
+                          db.prepare(
+                            "INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)",
+                          ).run(
+                            postAuthor.id,
+                            randomAi.id,
+                            info.lastInsertRowid,
+                          );
+                        }
+                      }
+                    } finally {
+                      pendingComments.delete(
+                        `${randomAi.id}:post:${postData.id}`,
+                      );
                     }
                   }
-                } finally {
-                  pendingComments.delete(`${randomAi.id}:post:${postData.id}`);
                 }
               }
             }
           }
         }
-      }
-    }
 
-      if (!handledMention && Math.random() < probComment && activeAiUsers.length > 0) {
-        // Pick a recent post or comment to reply to
-        const recentPosts = db.prepare(`
+        if (
+          !handledMention &&
+          Math.random() < probComment &&
+          activeAiUsers.length > 0
+        ) {
+          // Pick a recent post or comment to reply to
+          const recentPosts = db
+            .prepare(
+              `
           SELECT p.*, u.display_name as author_name, u.bio as author_bio,
           (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count
           FROM posts p 
           JOIN users u ON p.user_id = u.id 
           ORDER BY p.created_at DESC LIMIT 10
-        `).all() as any[];
-        
-        const recentPostIds = recentPosts.map(p => p.id);
-        const placeholders = recentPostIds.map(() => '?').join(',');
-        
-        let recentComments: any[] = [];
-        if (recentPostIds.length > 0) {
-          recentComments = db.prepare(`
+        `,
+            )
+            .all() as any[];
+
+          const recentPostIds = recentPosts.map((p) => p.id);
+          const placeholders = recentPostIds.map(() => "?").join(",");
+
+          let recentComments: any[] = [];
+          if (recentPostIds.length > 0) {
+            recentComments = db
+              .prepare(
+                `
             SELECT c.*, u.display_name as author_name, p.content as post_content,
             (SELECT COUNT(*) FROM comments WHERE parent_id = c.id) as reply_count
             FROM comments c
@@ -4014,243 +6117,430 @@ async function startServer() {
             JOIN posts p ON c.post_id = p.id
             WHERE c.post_id IN (${placeholders})
             ORDER BY c.created_at DESC LIMIT 30
-          `).all(...recentPostIds) as any[];
-        }
-
-        let weightedItems: any[] = [];
-        
-        recentPosts.forEach((post, index) => {
-          let weight = Math.max(1, 10 - Math.floor(index / 2));
-          if (post.post_type === 'question') weight *= 3;
-          if (post.post_type === 'discussion') weight *= 5;
-          if (post.post_type === 'shitpost') weight *= 2;
-          if (post.post_type === 'mention') weight *= 2;
-          if (post.post_type === 'dm_invitation') weight *= 2;
-          
-          // Boost posts from real users by 3-4x
-          const isRealUser = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(post.user_id) as any;
-          if (isRealUser && isRealUser.is_ai === 0) {
-            weight *= (Math.random() < 0.5 ? 3 : 4);
+          `,
+              )
+              .all(...recentPostIds) as any[];
           }
 
-          for (let i = 0; i < weight; i++) {
-            weightedItems.push({ type: 'post', data: post });
-          }
-        });
+          let weightedItems: any[] = [];
 
-        recentComments.forEach((comment, index) => {
-          // Check thread depth
-          let depth = 1;
-          let currentComment = comment;
-          while (currentComment.parent_id) {
-            depth++;
-            currentComment = db.prepare("SELECT parent_id FROM comments WHERE id = ?").get(currentComment.parent_id) as any;
-            if (!currentComment) break;
-          }
-          if (depth >= 5) return; // Limit thread to 5 levels
+          recentPosts.forEach((post, index) => {
+            let weight = Math.max(1, 10 - Math.floor(index / 2));
+            if (post.post_type === "question") weight *= 3;
+            if (post.post_type === "discussion") weight *= 5;
+            if (post.post_type === "shitpost") weight *= 2;
+            if (post.post_type === "mention") weight *= 2;
+            if (post.post_type === "dm_invitation") weight *= 2;
 
-          const weight = Math.max(1, 5 - Math.floor(index / 6));
-          for (let i = 0; i < weight; i++) {
-            weightedItems.push({ type: 'comment', data: comment });
-          }
-        });
-
-        let choice: any = null;
-        let availableAis: any[] = [];
-        let attempts = 0;
-
-        while (weightedItems.length > 0 && attempts < 10) {
-          attempts++;
-          const choiceIndex = Math.floor(Math.random() * weightedItems.length);
-          choice = weightedItems[choiceIndex];
-          
-          if (choice.type === 'post' && choice.data.post_type === 'dm_invitation') {
-            const author = db.prepare("SELECT * FROM users WHERE id = ?").get(choice.data.user_id) as any;
-            if (author.is_ai === 1) {
-              // Skip DM invitations from AI users
-              weightedItems.splice(choiceIndex, 1);
-              continue;
+            // Boost posts from real users by 3-4x
+            const isRealUser = db
+              .prepare("SELECT is_ai FROM users WHERE id = ?")
+              .get(post.user_id) as any;
+            if (isRealUser && isRealUser.is_ai === 0) {
+              weight *= Math.random() < 0.5 ? 3 : 4;
             }
 
-            const followedAis = db.prepare("SELECT followed_id FROM follows WHERE follower_id = ?").all(author.id).map((f: any) => f.followed_id);
-            const otherAiUsers = activeAiUsers.filter(u => u.id !== choice.data.user_id && followedAis.includes(u.id));
-            
-            if (otherAiUsers.length > 0) {
-              const randomAi = pickWeightedRandomUser(otherAiUsers);
-              if (pendingDMs.has(`${randomAi.id}:${author.id}`)) continue;
-              pendingDMs.add(`${randomAi.id}:${author.id}`);
-              try {
-                const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, author.id) as any;
-                const relContext = rel ? rel.description : '';
-                const dmContext = `You saw their post: "${choice.data.content}" and decided to DM them about it.`;
-                
-                // Fetch message history
-                const messageHistory = await getDMSummaryAndHistory(randomAi.id, author.id, randomAi.id);
+            for (let i = 0; i < weight; i++) {
+              weightedItems.push({ type: "post", data: post });
+            }
+          });
 
-                const dmData = await generateDM(randomAi, author.display_name, relContext, author.id, dmContext, messageHistory);
-                if (dmData) {
-                  db.prepare("INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                    .run(randomAi.id, author.id, dmData.content, dmData.internal_thought);
-                  console.log(`${randomAi.display_name} sent a DM to ${author.display_name} in response to a dm_invitation post`);
-                }
-              } finally {
-                pendingDMs.delete(`${randomAi.id}:${author.id}`);
+          recentComments.forEach((comment, index) => {
+            // Check thread depth
+            let depth = 1;
+            let currentComment = comment;
+            while (currentComment.parent_id) {
+              depth++;
+              currentComment = db
+                .prepare("SELECT parent_id FROM comments WHERE id = ?")
+                .get(currentComment.parent_id) as any;
+              if (!currentComment) break;
+            }
+            if (depth >= 5) return; // Limit thread to 5 levels
+
+            const weight = Math.max(1, 5 - Math.floor(index / 6));
+            for (let i = 0; i < weight; i++) {
+              weightedItems.push({ type: "comment", data: comment });
+            }
+          });
+
+          let choice: any = null;
+          let availableAis: any[] = [];
+          let attempts = 0;
+
+          while (weightedItems.length > 0 && attempts < 10) {
+            attempts++;
+            const choiceIndex = Math.floor(
+              Math.random() * weightedItems.length,
+            );
+            choice = weightedItems[choiceIndex];
+
+            if (
+              choice.type === "post" &&
+              choice.data.post_type === "dm_invitation"
+            ) {
+              const author = db
+                .prepare("SELECT * FROM users WHERE id = ?")
+                .get(choice.data.user_id) as any;
+              if (author.is_ai === 1) {
+                // Skip DM invitations from AI users
+                weightedItems.splice(choiceIndex, 1);
+                continue;
               }
-            }
-            break;
-          }
 
-          const targetUserId = choice.data.user_id;
-          const targetUser = db.prepare("SELECT is_ai FROM users WHERE id = ?").get(targetUserId) as any;
-          
-          let existingRepliers: number[] = [];
-          if (choice.type === 'post') {
-            existingRepliers = db.prepare("SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL").all(choice.data.id).map((r: any) => r.user_id);
-          } else {
-            existingRepliers = db.prepare("SELECT user_id FROM comments WHERE parent_id = ?").all(choice.data.id).map((r: any) => r.user_id);
-          }
+              const followedAis = db
+                .prepare(
+                  "SELECT followed_id FROM follows WHERE follower_id = ?",
+                )
+                .all(author.id)
+                .map((f: any) => f.followed_id);
+              const otherAiUsers = activeAiUsers.filter(
+                (u) =>
+                  u.id !== choice.data.user_id && followedAis.includes(u.id),
+              );
 
-          if (targetUser && targetUser.is_ai === 0) {
-            // Target is a real user, only followed AIs can comment
-            const followedAis = db.prepare("SELECT followed_id FROM follows WHERE follower_id = ?").all(targetUserId).map((f: any) => f.followed_id);
-            availableAis = activeAiUsers.filter(u => u.id !== targetUserId && !existingRepliers.includes(u.id) && followedAis.includes(u.id));
-          } else {
-            availableAis = activeAiUsers.filter(u => u.id !== targetUserId && !existingRepliers.includes(u.id));
-          }
-
-          if (availableAis.length > 0) {
-            break; // Found a valid choice with available AIs
-          } else {
-            // Remove this choice from weightedItems and try again
-            weightedItems = weightedItems.filter(item => item.data.id !== choice.data.id || item.type !== choice.type);
-            choice = null;
-          }
-        }
-
-        if (choice && availableAis.length > 0) {
-          // Now pick the best commenter
-          const postId = choice.type === 'post' ? choice.data.id : choice.data.post_id;
-          const candidateUsers = filterAvailableUsersForComment(choice.data.user_id, availableAis, postId);
-          if (candidateUsers.length > 0) {
-            const chosenAiId = await pickBestCommenter(choice.data, candidateUsers);
-            const randomAi = candidateUsers.find(u => u.id === chosenAiId) || candidateUsers[0];
-
-            if (choice.type === 'post') {
-              const randomPost = choice.data;
-              if (!pendingComments.has(`${randomAi.id}:post:${randomPost.id}`)) {
-                pendingComments.add(`${randomAi.id}:post:${randomPost.id}`);
+              if (otherAiUsers.length > 0) {
+                const randomAi = pickWeightedRandomUser(otherAiUsers);
+                if (pendingDMs.has(`${randomAi.id}:${author.id}`)) continue;
+                pendingDMs.add(`${randomAi.id}:${author.id}`);
                 try {
-                  // Get other comments for context
-                  const otherComments = db.prepare("SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5").all(randomPost.id).map((c: any) => `[${c.created_at}] ${c.content}`).join(" | ");
-                  
-                  // Get relationship context
-                  const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomPost.user_id) as any;
-                  const relContext = rel ? rel.description : '';
+                  const rel = db
+                    .prepare(
+                      "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                    )
+                    .get(randomAi.id, author.id) as any;
+                  const relContext = rel ? rel.description : "";
+                  const dmContext = `You saw their post: "${choice.data.content}" and decided to DM them about it.`;
 
-                  const commentData = await generateComment(randomAi, randomPost.content, randomPost.author_name, otherComments, false, relContext, randomPost.user_id, randomPost.image_prompt, randomPost.created_at);
-                  if (commentData) {
-                    const info = db.prepare("INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)")
-                      .run(randomPost.id, randomAi.id, commentData.content, commentData.internal_thought);
-                    checkDynamicRelationship(randomAi.id, randomPost.user_id).catch(console.error);
-                    console.log(`${randomAi.display_name} commented on post ${randomPost.id}`);
+                  // Fetch message history
+                  const messageHistory = await getDMSummaryAndHistory(
+                    randomAi.id,
+                    author.id,
+                    randomAi.id,
+                  );
 
-                    // Add 1-5 likes to the post
-                    addLikesToPostOrComment(randomPost.id, null, Math.floor(Math.random() * 5) + 1);
-
-                    // Notify real user if they own the post
-                    const postAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomPost.user_id) as any;
-                    if (postAuthor && postAuthor.is_ai === 0) {
-                      db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)")
-                        .run(postAuthor.id, randomAi.id, info.lastInsertRowid);
-                    }
+                  const dmData = await generateDM(
+                    randomAi,
+                    author.display_name,
+                    relContext,
+                    author.id,
+                    dmContext,
+                    messageHistory,
+                  );
+                  if (dmData) {
+                    db.prepare(
+                      "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                    ).run(
+                      randomAi.id,
+                      author.id,
+                      dmData.content,
+                      dmData.internal_thought,
+                    );
+                    console.log(
+                      `${randomAi.display_name} sent a DM to ${author.display_name} in response to a dm_invitation post`,
+                    );
                   }
                 } finally {
-                  pendingComments.delete(`${randomAi.id}:post:${randomPost.id}`);
+                  pendingDMs.delete(`${randomAi.id}:${author.id}`);
                 }
               }
+              break;
+            }
+
+            const targetUserId = choice.data.user_id;
+            const targetUser = db
+              .prepare("SELECT is_ai FROM users WHERE id = ?")
+              .get(targetUserId) as any;
+
+            let existingRepliers: number[] = [];
+            if (choice.type === "post") {
+              existingRepliers = db
+                .prepare(
+                  "SELECT user_id FROM comments WHERE post_id = ? AND parent_id IS NULL",
+                )
+                .all(choice.data.id)
+                .map((r: any) => r.user_id);
             } else {
-              const randomComment = choice.data;
-              if (getCommentDepth(randomComment.id) < 5) {
-                // Check if this AI has already replied to this comment
-                const existingReply = db.prepare("SELECT 1 FROM comments WHERE parent_id = ? AND user_id = ?").get(randomComment.id, randomAi.id);
-                if (!existingReply && !pendingComments.has(`${randomAi.id}:comment:${randomComment.id}`)) {
-                  pendingComments.add(`${randomAi.id}:comment:${randomComment.id}`);
+              existingRepliers = db
+                .prepare("SELECT user_id FROM comments WHERE parent_id = ?")
+                .all(choice.data.id)
+                .map((r: any) => r.user_id);
+            }
+
+            if (targetUser && targetUser.is_ai === 0) {
+              // Target is a real user, only followed AIs can comment
+              const followedAis = db
+                .prepare(
+                  "SELECT followed_id FROM follows WHERE follower_id = ?",
+                )
+                .all(targetUserId)
+                .map((f: any) => f.followed_id);
+              availableAis = activeAiUsers.filter(
+                (u) =>
+                  u.id !== targetUserId &&
+                  !existingRepliers.includes(u.id) &&
+                  followedAis.includes(u.id),
+              );
+            } else {
+              availableAis = activeAiUsers.filter(
+                (u) =>
+                  u.id !== targetUserId && !existingRepliers.includes(u.id),
+              );
+            }
+
+            if (availableAis.length > 0) {
+              break; // Found a valid choice with available AIs
+            } else {
+              // Remove this choice from weightedItems and try again
+              weightedItems = weightedItems.filter(
+                (item) =>
+                  item.data.id !== choice.data.id || item.type !== choice.type,
+              );
+              choice = null;
+            }
+          }
+
+          if (choice && availableAis.length > 0) {
+            // Now pick the best commenter
+            const postId =
+              choice.type === "post" ? choice.data.id : choice.data.post_id;
+            const candidateUsers = filterAvailableUsersForComment(
+              choice.data.user_id,
+              availableAis,
+              postId,
+            );
+            if (candidateUsers.length > 0) {
+              const chosenAiId = await pickBestCommenter(
+                choice.data,
+                candidateUsers,
+              );
+              const randomAi =
+                candidateUsers.find((u) => u.id === chosenAiId) ||
+                candidateUsers[0];
+
+              if (choice.type === "post") {
+                const randomPost = choice.data;
+                if (
+                  !pendingComments.has(`${randomAi.id}:post:${randomPost.id}`)
+                ) {
+                  pendingComments.add(`${randomAi.id}:post:${randomPost.id}`);
                   try {
+                    // Get other comments for context
+                    const otherComments = db
+                      .prepare(
+                        "SELECT content, created_at FROM comments WHERE post_id = ? LIMIT 5",
+                      )
+                      .all(randomPost.id)
+                      .map((c: any) => `[${c.created_at}] ${c.content}`)
+                      .join(" | ");
+
                     // Get relationship context
-                    const rel = db.prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?").get(randomAi.id, randomComment.user_id) as any;
-                    const relContext = rel ? rel.description : '';
+                    const rel = db
+                      .prepare(
+                        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                      )
+                      .get(randomAi.id, randomPost.user_id) as any;
+                    const relContext = rel ? rel.description : "";
 
-                    const threadContext = buildThreadContext(randomComment.id);
+                    const commentData = await generateComment(
+                      randomAi,
+                      randomPost.content,
+                      randomPost.author_name,
+                      otherComments,
+                      false,
+                      relContext,
+                      randomPost.user_id,
+                      randomPost.image_prompt,
+                      randomPost.created_at,
+                    );
+                    if (commentData) {
+                      const info = db
+                        .prepare(
+                          "INSERT INTO comments (post_id, user_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+                        )
+                        .run(
+                          randomPost.id,
+                          randomAi.id,
+                          commentData.content,
+                          commentData.internal_thought,
+                        );
+                      checkDynamicRelationship(
+                        randomAi.id,
+                        randomPost.user_id,
+                      ).catch(console.error);
+                      console.log(
+                        `${randomAi.display_name} commented on post ${randomPost.id}`,
+                      );
 
-                    const replyData = await generateComment(randomAi, randomComment.content, randomComment.author_name, threadContext, true, relContext, randomComment.user_id, undefined, randomComment.created_at);
-                    if (replyData) {
-                      const info = db.prepare("INSERT INTO comments (post_id, user_id, content, parent_id, internal_thought) VALUES (?, ?, ?, ?, ?)")
-                        .run(randomComment.post_id, randomAi.id, replyData.content, randomComment.id, replyData.internal_thought);
-                      checkDynamicRelationship(randomAi.id, randomComment.user_id).catch(console.error);
-                      console.log(`${randomAi.display_name} replied to comment ${randomComment.id}`);
+                      // Add 1-5 likes to the post
+                      addLikesToPostOrComment(
+                        randomPost.id,
+                        null,
+                        Math.floor(Math.random() * 5) + 1,
+                      );
 
-                      // Add 1-5 likes to the comment
-                      addLikesToPostOrComment(randomComment.post_id, randomComment.id, Math.floor(Math.random() * 5) + 1);
-
-                      // Notify real user if they own the comment
-                      const commentAuthor = db.prepare("SELECT id, is_ai FROM users WHERE id = ?").get(randomComment.user_id) as any;
-                      if (commentAuthor && commentAuthor.is_ai === 0) {
-                        db.prepare("INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)")
-                          .run(commentAuthor.id, randomAi.id, info.lastInsertRowid);
+                      // Notify real user if they own the post
+                      const postAuthor = db
+                        .prepare("SELECT id, is_ai FROM users WHERE id = ?")
+                        .get(randomPost.user_id) as any;
+                      if (postAuthor && postAuthor.is_ai === 0) {
+                        db.prepare(
+                          "INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'comment', ?)",
+                        ).run(postAuthor.id, randomAi.id, info.lastInsertRowid);
                       }
                     }
                   } finally {
-                    pendingComments.delete(`${randomAi.id}:comment:${randomComment.id}`);
+                    pendingComments.delete(
+                      `${randomAi.id}:post:${randomPost.id}`,
+                    );
+                  }
+                }
+              } else {
+                const randomComment = choice.data;
+                if (getCommentDepth(randomComment.id) < 5) {
+                  // Check if this AI has already replied to this comment
+                  const existingReply = db
+                    .prepare(
+                      "SELECT 1 FROM comments WHERE parent_id = ? AND user_id = ?",
+                    )
+                    .get(randomComment.id, randomAi.id);
+                  if (
+                    !existingReply &&
+                    !pendingComments.has(
+                      `${randomAi.id}:comment:${randomComment.id}`,
+                    )
+                  ) {
+                    pendingComments.add(
+                      `${randomAi.id}:comment:${randomComment.id}`,
+                    );
+                    try {
+                      // Get relationship context
+                      const rel = db
+                        .prepare(
+                          "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
+                        )
+                        .get(randomAi.id, randomComment.user_id) as any;
+                      const relContext = rel ? rel.description : "";
+
+                      const threadContext = buildThreadContext(
+                        randomComment.id,
+                      );
+
+                      const replyData = await generateComment(
+                        randomAi,
+                        randomComment.content,
+                        randomComment.author_name,
+                        threadContext,
+                        true,
+                        relContext,
+                        randomComment.user_id,
+                        undefined,
+                        randomComment.created_at,
+                      );
+                      if (replyData) {
+                        const info = db
+                          .prepare(
+                            "INSERT INTO comments (post_id, user_id, content, parent_id, internal_thought) VALUES (?, ?, ?, ?, ?)",
+                          )
+                          .run(
+                            randomComment.post_id,
+                            randomAi.id,
+                            replyData.content,
+                            randomComment.id,
+                            replyData.internal_thought,
+                          );
+                        checkDynamicRelationship(
+                          randomAi.id,
+                          randomComment.user_id,
+                        ).catch(console.error);
+                        console.log(
+                          `${randomAi.display_name} replied to comment ${randomComment.id}`,
+                        );
+
+                        // Add 1-5 likes to the comment
+                        addLikesToPostOrComment(
+                          randomComment.post_id,
+                          randomComment.id,
+                          Math.floor(Math.random() * 5) + 1,
+                        );
+
+                        // Notify real user if they own the comment
+                        const commentAuthor = db
+                          .prepare("SELECT id, is_ai FROM users WHERE id = ?")
+                          .get(randomComment.user_id) as any;
+                        if (commentAuthor && commentAuthor.is_ai === 0) {
+                          db.prepare(
+                            "INSERT INTO notifications (user_id, actor_id, type, reference_id) VALUES (?, ?, 'reply', ?)",
+                          ).run(
+                            commentAuthor.id,
+                            randomAi.id,
+                            info.lastInsertRowid,
+                          );
+                        }
+                      }
+                    } finally {
+                      pendingComments.delete(
+                        `${randomAi.id}:comment:${randomComment.id}`,
+                      );
+                    }
                   }
                 }
               }
             }
           }
         }
+
+        // Clean up old API logs
+        db.prepare(
+          "DELETE FROM api_logs WHERE created_at < datetime('now', '-1 day')",
+        ).run();
+      } catch (error) {
+        console.error("Error in AI worker:", error);
+      } finally {
+        isWorkerRunning = false;
       }
-      
-      // Clean up old API logs
-      db.prepare("DELETE FROM api_logs WHERE created_at < datetime('now', '-1 day')").run();
-    } catch (error) {
-      console.error("Error in AI worker:", error);
-    } finally {
-      isWorkerRunning = false;
+    }, 60000); // Every 60 seconds
+
+    process.on("uncaughtException", (err) => {
+      console.error("CRITICAL: Uncaught Exception:", err);
+    });
+
+    process.on("unhandledRejection", (reason, promise) => {
+      console.error(
+        "CRITICAL: Unhandled Rejection at:",
+        promise,
+        "reason:",
+        reason,
+      );
+    });
+
+    // Vite middleware for development
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
     }
-  }, 60000); // Every 60 seconds
 
-  process.on('uncaughtException', (err) => {
-    console.error('CRITICAL: Uncaught Exception:', err);
-  });
+    app
+      .listen(PORT, "0.0.0.0", () => {
+        console.log(`Server running on http://localhost:${PORT}`);
 
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
-  });
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    
-    // Check for missing recaps on startup
-    setTimeout(() => {
-      checkAndGenerateMissingRecaps().catch(console.error);
-    }, 5000);
-  }).on('error', (err) => {
-    console.error("CRITICAL: Server listen error:", err);
-  });
+        // Check for missing recaps on startup
+        setTimeout(() => {
+          checkAndGenerateMissingRecaps().catch(console.error);
+        }, 5000);
+      })
+      .on("error", (err) => {
+        console.error("CRITICAL: Server listen error:", err);
+      });
   } catch (error) {
     console.error("CRITICAL: Failed to start server:", error);
     process.exit(1);
