@@ -1,14 +1,16 @@
-import OpenAI from 'openai';
-import db from './db';
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import { FAUX_GROUND_RULES } from './groundRules';
+import OpenAI from "openai";
+import db from "./db";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import { FAUX_GROUND_RULES } from "./groundRules";
 
 export function getOpenAI() {
-  let apiKey = process.env.NANO_GPT_API_KEY || '';
+  let apiKey = process.env.NANO_GPT_API_KEY || "";
   try {
-    const settings = db.prepare("SELECT api_key FROM settings WHERE id = 1").get() as any;
+    const settings = db
+      .prepare("SELECT api_key FROM settings WHERE id = 1")
+      .get() as any;
     if (settings && settings.api_key) {
       apiKey = settings.api_key;
     }
@@ -22,61 +24,64 @@ export function getOpenAI() {
 
   return new OpenAI({
     apiKey: apiKey,
-    baseURL: 'https://nano-gpt.com/api/v1',
+    baseURL: "https://nano-gpt.com/api/v1",
     defaultHeaders: {
-      'X-Title': 'Faux Social Media',
-      'Referer': process.env.APP_URL || 'http://localhost:3000',
-    }
+      "X-Title": "Faux Social Media",
+      Referer: process.env.APP_URL || "http://localhost:3000",
+    },
   });
 }
 
 function stripReasoning(text: string): string {
   if (!text) return "";
   // Remove <think>...</think> tags and their content
-  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
   // Remove common prefixes if they appear at the start
-  cleaned = cleaned.replace(/^(Thought|Reasoning|Thinking):\s*/i, '');
+  cleaned = cleaned.replace(/^(Thought|Reasoning|Thinking):\s*/i, "");
   return cleaned.trim();
 }
 
 function cleanAiResponse(text: string): string {
   if (!text) return "";
   // Remove timestamps like [2026-04-08 22:04:15] or [22:04:15] or (2026-04-08 22:04:15)
-  let cleaned = text.replace(/\[\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\]\s*/g, '');
-  cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\)\s*/g, '');
-  cleaned = cleaned.replace(/\[\d{2}:\d{2}:\d{2}\]\s*/g, '');
-  cleaned = cleaned.replace(/\(\d{2}:\d{2}:\d{2}\)\s*/g, '');
-  cleaned = cleaned.replace(/\[\d{4}-\d{2}-\d{2}\]\s*/g, '');
-  cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\)\s*/g, '');
-  
+  let cleaned = text.replace(
+    /\[\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\]\s*/g,
+    "",
+  );
+  cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\)\s*/g, "");
+  cleaned = cleaned.replace(/\[\d{2}:\d{2}:\d{2}\]\s*/g, "");
+  cleaned = cleaned.replace(/\(\d{2}:\d{2}:\d{2}\)\s*/g, "");
+  cleaned = cleaned.replace(/\[\d{4}-\d{2}-\d{2}\]\s*/g, "");
+  cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\)\s*/g, "");
+
   // Also remove potential "Assistant:" or "CharacterName:" prefixes if the AI hallucinated them
-  cleaned = cleaned.replace(/^(Assistant|System|User|AI|Bot):\s*/i, '');
-  
+  cleaned = cleaned.replace(/^(Assistant|System|User|AI|Bot):\s*/i, "");
+
   return cleaned.trim();
 }
 
 function sanitizeJSONString(str: string): string {
   let isInsideString = false;
   let isEscaped = false;
-  let result = '';
-  
+  let result = "";
+
   for (let i = 0; i < str.length; i++) {
     const char = str[i];
-    
+
     if (char === '"' && !isEscaped) {
       isInsideString = !isInsideString;
       result += char;
       isEscaped = false;
-    } else if (char === '\\' && !isEscaped) {
+    } else if (char === "\\" && !isEscaped) {
       isEscaped = true;
       result += char;
     } else {
-      if (isInsideString && char === '\n') {
-        result += '\\n';
-      } else if (isInsideString && char === '\r') {
-        result += '\\r';
-      } else if (isInsideString && char === '\t') {
-        result += '\\t';
+      if (isInsideString && char === "\n") {
+        result += "\\n";
+      } else if (isInsideString && char === "\r") {
+        result += "\\r";
+      } else if (isInsideString && char === "\t") {
+        result += "\\t";
       } else {
         result += char;
       }
@@ -88,10 +93,10 @@ function sanitizeJSONString(str: string): string {
 
 function extractJSON(text: string): any {
   if (!text) return {};
-  
+
   let jsonResult = {};
   let success = false;
-  
+
   try {
     return JSON.parse(text);
   } catch (e) {}
@@ -99,7 +104,7 @@ function extractJSON(text: string): any {
   try {
     return JSON.parse(sanitizeJSONString(text));
   } catch (e) {}
-  
+
   const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (match && match[1]) {
     try {
@@ -109,9 +114,9 @@ function extractJSON(text: string): any {
       return JSON.parse(sanitizeJSONString(match[1]));
     } catch (e2) {}
   }
-  
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
   if (start !== -1 && end !== -1 && end > start) {
     try {
       return JSON.parse(text.substring(start, end + 1));
@@ -120,73 +125,96 @@ function extractJSON(text: string): any {
       return JSON.parse(sanitizeJSONString(text.substring(start, end + 1)));
     } catch (e3) {}
   }
-  
+
   // Final fallback using regex specifically for content and internal_thought
   let parsed: any = {};
-  const contentMatch = text.match(/"content"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"internal_thought"|\})/);
-  const internalThoughtMatch = text.match(/"internal_thought"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"|\})/);
-  
+  const contentMatch = text.match(
+    /"content"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"internal_thought"|\})/,
+  );
+  const internalThoughtMatch = text.match(
+    /"internal_thought"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"|\})/,
+  );
+
   if (contentMatch && contentMatch[1]) {
-    parsed.content = contentMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    parsed.content = contentMatch[1]
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\");
   }
   if (internalThoughtMatch && internalThoughtMatch[1]) {
-    parsed.internal_thought = internalThoughtMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    parsed.internal_thought = internalThoughtMatch[1]
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\");
   }
-  
+
   if (parsed.content || parsed.internal_thought) {
     return parsed;
   }
-  
+
   return {};
 }
 
 export function getModel() {
   try {
-    const settings = db.prepare("SELECT model_name FROM settings WHERE id = 1").get() as any;
-    return settings?.model_name || 'zai-org/glm-5';
+    const settings = db
+      .prepare("SELECT model_name FROM settings WHERE id = 1")
+      .get() as any;
+    return settings?.model_name || "zai-org/glm-5";
   } catch (e) {
-    return 'zai-org/glm-5';
+    return "zai-org/glm-5";
   }
 }
 
 function getVisionModel() {
   try {
-    const settings = db.prepare("SELECT vision_model_name FROM settings WHERE id = 1").get() as any;
-    return settings?.vision_model_name || 'zai-org/glm-5-vision';
+    const settings = db
+      .prepare("SELECT vision_model_name FROM settings WHERE id = 1")
+      .get() as any;
+    return settings?.vision_model_name || "zai-org/glm-5-vision";
   } catch (e) {
-    return 'zai-org/glm-5-vision';
+    return "zai-org/glm-5-vision";
   }
 }
 
 function getImageModel() {
   try {
-    const settings = db.prepare("SELECT image_model_name FROM settings WHERE id = 1").get() as any;
-    return settings?.image_model_name || 'z-image-turbo';
+    const settings = db
+      .prepare("SELECT image_model_name FROM settings WHERE id = 1")
+      .get() as any;
+    return settings?.image_model_name || "z-image-turbo";
   } catch (e) {
-    return 'z-image-turbo';
+    return "z-image-turbo";
   }
 }
 
 function getImageResolutions() {
   try {
-    const settings = db.prepare("SELECT image_resolutions FROM settings WHERE id = 1").get() as any;
+    const settings = db
+      .prepare("SELECT image_resolutions FROM settings WHERE id = 1")
+      .get() as any;
     if (settings?.image_resolutions) {
       return JSON.parse(settings.image_resolutions);
     }
-    return ['4096x4096', '2304x4096', '4096x2304'];
+    return ["4096x4096", "2304x4096", "4096x2304"];
   } catch (e) {
-    return ['4096x4096', '2304x4096', '4096x2304'];
+    return ["4096x4096", "2304x4096", "4096x2304"];
   }
 }
 
-export function logApi(endpoint: string, request: any, response: any, userId: number | null = null) {
+export function logApi(
+  endpoint: string,
+  request: any,
+  response: any,
+  userId: number | null = null,
+) {
   console.log(`[DEBUG] logApi called for endpoint: ${endpoint}`);
   try {
-    db.prepare("INSERT INTO api_logs (endpoint, request_payload, response_payload, user_id) VALUES (?, ?, ?, ?)").run(
+    db.prepare(
+      "INSERT INTO api_logs (endpoint, request_payload, response_payload, user_id) VALUES (?, ?, ?, ?)",
+    ).run(
       endpoint,
-      typeof request === 'string' ? request : JSON.stringify(request),
-      typeof response === 'string' ? response : JSON.stringify(response),
-      userId
+      typeof request === "string" ? request : JSON.stringify(request),
+      typeof response === "string" ? response : JSON.stringify(response),
+      userId,
     );
   } catch (e) {
     console.error("Failed to log API call", e);
@@ -199,42 +227,57 @@ export async function testConnection() {
     let content = "";
     let reasoning = "";
     let rawContent = "";
-    
+
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: model,
-        messages: [{ role: 'user', content: 'Reply with exactly "API Connection Successful".' }],
+        messages: [
+          {
+            role: "user",
+            content: 'Reply with exactly "API Connection Successful".',
+          },
+        ],
         max_tokens: 10000,
       });
       rawContent = response.choices[0].message.content || "";
       reasoning = (response.choices[0].message as any).reasoning || "";
       content = stripReasoning(rawContent);
-      
+
       if (content || !reasoning) break;
       console.log(`testConnection: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
-    
+
     logApi(
       "testConnection",
       { model, max_tokens: 10000 },
-      { content, reasoning, raw: rawContent }
+      { content, reasoning, raw: rawContent },
     );
 
-    return { success: true, message: content || (reasoning ? "Thinking..." : "Empty Response") };
+    return {
+      success: true,
+      message: content || (reasoning ? "Thinking..." : "Empty Response"),
+    };
   } catch (error: any) {
-    console.error('API Test Error:', error);
+    console.error("API Test Error:", error);
     logApi(
       "testConnection",
       { model: getModel(), error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
     );
     return { success: false, error: error.message };
   }
 }
 
-export async function generatePersona(name: string, extraInfo: string, existingUniverses: string[]) {
+export async function generatePersona(
+  name: string,
+  extraInfo: string,
+  existingUniverses: string[],
+) {
   const prompt = `You are an expert character writer. Help me create a detailed persona for a character named "${name}".
-${extraInfo ? `Additional context: ${extraInfo}` : ''}
+${extraInfo ? `Additional context: ${extraInfo}` : ""}
 If this is a known fictional character or celebrity, use your knowledge to make it accurate.
 
 Please provide a comprehensive profile including:
@@ -245,7 +288,7 @@ Please provide a comprehensive profile including:
 5. Physical appearance details.
 6. Clothing style and fashion sense.
 7. Artstyle for image generation (e.g., Realistic, Anime, Pixel Art, Oil Painting, Comic Book, 3D Render, etc.).
-8. A suggested Universe name. This should be the franchise they are from (e.g., "Marvel Cinematic Universe", "Star Wars", "Real Life"). Try to pick from this list of existing universes if it fits: ${existingUniverses.join(', ')}
+8. A suggested Universe name. This should be the franchise they are from (e.g., "Marvel Cinematic Universe", "Star Wars", "Real Life"). Try to pick from this list of existing universes if it fits: ${existingUniverses.join(", ")}
 
 Format your response as a friendly chat message, but make sure all the information is clearly laid out so I can copy it into the fields.`;
 
@@ -258,7 +301,7 @@ Format your response as a friendly chat message, but make sure all the informati
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.8,
       });
@@ -268,42 +311,66 @@ Format your response as a friendly chat message, but make sure all the informati
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`generatePersona: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `generatePersona: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "generatePersona",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason },
-      { content, reasoning, raw: rawContent }
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.8,
+        finish_reason: finishReason,
+      },
+      { content, reasoning, raw: rawContent },
     );
-    
-    return content || (reasoning ? "The AI is still thinking. Please try again in a moment." : "Failed to generate persona.");
+
+    return (
+      content ||
+      (reasoning
+        ? "The AI is still thinking. Please try again in a moment."
+        : "Failed to generate persona.")
+    );
   } catch (error: any) {
     console.error("Error generating persona:", error);
     logApi(
       "generatePersona",
       { model: getModel(), prompt, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
     );
     return "Error: " + error.message;
   }
 }
 
 function buildCharacterPrompt(character: any) {
-  let prompt = '';
-  
-  if (character.account_type === 'company') {
+  let prompt = "";
+
+  if (character.account_type === "company") {
     prompt = `You are managing the official Faux social media account for ${character.company_name || character.display_name}. `;
-    if (character.brand_identity) prompt += `\nBrand Identity: ${character.brand_identity}`;
-    if (character.products_services) prompt += `\nProducts/Services: ${character.products_services}`;
-    if (character.target_audience) prompt += `\nTarget Audience: ${character.target_audience}`;
-    if (character.writing_style) prompt += `\nYour writing style: ${character.writing_style}`;
-    
+    if (character.brand_identity)
+      prompt += `\nBrand Identity: ${character.brand_identity}`;
+    if (character.products_services)
+      prompt += `\nProducts/Services: ${character.products_services}`;
+    if (character.target_audience)
+      prompt += `\nTarget Audience: ${character.target_audience}`;
+    if (character.writing_style)
+      prompt += `\nYour writing style: ${character.writing_style}`;
+
     if (character.run_by_character_id) {
       try {
-        const runner = db.prepare("SELECT display_name, ai_persona, description FROM users WHERE id = ?").get(character.run_by_character_id) as any;
+        const runner = db
+          .prepare(
+            "SELECT display_name, ai_persona, description FROM users WHERE id = ?",
+          )
+          .get(character.run_by_character_id) as any;
         if (runner) {
-          prompt += `\nThis account is run by ${runner.display_name}. ${runner.ai_persona ? runner.ai_persona : ''} ${runner.description ? runner.description : ''}. Your personal traits might occasionally bleed into the corporate posts, or you might sign off with your name.`;
+          prompt += `\nThis account is run by ${runner.display_name}. ${runner.ai_persona ? runner.ai_persona : ""} ${runner.description ? runner.description : ""}. Your personal traits might occasionally bleed into the corporate posts, or you might sign off with your name.`;
         }
       } catch (e) {}
     } else {
@@ -311,17 +378,24 @@ function buildCharacterPrompt(character: any) {
     }
   } else {
     prompt = `You are ${character.display_name}. `;
-    if (character.is_verified) prompt += `You are a verified public figure/celebrity on Faux. `;
+    if (character.is_verified)
+      prompt += `You are a verified public figure/celebrity on Faux. `;
     if (character.ai_persona) prompt += `${character.ai_persona} `;
-    if (character.description) prompt += `\nYour personality and background: ${character.description}`;
-    if (character.writing_style) prompt += `\nYour writing style: ${character.writing_style}`;
-    if (character.physical_appearance) prompt += `\nYour physical appearance: ${character.physical_appearance}`;
-    if (character.clothing_style) prompt += `\nYour clothing style: ${character.clothing_style}`;
+    if (character.description)
+      prompt += `\nYour personality and background: ${character.description}`;
+    if (character.writing_style)
+      prompt += `\nYour writing style: ${character.writing_style}`;
+    if (character.physical_appearance)
+      prompt += `\nYour physical appearance: ${character.physical_appearance}`;
+    if (character.clothing_style)
+      prompt += `\nYour clothing style: ${character.clothing_style}`;
   }
-  
+
   if (character.universe_id) {
     try {
-      const universe = db.prepare("SELECT name, description FROM universes WHERE id = ?").get(character.universe_id) as any;
+      const universe = db
+        .prepare("SELECT name, description FROM universes WHERE id = ?")
+        .get(character.universe_id) as any;
       if (universe) {
         prompt += `\nYou are from the universe/franchise: "${universe.name}".`;
         if (universe.description) {
@@ -334,11 +408,21 @@ function buildCharacterPrompt(character: any) {
   }
 
   prompt += `\n${FAUX_GROUND_RULES}`;
-  
+
   try {
-    const settings = db.prepare("SELECT timezone, allow_nsfw FROM settings WHERE id = 1").get() as any;
-    const tz = settings?.timezone || 'UTC';
-    const currentTime = new Date().toLocaleString('en-US', { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const settings = db
+      .prepare("SELECT timezone, allow_nsfw FROM settings WHERE id = 1")
+      .get() as any;
+    const tz = settings?.timezone || "UTC";
+    const currentTime = new Date().toLocaleString("en-US", {
+      timeZone: tz,
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
     prompt += `\nThe current local time for you is ${currentTime}.`;
     if (settings?.allow_nsfw) {
       prompt += `\nNSFW content is ALLOWED. You may use explicit language, adult themes, and mature content if it fits your character.`;
@@ -348,7 +432,7 @@ function buildCharacterPrompt(character: any) {
   } catch (e) {
     // ignore
   }
-  
+
   return prompt;
 }
 
@@ -358,36 +442,49 @@ export async function pickBestCommenter(post: any, availableUsers: any[]) {
     return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
   }
 
-  const relationships = db.prepare(`
+  const relationships = db
+    .prepare(
+      `
     SELECT user_id_1, user_id_2, description 
     FROM relationships 
     WHERE user_id_1 = ? OR user_id_2 = ?
-  `).all(post.user_id, post.user_id) as any[];
+  `,
+    )
+    .all(post.user_id, post.user_id) as any[];
 
   // 1. ALL Users who the OP has a relationship with (but that have not commented yet - availableUsers already filters out those who commented)
   const relatedUserIds = new Set(
-    relationships.flatMap(r => [r.user_id_1, r.user_id_2]).filter(id => id !== post.user_id)
+    relationships
+      .flatMap((r) => [r.user_id_1, r.user_id_2])
+      .filter((id) => id !== post.user_id),
   );
-  
-  const relatedUsers = availableUsers.filter(u => relatedUserIds.has(u.id));
+
+  const relatedUsers = availableUsers.filter((u) => relatedUserIds.has(u.id));
 
   // 2. Up to 20 Users who are following OP
-  const followers = db.prepare(`
+  const followers = db
+    .prepare(
+      `
     SELECT follower_id 
     FROM follows 
     WHERE followed_id = ?
-  `).all(post.user_id) as any[];
-  
-  const followerIds = new Set(followers.map(f => f.follower_id));
+  `,
+    )
+    .all(post.user_id) as any[];
+
+  const followerIds = new Set(followers.map((f) => f.follower_id));
   const followerUsers = availableUsers
-    .filter(u => followerIds.has(u.id) && !relatedUserIds.has(u.id))
+    .filter((u) => followerIds.has(u.id) && !relatedUserIds.has(u.id))
     .sort(() => 0.5 - Math.random())
     .slice(0, 20);
 
   // 3. 20 Additional, random Users
-  const alreadySelectedIds = new Set([...relatedUsers.map(u => u.id), ...followerUsers.map(u => u.id)]);
+  const alreadySelectedIds = new Set([
+    ...relatedUsers.map((u) => u.id),
+    ...followerUsers.map((u) => u.id),
+  ]);
   const randomUsers = availableUsers
-    .filter(u => !alreadySelectedIds.has(u.id))
+    .filter((u) => !alreadySelectedIds.has(u.id))
     .sort(() => 0.5 - Math.random())
     .slice(0, 20);
 
@@ -397,12 +494,18 @@ export async function pickBestCommenter(post: any, availableUsers: any[]) {
     return availableUsers[Math.floor(Math.random() * availableUsers.length)].id;
   }
 
-  const userContexts = candidateUsers.map(u => {
-    let relDesc = "No established relationship.";
-    const rel = relationships.find(r => (r.user_id_1 === u.id && r.user_id_2 === post.user_id) || (r.user_id_2 === u.id && r.user_id_1 === post.user_id));
-    if (rel) relDesc = rel.description;
-    return `ID: ${u.id}, Name: ${u.display_name}, Bio: ${u.bio}, Relationship to OP: ${relDesc}`;
-  }).join('\n');
+  const userContexts = candidateUsers
+    .map((u) => {
+      let relDesc = "No established relationship.";
+      const rel = relationships.find(
+        (r) =>
+          (r.user_id_1 === u.id && r.user_id_2 === post.user_id) ||
+          (r.user_id_2 === u.id && r.user_id_1 === post.user_id),
+      );
+      if (rel) relDesc = rel.description;
+      return `ID: ${u.id}, Name: ${u.display_name}, Bio: ${u.bio}, Relationship to OP: ${relDesc}`;
+    })
+    .join("\n");
 
   const prompt = `You are a social media manager. Given the following post:
 "${post.content}" by ${post.author_name}
@@ -421,7 +524,7 @@ Reply with ONLY the ID of the chosen user.`;
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.2,
       });
@@ -431,70 +534,112 @@ Reply with ONLY the ID of the chosen user.`;
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`pickBestCommenter: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `pickBestCommenter: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "pickBestCommenter",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.2, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.2,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      post.user_id
+      post.user_id,
     );
 
-    const id = parseInt(content || '');
+    const id = parseInt(content || "");
     if (!isNaN(id)) return id;
   } catch (error: any) {
-    console.error('Error picking commenter:', error);
+    console.error("Error picking commenter:", error);
     logApi(
       "pickBestCommenter",
       { model: getModel(), prompt, error: "Catch Block" },
       "Error: " + (error.message || "Unknown error"),
-      post.user_id
+      post.user_id,
     );
   }
   return candidateUsers[Math.floor(Math.random() * candidateUsers.length)].id;
 }
 
-export function pickArchetype(isFirstPost: boolean, forceImage: boolean = false, accountType: string = 'character') {
+export function pickArchetype(
+  isFirstPost: boolean,
+  forceImage: boolean = false,
+  accountType: string = "character",
+) {
   if (isFirstPost) {
-    if (accountType === 'company') {
-      return { id: 'company_announcement', name: 'Company Announcement', description: 'Make them announce that they just joined Faux. Whatever fits their brand identity.' };
+    if (accountType === "company") {
+      return {
+        id: "company_announcement",
+        name: "Company Announcement",
+        description:
+          "Make them announce that they just joined Faux. Whatever fits their brand identity.",
+      };
     }
-    return { id: 'introduction', name: 'Introduction', description: 'Make them "introduce" themselves on Faux or write about that they just joined Faux. Whatever fits their character.' };
+    return {
+      id: "introduction",
+      name: "Introduction",
+      description:
+        'Make them "introduce" themselves on Faux or write about that they just joined Faux. Whatever fits their character.',
+    };
   }
 
-  const archetypes = db.prepare("SELECT * FROM post_archetypes WHERE account_type = ?").all(accountType) as any[];
-  
+  const archetypes = db
+    .prepare("SELECT * FROM post_archetypes WHERE account_type = ?")
+    .all(accountType) as any[];
+
   if (forceImage) {
-    return archetypes.find(a => a.id === 'image_post') || { id: 'image_post', name: 'Image Post', description: 'A post that makes sense to have an image attached to it. The image should have a proper reason to be there.', probability: 15 };
+    return (
+      archetypes.find((a) => a.id === "image_post") || {
+        id: "image_post",
+        name: "Image Post",
+        description:
+          "A post that makes sense to have an image attached to it. The image should have a proper reason to be there.",
+        probability: 15,
+      }
+    );
   }
-  
+
   const totalWeight = archetypes.reduce((sum, a) => sum + a.probability, 0);
   let random = Math.random() * totalWeight;
   for (const archetype of archetypes) {
     random -= archetype.probability;
     if (random <= 0) return archetype;
   }
-  return archetypes[0] || { id: 'life_update', name: 'Life Update', description: 'A character posting about something they are doing or something they have experienced.', probability: 30 };
+  return (
+    archetypes[0] || {
+      id: "life_update",
+      name: "Life Update",
+      description:
+        "A character posting about something they are doing or something they have experienced.",
+      probability: 30,
+    }
+  );
 }
 
 function getOtherUserUniverseContext(character: any, otherUser: any): string {
-  if (!otherUser) return '';
-  
-  let context = '';
-  
-  if (otherUser.account_type === 'company') {
+  if (!otherUser) return "";
+
+  let context = "";
+
+  if (otherUser.account_type === "company") {
     context += `${otherUser.display_name} is a verified Company/Brand account on Faux.\n`;
-  } else if (otherUser.account_type === 'news') {
+  } else if (otherUser.account_type === "news") {
     context += `${otherUser.display_name} is a verified News/Media account on Faux.\n`;
-  } else if (otherUser.account_type === 'character' && otherUser.is_verified) {
+  } else if (otherUser.account_type === "character" && otherUser.is_verified) {
     context += `${otherUser.display_name} is a verified public figure/celebrity on Faux.\n`;
   }
-  
+
   if (!otherUser.universe_id) return context;
-  
+
   try {
-    const otherUniverse = db.prepare("SELECT name FROM universes WHERE id = ?").get(otherUser.universe_id) as any;
+    const otherUniverse = db
+      .prepare("SELECT name FROM universes WHERE id = ?")
+      .get(otherUser.universe_id) as any;
     if (otherUniverse) {
       if (character.universe_id === otherUser.universe_id) {
         context += `You and ${otherUser.display_name} are from the same universe/franchise ("${otherUniverse.name}"). You likely know each other to some extent or share common knowledge of your world. You CAN interact with them in the "real world" (meet up, hang out, etc).\n`;
@@ -508,8 +653,17 @@ function getOtherUserUniverseContext(character: any, otherUser: any): string {
   return context;
 }
 
-export async function generateImagePostData(character: any, context: string = '', relationships: string = '', availableUsernames: string = '') {
-  const helperCallLLM = async (prompt: string, endpointName: string, temp: number = 0.9) => {
+export async function generateImagePostData(
+  character: any,
+  context: string = "",
+  relationships: string = "",
+  availableUsernames: string = "",
+) {
+  const helperCallLLM = async (
+    prompt: string,
+    endpointName: string,
+    temp: number = 0.9,
+  ) => {
     let content = "";
     let reasoning = "";
     let rawContent = "";
@@ -518,7 +672,7 @@ export async function generateImagePostData(character: any, context: string = ''
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: temp,
       });
@@ -528,16 +682,24 @@ export async function generateImagePostData(character: any, context: string = ''
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`${endpointName}: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `${endpointName}: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       endpointName,
-      { model: getModel(), prompt, max_tokens: 10000, temperature: temp, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: temp,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
-    
+
     return cleanAiResponse(content.trim());
   };
 
@@ -546,18 +708,26 @@ export async function generateImagePostData(character: any, context: string = ''
     const ideaPrompt = `${buildCharacterPrompt(character)}
 Think about something you would post on social media right now that would justify adding a photo to it.
 Make sure to only create the vision/idea of the post, not the post itself.
-${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
-${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ''}
-${context ? `Your recent posts (with timestamps): ${context}
-CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
+${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ""}
+${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ""}
+${
+  context
+    ? `Your recent posts (with timestamps): ${context}
+CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.`
+    : ""
+}
 Respond with ONLY the brief idea.`;
-    const idea = await helperCallLLM(ideaPrompt, "generateImagePostData_idea", 0.9);
+    const idea = await helperCallLLM(
+      ideaPrompt,
+      "generateImagePostData_idea",
+      0.9,
+    );
 
     // Step 2: Text Post
     const textPrompt = `${buildCharacterPrompt(character)}
 Based on this idea for a photo post: "${idea}"
 Generate the Text Part of the post. DO NOT include an image description (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.
-${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ''}
+${availableUsernames ? `Available usernames you can mention: ${availableUsernames}.` : ""}
 Do not use hashtags unless it fits the character. Keep it under 280 characters.
 
 CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this post. This is what you are REALLY thinking or feeling while writing this post. It can be different from what you actually post.
@@ -567,7 +737,11 @@ Return your response in the following JSON format:
   "content": "The actual social media post text.",
   "internal_thought": "Your hidden internal monologue/thoughts."
 }`;
-    const textPostRaw = await helperCallLLM(textPrompt, "generateImagePostData_text", 0.9);
+    const textPostRaw = await helperCallLLM(
+      textPrompt,
+      "generateImagePostData_text",
+      0.9,
+    );
     const textPostJson = extractJSON(textPostRaw);
     const textPost = cleanAiResponse(textPostJson.content || textPostRaw);
     const internal_thought = textPostJson.internal_thought || "";
@@ -582,19 +756,20 @@ Chroma is sensitive to prompting and understands plain English. A structured, de
 
 Character details:
 Name: ${character.display_name}
-Appearance: ${character.physical_appearance || character.bio || 'average looking'}
-Clothing style: ${character.clothing_style || 'casual everyday clothes'}
-Artstyle: ${character.artstyle || 'Realistic'}
+Appearance: ${character.physical_appearance || character.bio || "average looking"}
+Clothing style: ${character.clothing_style || "casual everyday clothes"}
+Artstyle: ${character.artstyle || "Realistic"}
 
-Guidelines for Seedream 4.0:
-- Think about what actually should be depicted based on the idea and text.
-- The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
+Guidelines for Seedream 4.0 Pro Prompting:
+- Seedream 4.0 requires natural, complete sentences. Do NOT use older "keyword salad" habits (e.g., comma-separated adjectives).
+- Use this Formula: [Format/Application] + [Subject] + [Action] + [Environment/Setting] + [Style/Lighting]
+- Specify the Application Scenario (e.g., "A candid Instagram photo of...", "A dramatic movie poster showing...", "A stylized anime illustration of..."). 
+- If the Artstyle is Realistic: Define the medium and context. Mention constraints like "Shot on iPhone 15 Pro". If Stylized: Clearly describe the Art Direction.
+- Flawless Text Rendering: If the image should contain visible text anywhere, place the exact text inside double quotation marks (" ").
+- Reference Images: If the character is visible, an image of the character will be provided. The prompt MUST explicitly reference this (e.g., "Based on the character in the reference images, create a photo of...").
+- Think about what actually should be depicted based on the idea and text. The image does not need to depict the text post 1:1. 
 - Images don't always need to show the character who posted it. You can show a relevant object, scenery, situation, etc. Add variance.
 - If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
-- Keep in mind how Characters access Faux (based on their universe description), as this usually also has influence on how the image looks.
-- If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Instagram photo", "Lighting: Natural morning light", "Style: Candid amateur photograph"). Mention camera type.
-- If the Artstyle is Stylized: Clearly describe the Art Direction.
-- Be very descriptive about the environment, lighting, mood, and composition.
 
 IMPORTANT: You must output a JSON object with exactly two fields:
 1. "character_visible": boolean (true if the character is visible in the shot, false otherwise)
@@ -608,8 +783,12 @@ If the character is NOT visible:
 - DO NOT describe the character's physical appearance in the prompt.
 
 Output ONLY the JSON object, nothing else.`;
-    const positivePromptRaw = await helperCallLLM(imagePrompt, "generateImagePostData_image", 0.7);
-    
+    const positivePromptRaw = await helperCallLLM(
+      imagePrompt,
+      "generateImagePostData_image",
+      0.7,
+    );
+
     let positivePrompt = "";
     let characterVisible = false;
     try {
@@ -623,29 +802,39 @@ Output ONLY the JSON object, nothing else.`;
     // Step 4: Negative Prompt
     const negativePrompt = await generateNegativeImagePrompt(positivePrompt);
 
-    return { idea, textPost, internal_thought, positivePrompt, negativePrompt, characterVisible };
+    return {
+      idea,
+      textPost,
+      internal_thought,
+      positivePrompt,
+      negativePrompt,
+      characterVisible,
+    };
   } catch (error: any) {
-    console.error('Error generating image post data:', error);
+    console.error("Error generating image post data:", error);
     logApi(
       "generateImagePostData",
       { model: getModel(), error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      character.id
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      character.id,
     );
     return null;
   }
 }
 
 export async function generateNewArc(character: any) {
-  const isCompany = character.account_type === 'company';
-  const entityType = isCompany ? 'company' : 'social media character';
-  
+  const isCompany = character.account_type === "company";
+  const entityType = isCompany ? "company" : "social media character";
+
   const prompt = `${buildCharacterPrompt(character)}
 You are planning the next narrative arc for this ${entityType}. Create a 1-week to 6-week storyline. 
 CRITICAL CONSTRAINTS:
 1. Tone & Realism: The arc MUST fit the character's bio and universe perfectly. Do not make the arc random, eccentric, or overly weird unless their bio strictly demands it.
-2. Grounded Tropes: Use recognizable ${isCompany ? 'corporate/business' : 'character-driven'} tropes that feel organic to their specific world. 
-${isCompany ? 'Focus on realistic business milestones, PR crises, new product launches, or corporate rivalries.' : 'Focus on grounded personal growth, relationship dynamics, realistic life changes, or personal projects.'}
+2. Grounded Tropes: Use recognizable ${isCompany ? "corporate/business" : "character-driven"} tropes that feel organic to their specific world. 
+${isCompany ? "Focus on realistic business milestones, PR crises, new product launches, or corporate rivalries." : "Focus on grounded personal growth, relationship dynamics, realistic life changes, or personal projects."}
 3. Relevant Impact: The arc should have meaningful stakes, but keep the scale appropriate. Avoid world-ending scenarios unless explicitly established by their lore.
 4. Cohesion: Ensure the storyline makes sense for their daily life and doesn't introduce jarring elements.
 
@@ -661,26 +850,47 @@ Ensure duration_days is an integer between 7 and 42.`;
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 1000,
     });
-    const result = extractJSON(response.choices[0].message.content || '{}');
-    console.log(`[DEBUG] generateNewArc result for ${character.display_name}:`, JSON.stringify(result));
-    logApi('generateNewArc', { characterId: character.id, accountType: character.account_type, prompt }, { response: response.choices[0].message.content, parsed: result }, character.id);
+    const result = extractJSON(response.choices[0].message.content || "{}");
+    console.log(
+      `[DEBUG] generateNewArc result for ${character.display_name}:`,
+      JSON.stringify(result),
+    );
+    logApi(
+      "generateNewArc",
+      {
+        characterId: character.id,
+        accountType: character.account_type,
+        prompt,
+      },
+      { response: response.choices[0].message.content, parsed: result },
+      character.id,
+    );
     return result;
   } catch (e) {
     console.error("Error generating new arc:", e);
-    logApi('generateNewArc_error', { characterId: character.id, prompt }, { error: String(e) }, character.id);
+    logApi(
+      "generateNewArc_error",
+      { characterId: character.id, prompt },
+      { error: String(e) },
+      character.id,
+    );
     return null;
   }
 }
 
-export async function updateCharacterArc(character: any, arc: any, recentPosts: string) {
-  let historyText = '';
+export async function updateCharacterArc(
+  character: any,
+  arc: any,
+  recentPosts: string,
+) {
+  let historyText = "";
   try {
-    const history = JSON.parse(arc.history || '[]');
+    const history = JSON.parse(arc.history || "[]");
     if (history.length > 0) {
-      historyText = `\nPast Updates (Oldest to Newest):\n${history.map((h: any) => `- [${h.date}] ${h.status}`).join('\n')}\n`;
+      historyText = `\nPast Updates (Oldest to Newest):\n${history.map((h: any) => `- [${h.date}] ${h.status}`).join("\n")}\n`;
     }
   } catch (e) {}
 
@@ -689,7 +899,7 @@ There is an ongoing Character Arc:
 Title: ${arc.title}
 Overall Premise: ${arc.description}
 ${historyText}
-Previous Status: ${arc.current_status_text || 'Just started.'}
+Previous Status: ${arc.current_status_text || "Just started."}
 
 It has been 24 hours since the last update. The character arc should progress naturally based on what the character has been doing recently.
 
@@ -706,24 +916,37 @@ Return ONLY a JSON object with the following structure:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 1000,
     });
-    return extractJSON(response.choices[0].message.content || '{}').current_status_text || arc.current_status_text;
+    return (
+      extractJSON(response.choices[0].message.content || "{}")
+        .current_status_text || arc.current_status_text
+    );
   } catch (e) {
     console.error("Error updating character arc:", e);
     return arc.current_status_text;
   }
 }
 
-export async function generateNewsPost(newsAccount: any, recentPosts: any[], activeArc: any, otherNewsPosts: any[], pastNewsPosts: any[] = []) {
+export async function generateNewsPost(
+  newsAccount: any,
+  recentPosts: any[],
+  activeArc: any,
+  otherNewsPosts: any[],
+  pastNewsPosts: any[] = [],
+) {
   let prompt = `You are managing the news account: ${newsAccount.display_name}. `;
   if (newsAccount.bio) prompt += `\nBio: ${newsAccount.bio}`;
-  if (newsAccount.description) prompt += `\nBackground: ${newsAccount.description}`;
-  if (newsAccount.writing_style) prompt += `\nWriting Style: ${newsAccount.writing_style}`;
+  if (newsAccount.description)
+    prompt += `\nBackground: ${newsAccount.description}`;
+  if (newsAccount.writing_style)
+    prompt += `\nWriting Style: ${newsAccount.writing_style}`;
 
   try {
-    const universe = db.prepare("SELECT name, description FROM universes WHERE id = ?").get(newsAccount.universe_id) as any;
+    const universe = db
+      .prepare("SELECT name, description FROM universes WHERE id = ?")
+      .get(newsAccount.universe_id) as any;
     if (universe) {
       prompt += `\nYou are reporting on the universe/franchise: "${universe.name}".`;
       if (universe.description) {
@@ -736,7 +959,7 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
 
   if (pastNewsPosts.length > 0) {
     prompt += `\n\nIMPORTANT CONTEXT - Your Previous News Posts (Oldest to Newest):\n`;
-    pastNewsPosts.forEach(post => {
+    pastNewsPosts.forEach((post) => {
       prompt += `[${post.created_at}] ${post.content}\n\n`;
     });
     prompt += `CRITICAL INSTRUCTION: You MUST build upon these previous posts. DO NOT repeat the same explanations or retell events you have already covered. Focus entirely on what has CHANGED or what is NEW since your last report. Ensure a strong sense of continuity.`;
@@ -748,7 +971,7 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
 
   if (recentPosts.length > 0) {
     prompt += `\n\nRecent Posts from characters in your universe (since your last update):\n`;
-    recentPosts.forEach(post => {
+    recentPosts.forEach((post) => {
       prompt += `[${post.created_at}] ${post.display_name}: ${post.content}\n`;
     });
   } else {
@@ -757,7 +980,7 @@ export async function generateNewsPost(newsAccount: any, recentPosts: any[], act
 
   if (otherNewsPosts.length > 0) {
     prompt += `\n\nOther News Accounts in your universe have already reported today:\n`;
-    otherNewsPosts.forEach(post => {
+    otherNewsPosts.forEach((post) => {
       prompt += `[${post.created_at}] ${post.display_name}: ${post.content}\n`;
     });
     prompt += `\nTry to cover different topics or provide a different perspective than the other news accounts, unless something really big happened that everyone must cover.`;
@@ -776,32 +999,49 @@ Return your response in the following JSON format:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 2000,
     });
-    
+
     let rawContent = response.choices[0].message.content || "";
     let content = stripReasoning(rawContent);
-    
-    logApi('generateNewsPost', { newsAccountId: newsAccount.id, prompt }, { response: rawContent, content }, newsAccount.id);
-    
+
+    logApi(
+      "generateNewsPost",
+      { newsAccountId: newsAccount.id, prompt },
+      { response: rawContent, content },
+      newsAccount.id,
+    );
+
     const json = extractJSON(content);
     return {
       content: cleanAiResponse(json.content || content),
-      internal_thought: json.internal_thought || ""
+      internal_thought: json.internal_thought || "",
     };
   } catch (e) {
     console.error("Error generating news post:", e);
-    logApi('generateNewsPost_error', { newsAccountId: newsAccount.id, prompt }, { error: String(e) }, newsAccount.id);
+    logApi(
+      "generateNewsPost_error",
+      { newsAccountId: newsAccount.id, prompt },
+      { error: String(e) },
+      newsAccount.id,
+    );
     return null;
   }
 }
 
-export async function generateFauxNewsPost(fauxNewsAccount: any, newsPosts: any[], pastNewsPosts: any[] = [], currentTimeStr: string = "") {
+export async function generateFauxNewsPost(
+  fauxNewsAccount: any,
+  newsPosts: any[],
+  pastNewsPosts: any[] = [],
+  currentTimeStr: string = "",
+) {
   let prompt = `You are the ultimate news authority for the Faux platform: ${fauxNewsAccount.display_name}. `;
   if (fauxNewsAccount.bio) prompt += `\nBio: ${fauxNewsAccount.bio}`;
-  if (fauxNewsAccount.description) prompt += `\nBackground: ${fauxNewsAccount.description}`;
-  if (fauxNewsAccount.writing_style) prompt += `\nWriting Style: ${fauxNewsAccount.writing_style}`;
+  if (fauxNewsAccount.description)
+    prompt += `\nBackground: ${fauxNewsAccount.description}`;
+  if (fauxNewsAccount.writing_style)
+    prompt += `\nWriting Style: ${fauxNewsAccount.writing_style}`;
 
   if (currentTimeStr) {
     prompt += `\n\nThe current local time is: ${currentTimeStr}. Please ensure any temporal references (like "Good morning", "Tonight's recap") align with this time.`;
@@ -813,14 +1053,14 @@ Your goal is to summarize these events into a single, cohesive, and engaging pla
 
   if (pastNewsPosts.length > 0) {
     prompt += `\n\nIMPORTANT CONTEXT - Your Previous News Posts (Oldest to Newest):\n`;
-    pastNewsPosts.forEach(post => {
+    pastNewsPosts.forEach((post) => {
       prompt += `[${post.created_at}] ${post.content}\n\n`;
     });
     prompt += `CRITICAL INSTRUCTION: You MUST build upon these previous posts. DO NOT repeat the same explanations or retell events you have already covered. Focus entirely on what has CHANGED or what is NEW since your last report. Ensure a strong sense of continuity.`;
   }
 
   prompt += `\n\nRecent News Posts from other universes:\n`;
-  newsPosts.forEach(post => {
+  newsPosts.forEach((post) => {
     prompt += `[${post.created_at}] ${post.display_name} (Universe: ${post.universe_name}): ${post.content}\n`;
   });
 
@@ -837,28 +1077,43 @@ Return your response in the following JSON format:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 2500,
     });
-    
+
     let rawContent = response.choices[0].message.content || "";
     let content = stripReasoning(rawContent);
-    
-    logApi('generateFauxNewsPost', { newsAccountId: fauxNewsAccount.id, prompt }, { response: rawContent, content }, fauxNewsAccount.id);
-    
+
+    logApi(
+      "generateFauxNewsPost",
+      { newsAccountId: fauxNewsAccount.id, prompt },
+      { response: rawContent, content },
+      fauxNewsAccount.id,
+    );
+
     const json = extractJSON(content);
     return {
       content: cleanAiResponse(json.content || content),
-      internal_thought: json.internal_thought || ""
+      internal_thought: json.internal_thought || "",
     };
   } catch (e) {
     console.error("Error generating faux news post:", e);
-    logApi('generateFauxNewsPost_error', { newsAccountId: fauxNewsAccount.id, prompt }, { error: String(e) }, fauxNewsAccount.id);
+    logApi(
+      "generateFauxNewsPost_error",
+      { newsAccountId: fauxNewsAccount.id, prompt },
+      { error: String(e) },
+      fauxNewsAccount.id,
+    );
     return null;
   }
 }
 
-export async function concludeArc(character: any, arc: any, recentPosts: string, recentComments: string) {
+export async function concludeArc(
+  character: any,
+  arc: any,
+  recentPosts: string,
+  recentComments: string,
+) {
   const prompt = `${buildCharacterPrompt(character)}
 This character's narrative arc has reached its end date. 
 Arc Title: ${arc.title}
@@ -879,10 +1134,13 @@ Return ONLY a valid JSON object with the following structure:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 1000,
     });
-    return extractJSON(response.choices[0].message.content || '{}').completion_summary || "The arc concluded naturally over time.";
+    return (
+      extractJSON(response.choices[0].message.content || "{}")
+        .completion_summary || "The arc concluded naturally over time."
+    );
   } catch (e) {
     console.error("Error concluding arc:", e);
     return "The arc concluded naturally over time.";
@@ -914,25 +1172,39 @@ Return ONLY a JSON object with the following structure:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 1000,
     });
-    const result = extractJSON(response.choices[0].message.content || '{}');
-    logApi('generateNewUniverseArc', { universeId: universe.id, prompt }, { response: response.choices[0].message.content, parsed: result }, null);
+    const result = extractJSON(response.choices[0].message.content || "{}");
+    logApi(
+      "generateNewUniverseArc",
+      { universeId: universe.id, prompt },
+      { response: response.choices[0].message.content, parsed: result },
+      null,
+    );
     return result;
   } catch (e) {
     console.error("Error generating new universe arc:", e);
-    logApi('generateNewUniverseArc_error', { universeId: universe.id, prompt }, { error: String(e) }, null);
+    logApi(
+      "generateNewUniverseArc_error",
+      { universeId: universe.id, prompt },
+      { error: String(e) },
+      null,
+    );
     return null;
   }
 }
 
-export async function updateUniverseArc(universe: any, arc: any, recentPosts: string) {
-  let historyText = '';
+export async function updateUniverseArc(
+  universe: any,
+  arc: any,
+  recentPosts: string,
+) {
+  let historyText = "";
   try {
-    const history = JSON.parse(arc.history || '[]');
+    const history = JSON.parse(arc.history || "[]");
     if (history.length > 0) {
-      historyText = `\nPast Updates (Oldest to Newest):\n${history.map((h: any) => `- [${h.date}] ${h.status}`).join('\n')}\n`;
+      historyText = `\nPast Updates (Oldest to Newest):\n${history.map((h: any) => `- [${h.date}] ${h.status}`).join("\n")}\n`;
     }
   } catch (e) {}
 
@@ -958,17 +1230,24 @@ Return ONLY a JSON object with the following structure:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 1000,
     });
-    return extractJSON(response.choices[0].message.content || '{}').current_status_text || arc.current_status_text;
+    return (
+      extractJSON(response.choices[0].message.content || "{}")
+        .current_status_text || arc.current_status_text
+    );
   } catch (e) {
     console.error("Error updating universe arc:", e);
     return arc.current_status_text;
   }
 }
 
-export async function concludeUniverseArc(universe: any, arc: any, recentPosts: string) {
+export async function concludeUniverseArc(
+  universe: any,
+  arc: any,
+  recentPosts: string,
+) {
   const prompt = `You are the narrative director for the universe "${universe.name}".
 The following Universe Arc has reached its conclusion:
 Title: ${arc.title}
@@ -988,56 +1267,93 @@ Return ONLY a JSON object with the following structure:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 1000,
     });
-    return extractJSON(response.choices[0].message.content || '{}').completion_summary || "The universe arc concluded naturally.";
+    return (
+      extractJSON(response.choices[0].message.content || "{}")
+        .completion_summary || "The universe arc concluded naturally."
+    );
   } catch (e) {
     console.error("Error concluding universe arc:", e);
     return "The universe event concluded naturally over time.";
   }
 }
 
-export async function generatePost(character: any, context: string = '', relationships: string = '', postTypeObj: any, availableUsernames: string = '', isIntroduction: boolean = false, activeArc: any = null, pastArcs: any[] = [], arcInstruction: string = '', arcComments: string = '', activeUniverseArc: any = null, pastUniverseArcs: any[] = [], recentNewsPosts: any[] = []) {
+export async function generatePost(
+  character: any,
+  context: string = "",
+  relationships: string = "",
+  postTypeObj: any,
+  availableUsernames: string = "",
+  isIntroduction: boolean = false,
+  activeArc: any = null,
+  pastArcs: any[] = [],
+  arcInstruction: string = "",
+  arcComments: string = "",
+  activeUniverseArc: any = null,
+  pastUniverseArcs: any[] = [],
+  recentNewsPosts: any[] = [],
+) {
   let prompt = `${buildCharacterPrompt(character)}
-${isIntroduction ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.` : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
-${character.account_type === 'company' ? 'Your post should reflect your brand identity, promote your products/services, or engage with your target audience in a corporate or brand-appropriate way.' : 'Your post should be independent and reflect your current thoughts, feelings, or activities.'}
+${
+  isIntroduction
+    ? `Write your very first "Introduction" post on this social media platform. Introduce yourself, your vibe, and what you're doing here. Make it fit your character perfectly.`
+    : `Write a short, engaging social media post (like a tweet) that fits your character perfectly.
+${character.account_type === "company" ? "Your post should reflect your brand identity, promote your products/services, or engage with your target audience in a corporate or brand-appropriate way." : "Your post should be independent and reflect your current thoughts, feelings, or activities."}
 For this specific post, your post archetype is: "${postTypeObj.name}".
 Instructions for this archetype: ${postTypeObj.description}
 Avoid referencing other people's posts directly unless it's a very general observation or the archetype requires it.
 Do not attempt to search the web for current world events. If the user references real world events, you can have your own opinions about them. Make sure that not every post is about what the user posts.
-${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ''}
+${relationships ? `Your relationships with others: ${relationships}. You can mention them if it fits your current thought.` : ""}
 
-${recentNewsPosts.length > 0 ? `RECENT UNIVERSE NEWS (Events that happened in your world recently):\n${recentNewsPosts.map(p => `[${p.created_at}] ${p.display_name}: ${p.content}`).join('\n')}\nNOTE: You are aware of these news events. You can react to them, mention them, or completely ignore them if they don't concern you.\n` : ''}
+${recentNewsPosts.length > 0 ? `RECENT UNIVERSE NEWS (Events that happened in your world recently):\n${recentNewsPosts.map((p) => `[${p.created_at}] ${p.display_name}: ${p.content}`).join("\n")}\nNOTE: You are aware of these news events. You can react to them, mention them, or completely ignore them if they don't concern you.\n` : ""}
 
-${pastUniverseArcs.length > 0 ? `PAST UNIVERSE ARCS (Historical events in your world):\n${pastUniverseArcs.map(a => `- ${a.title}: ${a.completion_summary}`).join('\n')}\n` : ''}
+${pastUniverseArcs.length > 0 ? `PAST UNIVERSE ARCS (Historical events in your world):\n${pastUniverseArcs.map((a) => `- ${a.title}: ${a.completion_summary}`).join("\n")}\n` : ""}
 
-${activeUniverseArc ? `CURRENT UNIVERSE ARC (The overarching setting/event happening in your world right now):
+${
+  activeUniverseArc
+    ? `CURRENT UNIVERSE ARC (The overarching setting/event happening in your world right now):
 Title: ${activeUniverseArc.title}
 Overall Premise: ${activeUniverseArc.description}
 Current Status/Latest Developments: ${activeUniverseArc.current_status_text}
 NOTE: You are aware of this universe arc. It is the setting and outer influence of your world right now. It may affect your personal journey or you might just comment on it.
-` : ''}
+`
+    : ""
+}
 
-${pastArcs.length > 0 ? `PAST ARCS (For background context only):\n${pastArcs.map(a => `- ${a.title}: ${a.completion_summary}`).join('\n')}\n` : ''}
+${pastArcs.length > 0 ? `PAST ARCS (For background context only):\n${pastArcs.map((a) => `- ${a.title}: ${a.completion_summary}`).join("\n")}\n` : ""}
 
-${activeArc ? `CURRENT ACTIVE ARC:
+${
+  activeArc
+    ? `CURRENT ACTIVE ARC:
 Title: ${activeArc.title}
 Description: ${activeArc.description}
-` : ''}
+`
+    : ""
+}
 
-${arcInstruction === 'START_ARC' ? `ARC INSTRUCTION: You are starting a new narrative arc. Write a post that kicks off this journey.` : ''}
-${arcInstruction === 'PROGRESS_ARC' ? `ARC INSTRUCTION: You are currently in the middle of this arc. Progress this story naturally. Do not rush it.
-${arcComments ? `Consider these recent comments from others on your past posts:\n${arcComments}` : ''}` : ''}
-${arcInstruction === 'CONCLUDE_ARC' ? `ARC INSTRUCTION: Your arc has concluded with the following summary: "${activeArc?.completion_summary}". Write a post that wraps up this storyline based on this conclusion.` : ''}
-${(!arcInstruction && activeArc) ? `ARC INSTRUCTION: Keep your current active arc in mind for your general mood and context, even if this post isn't directly about it.` : ''}
+${arcInstruction === "START_ARC" ? `ARC INSTRUCTION: You are starting a new narrative arc. Write a post that kicks off this journey.` : ""}
+${
+  arcInstruction === "PROGRESS_ARC"
+    ? `ARC INSTRUCTION: You are currently in the middle of this arc. Progress this story naturally. Do not rush it.
+${arcComments ? `Consider these recent comments from others on your past posts:\n${arcComments}` : ""}`
+    : ""
+}
+${arcInstruction === "CONCLUDE_ARC" ? `ARC INSTRUCTION: Your arc has concluded with the following summary: "${activeArc?.completion_summary}". Write a post that wraps up this storyline based on this conclusion.` : ""}
+${!arcInstruction && activeArc ? `ARC INSTRUCTION: Keep your current active arc in mind for your general mood and context, even if this post isn't directly about it.` : ""}
 
-${context ? `Your recent posts (with timestamps): ${context}
-CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.` : ''}
-${postTypeObj.id === 'image_post' ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : `IMPORTANT: This is a text-only post. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your post must rely entirely on text and emojis.`}
-${postTypeObj.id === 'mention' ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ''}
-${postTypeObj.id === 'event' ? `IMPORTANT: This is an EVENT post. An event has happened that affects you and some other characters. Describe the event and your reaction to it. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}
-${postTypeObj.id === 'meetup' ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ''}`}
+${
+  context
+    ? `Your recent posts (with timestamps): ${context}
+CRITICAL INSTRUCTION: Review your recent posts above. DO NOT repeat the same topics, activities, or complaints. Instead, show PROGRESSION. If you previously posted about starting a project, post about a new development or a different aspect of your life. Create little storylines over multiple posts to show minor character development. Ensure variance and avoid posting about the same or very similar things over and over again.`
+    : ""
+}
+${postTypeObj.id === "image_post" ? `IMPORTANT: This post will be accompanied by an image. Write a text post that would be a good fit for an image. DO NOT include any image descriptions or prompts in the text post itself (e.g., no text in square brackets like [Image of...]). The text should be natural social media content.` : `IMPORTANT: This is a text-only post. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your post must rely entirely on text and emojis.`}
+${postTypeObj.id === "mention" ? `IMPORTANT: You MUST mention another user in this post using the @username format. Here are some available usernames you can mention: ${availableUsernames}. Pick one that makes sense or pick randomly.` : ""}
+${postTypeObj.id === "event" ? `IMPORTANT: This is an EVENT post. An event has happened that affects you and some other characters. Describe the event and your reaction to it. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ""}
+${postTypeObj.id === "meetup" ? `IMPORTANT: This is a MEETUP post. You are meeting up with some other characters. Describe the meetup and what you're doing. Mention the other characters involved using @username. Available usernames: ${availableUsernames}.` : ""}`
+}
 Do not use hashtags unless it fits the character. Keep it under 280 characters.
 
 CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this post. This is what you are REALLY thinking or feeling while writing this post. It can be different from what you actually post. It should reflect your true motives, hidden emotions, or secret plans.
@@ -1057,7 +1373,7 @@ Return your response in the following JSON format:
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.9,
       });
@@ -1069,52 +1385,84 @@ Return your response in the following JSON format:
       if (content || !reasoning) break;
       console.log(`generatePost: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
-    
+
     logApi(
       "generatePost",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.9, archetype: postTypeObj.id, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.9,
+        archetype: postTypeObj.id,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
-    
+
     const json = extractJSON(content);
     return {
       content: cleanAiResponse(json.content || content),
-      internal_thought: json.internal_thought || ""
+      internal_thought: json.internal_thought || "",
     };
   } catch (error: any) {
-    console.error('Error generating post:', error);
+    console.error("Error generating post:", error);
     logApi(
       "generatePost",
-      { model: getModel(), prompt, archetype: postTypeObj.id, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      character.id
+      {
+        model: getModel(),
+        prompt,
+        archetype: postTypeObj.id,
+        error: "Catch Block",
+      },
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      character.id,
     );
     return null;
   }
 }
 
-export async function generateComment(character: any, postContent: string, postAuthorName: string, otherComments: string = '', isReply: boolean = false, relationshipContext: string = '', otherUserId?: number, imagePrompt?: string, postTimestamp?: string) {
-  let otherUserInfo = '';
+export async function generateComment(
+  character: any,
+  postContent: string,
+  postAuthorName: string,
+  otherComments: string = "",
+  isReply: boolean = false,
+  relationshipContext: string = "",
+  otherUserId?: number,
+  imagePrompt?: string,
+  postTimestamp?: string,
+) {
+  let otherUserInfo = "";
   if (otherUserId) {
-    const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
+    const otherUser = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(otherUserId) as any;
     if (otherUser) {
-      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || "No bio provided."}\n`;
       otherUserInfo += getOtherUserUniverseContext(character, otherUser);
-      if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
-        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
+      if (
+        relationshipContext &&
+        (relationshipContext.toLowerCase().includes("close") ||
+          relationshipContext.toLowerCase().includes("friend") ||
+          relationshipContext.toLowerCase().includes("partner"))
+      ) {
+        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || "No backstory provided."}\n`;
       }
     }
   }
 
   const prompt = `${buildCharacterPrompt(character)}
-${isReply ? `You are participating in a comment thread. Here is the context of the thread (with timestamps):\n${otherComments}\n\nYou are replying to the last comment in the thread by ${postAuthorName} (sent at ${postTimestamp || 'unknown time'}): "${postContent}"` : `You are looking at a social media post by ${postAuthorName} (posted at ${postTimestamp || 'unknown time'}): "${postContent}"\n${imagePrompt ? `The post has an image attached. Description of the image: ${imagePrompt}\n` : ''}${otherComments ? `Other users have already commented (with timestamps): ${otherComments}` : ''}`}
+${isReply ? `You are participating in a comment thread. Here is the context of the thread (with timestamps):\n${otherComments}\n\nYou are replying to the last comment in the thread by ${postAuthorName} (sent at ${postTimestamp || "unknown time"}): "${postContent}"` : `You are looking at a social media post by ${postAuthorName} (posted at ${postTimestamp || "unknown time"}): "${postContent}"\n${imagePrompt ? `The post has an image attached. Description of the image: ${imagePrompt}\n` : ""}${otherComments ? `Other users have already commented (with timestamps): ${otherComments}` : ""}`}
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${postAuthorName}: ${relationshipContext}` : `You don't know ${postAuthorName} well, treat them as an acquaintance or celebrity.`}
 ${isReply ? `Write a reply that fits your character perfectly and continues the conversation naturally. Notice the timestamps to understand the flow of time.` : `Write a comment that fits your character perfectly. Notice the timestamp of the post to understand how recent it is.`}
 IMPORTANT: This is a text-only comment. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). 
 CRITICAL: DO NOT include any timestamps in your comment (e.g., no "[2026-04-08 22:04:15]"). Your comment must rely entirely on text and emojis.
-${character.account_type === 'company' ? 'Your comment should reflect your brand identity, promote your products/services if relevant, or engage with your target audience in a corporate or brand-appropriate way.' : ''}
+${character.account_type === "company" ? "Your comment should reflect your brand identity, promote your products/services if relevant, or engage with your target audience in a corporate or brand-appropriate way." : ""}
 Keep it short, natural, and in character. Focus on the topic being discussed. Keep it under 150 characters.
 
 CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this comment. This is what you are REALLY thinking or feeling while writing this comment. It can be different from what you actually post.
@@ -1134,7 +1482,7 @@ Return your response in the following JSON format:
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.8,
       });
@@ -1144,48 +1492,82 @@ Return your response in the following JSON format:
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`generateComment: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `generateComment: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "generateComment",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, isReply, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.8,
+        isReply,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
-    
+
     const json = extractJSON(content);
     return {
       content: cleanAiResponse(json.content || content),
-      internal_thought: json.internal_thought || ""
+      internal_thought: json.internal_thought || "",
     };
   } catch (error: any) {
-    console.error('Error generating comment:', error);
+    console.error("Error generating comment:", error);
     logApi(
       "generateComment",
       { model: getModel(), prompt, isReply, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      character.id
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      character.id,
     );
     return null;
   }
 }
 
-export async function generateDM(character: any, userDisplayName: string, relationshipContext: string = '', otherUserId?: number, context: string = '', messageHistory: {role: string, content: string, created_at: string}[] = []) {
-  let otherUserInfo = '';
-  let recentActivity = '';
+export async function generateDM(
+  character: any,
+  userDisplayName: string,
+  relationshipContext: string = "",
+  otherUserId?: number,
+  context: string = "",
+  messageHistory: { role: string; content: string; created_at: string }[] = [],
+) {
+  let otherUserInfo = "";
+  let recentActivity = "";
   if (otherUserId) {
-    const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
+    const otherUser = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(otherUserId) as any;
     if (otherUser) {
-      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || "No bio provided."}\n`;
       otherUserInfo += getOtherUserUniverseContext(character, otherUser);
-      if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
-        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
+      if (
+        relationshipContext &&
+        (relationshipContext.toLowerCase().includes("close") ||
+          relationshipContext.toLowerCase().includes("friend") ||
+          relationshipContext.toLowerCase().includes("partner"))
+      ) {
+        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || "No backstory provided."}\n`;
       }
-      
-      const recentPosts = db.prepare("SELECT content FROM posts WHERE user_id = ? AND created_at >= datetime('now', '-36 hours') ORDER BY created_at DESC LIMIT 5").all(otherUserId) as any[];
-      const recentComments = db.prepare("SELECT content FROM comments WHERE user_id = ? AND created_at >= datetime('now', '-36 hours') ORDER BY created_at DESC LIMIT 5").all(otherUserId) as any[];
-      
+
+      const recentPosts = db
+        .prepare(
+          "SELECT content FROM posts WHERE user_id = ? AND created_at >= datetime('now', '-36 hours') ORDER BY created_at DESC LIMIT 5",
+        )
+        .all(otherUserId) as any[];
+      const recentComments = db
+        .prepare(
+          "SELECT content FROM comments WHERE user_id = ? AND created_at >= datetime('now', '-36 hours') ORDER BY created_at DESC LIMIT 5",
+        )
+        .all(otherUserId) as any[];
+
       const hasPosts = recentPosts.length > 0;
       const hasComments = recentComments.length > 0;
 
@@ -1194,7 +1576,7 @@ export async function generateDM(character: any, userDisplayName: string, relati
       // If context is provided (e.g., reacting to a specific dm_invitation post), don't randomly pick another post to react to
       if (!context) {
         // 20% chance to react to a post or comment, if they exist
-        if (Math.random() < 0.20 && (hasPosts || hasComments)) {
+        if (Math.random() < 0.2 && (hasPosts || hasComments)) {
           if (hasPosts && hasComments) {
             chosenOption = Math.random() < 0.5 ? 1 : 2;
           } else if (hasPosts) {
@@ -1206,28 +1588,31 @@ export async function generateDM(character: any, userDisplayName: string, relati
       }
 
       if (chosenOption === 1) {
-        const randomPost = recentPosts[Math.floor(Math.random() * recentPosts.length)];
+        const randomPost =
+          recentPosts[Math.floor(Math.random() * recentPosts.length)];
         recentActivity += `One of their recent posts:\n- "${randomPost.content}"\n`;
       } else if (chosenOption === 2) {
-        const randomComment = recentComments[Math.floor(Math.random() * recentComments.length)];
+        const randomComment =
+          recentComments[Math.floor(Math.random() * recentComments.length)];
         recentActivity += `One of their recent comments:\n- "${randomComment.content}"\n`;
       }
     }
   }
 
-  const historyStr = messageHistory.length > 0 
-    ? `\nPrevious conversation history:\n${messageHistory.map(m => m.role === 'system' ? m.content : `(Sent at ${m.created_at}) ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n')}\n`
-    : '';
+  const historyStr =
+    messageHistory.length > 0
+      ? `\nPrevious conversation history:\n${messageHistory.map((m) => (m.role === "system" ? m.content : `(Sent at ${m.created_at}) ${m.role === "assistant" ? character.display_name : userDisplayName}: ${m.content}`)).join("\n")}\n`
+      : "";
 
   const prompt = `${buildCharacterPrompt(character)}
 You are sending a private direct message to ${userDisplayName}.
 ${otherUserInfo}
 ${recentActivity}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
-${context ? `Context for this message: ${context}` : ''}
+${context ? `Context for this message: ${context}` : ""}
 ${historyStr}
 Write a short, in-character message. 
-${character.account_type === 'company' ? 'Your message should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be a promotional message, customer support, or a brand partnership inquiry.' : ''}
+${character.account_type === "company" ? "Your message should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be a promotional message, customer support, or a brand partnership inquiry." : ""}
 CRITICAL: Make it feel like a REALISTIC text message/DM. 
 - Do NOT include any timestamps or Sent at prefixes in your message (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)").
 - Do NOT include any image placeholders or text like "[Generating image...]" or "[IMAGE ATTACHED: ...]" in your message.
@@ -1238,8 +1623,8 @@ CRITICAL: Make it feel like a REALISTIC text message/DM.
 - CRITICAL: Natural conversations don't always end with a question or a call to action. It is okay (and often preferred) to just make a statement, share an observation, or drop a thought without forcing the other person to reply. Do NOT feel pressured to keep the conversation going at all costs. Let things end naturally.
 If there is previous history, you can pick up where you left off or start a new topic. 
 Notice the timestamps in the history to understand how much time has passed since the last message.
-${context ? 'Use the provided context as the reason for reaching out.' : (recentActivity ? 'Give a good reason for reaching out (e.g., asking a casual question about their recent post or comment, sharing a quick thought, or checking in).' : 'Give a good reason for reaching out (e.g., sharing a quick thought, asking a random question, talking about your own life, or just checking in).')} 
-IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never actually posted. ${context ? 'Focus on the provided context.' : (recentActivity ? 'Only reference the recent posts/comments provided above, or find another reason to reach out.' : 'Since no recent posts/comments are provided, you MUST find another reason to reach out.')}
+${context ? "Use the provided context as the reason for reaching out." : recentActivity ? "Give a good reason for reaching out (e.g., asking a casual question about their recent post or comment, sharing a quick thought, or checking in)." : "Give a good reason for reaching out (e.g., sharing a quick thought, asking a random question, talking about your own life, or just checking in)."} 
+IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never actually posted. ${context ? "Focus on the provided context." : recentActivity ? "Only reference the recent posts/comments provided above, or find another reason to reach out." : "Since no recent posts/comments are provided, you MUST find another reason to reach out."}
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.
 IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.
 
@@ -1260,7 +1645,7 @@ Return your response in the following JSON format:
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.8,
       });
@@ -1272,60 +1657,80 @@ Return your response in the following JSON format:
       if (content || !reasoning) break;
       console.log(`generateDM: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
-    
+
     logApi(
       "generateDM",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.8,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
-    
+
     const json = extractJSON(content);
     return {
       content: cleanAiResponse(json.content || content),
-      internal_thought: json.internal_thought || ""
+      internal_thought: json.internal_thought || "",
     };
   } catch (error: any) {
-    console.error('Error generating DM:', error);
+    console.error("Error generating DM:", error);
     logApi(
       "generateDM",
       { model: getModel(), prompt, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      character.id
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      character.id,
     );
     return null;
   }
 }
 
-export async function summarizeDMHistory(currentSummary: string | null, newMessages: {role: string, content: string, created_at: string}[], character1: any, character2: any) {
+export async function summarizeDMHistory(
+  currentSummary: string | null,
+  newMessages: { role: string; content: string; created_at: string }[],
+  character1: any,
+  character2: any,
+) {
   const prompt = `You are an AI summarizing a direct message conversation between ${character1.display_name} and ${character2.display_name}.
-${currentSummary ? `Here is the summary of the conversation so far:\n${currentSummary}\n\n` : ''}Here are the latest messages:
-${newMessages.map(m => `(Sent at ${m.created_at}) ${m.role === 'user' ? character2.display_name : character1.display_name}: ${m.content}`).join('\n')}
+${currentSummary ? `Here is the summary of the conversation so far:\n${currentSummary}\n\n` : ""}Here are the latest messages:
+${newMessages.map((m) => `(Sent at ${m.created_at}) ${m.role === "user" ? character2.display_name : character1.display_name}: ${m.content}`).join("\n")}
 
 Please provide a concise, updated summary of the entire conversation history, capturing the main topics, relationship dynamics, and any important events. Keep it under 200 words.`;
 
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 500,
       temperature: 0.5,
     });
-    
+
     let content = response.choices[0].message.content || "";
     return cleanAiResponse(stripReasoning(content).trim());
   } catch (error: any) {
-    console.error('Error summarizing DM history:', error);
+    console.error("Error summarizing DM history:", error);
     return currentSummary || "";
   }
 }
 
-export async function updateDMSummaryAndFacts(currentSummary: string | null, currentFacts: string | null, newMessages: {role: string, content: string, created_at: string}[], character1: any, character2: any) {
+export async function updateDMSummaryAndFacts(
+  currentSummary: string | null,
+  currentFacts: string | null,
+  newMessages: { role: string; content: string; created_at: string }[],
+  character1: any,
+  character2: any,
+) {
   const prompt = `You are an AI maintaining a memory log of a direct message conversation between ${character1.display_name} and ${character2.display_name}.
 
-${currentFacts ? `CURRENT PERMANENT FACTS LIST:\n${currentFacts}\n\n` : ''}${currentSummary ? `CURRENT CONVERSATION SUMMARY:\n${currentSummary}\n\n` : ''}
+${currentFacts ? `CURRENT PERMANENT FACTS LIST:\n${currentFacts}\n\n` : ""}${currentSummary ? `CURRENT CONVERSATION SUMMARY:\n${currentSummary}\n\n` : ""}
 Here are the latest messages to process:
-${newMessages.map(m => `(Sent at ${m.created_at}) ${m.role === 'user' ? character2.display_name : character1.display_name}: ${m.content}`).join('\n')}
+${newMessages.map((m) => `(Sent at ${m.created_at}) ${m.role === "user" ? character2.display_name : character1.display_name}: ${m.content}`).join("\n")}
 
 Your task is to return a JSON object with two fields:
 1. "summary": An updated conversational summary (max 3000 tokens long). Summarize the recent events, continuing from the old summary if one exists.
@@ -1341,55 +1746,76 @@ Return strictly JSON format:
   try {
     const response = await getOpenAI().chat.completions.create({
       model: getModel(),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
       max_tokens: 5000,
       temperature: 0.5,
-      response_format: { type: "json_object" }
+      response_format: { type: "json_object" },
     });
-    
+
     let rawContent = response.choices[0].message.content || "{}";
     let json = JSON.parse(stripReasoning(rawContent));
-    
+
     return {
       summary: json.summary || currentSummary || "",
-      facts: json.facts || currentFacts || ""
+      facts: json.facts || currentFacts || "",
     };
   } catch (error: any) {
-    console.error('Error updating DM summary and facts:', error);
+    console.error("Error updating DM summary and facts:", error);
     return {
       summary: currentSummary || "",
-      facts: currentFacts || ""
+      facts: currentFacts || "",
     };
   }
 }
 
-export async function replyToDM(character: any, userDisplayName: string, messageHistory: {role: string, content: string, created_at: string}[], relationshipContext: string = '', otherUserId?: number, isDelayed: boolean = false, allowImageGen: boolean = false) {
-  let otherUserInfo = '';
+export async function replyToDM(
+  character: any,
+  userDisplayName: string,
+  messageHistory: { role: string; content: string; created_at: string }[],
+  relationshipContext: string = "",
+  otherUserId?: number,
+  isDelayed: boolean = false,
+  allowImageGen: boolean = false,
+) {
+  let otherUserInfo = "";
   if (otherUserId) {
-    const otherUser = db.prepare("SELECT * FROM users WHERE id = ?").get(otherUserId) as any;
+    const otherUser = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(otherUserId) as any;
     if (otherUser) {
-      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || 'No bio provided.'}\n`;
+      otherUserInfo = `Their Bio (for your understanding only, do not explicitly mention it unless relevant): ${otherUser.bio || "No bio provided."}\n`;
       otherUserInfo += getOtherUserUniverseContext(character, otherUser);
-      if (relationshipContext && (relationshipContext.toLowerCase().includes('close') || relationshipContext.toLowerCase().includes('friend') || relationshipContext.toLowerCase().includes('partner'))) {
-        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || 'No backstory provided.'}\n`;
+      if (
+        relationshipContext &&
+        (relationshipContext.toLowerCase().includes("close") ||
+          relationshipContext.toLowerCase().includes("friend") ||
+          relationshipContext.toLowerCase().includes("partner"))
+      ) {
+        otherUserInfo += `Their Backstory (you know this because you are close): ${otherUser.backstory || "No backstory provided."}\n`;
       }
     }
   }
 
-  const historyStr = messageHistory.map(m => m.role === 'system' ? m.content : `(Sent at ${m.created_at}) ${m.role === 'assistant' ? character.display_name : userDisplayName}: ${m.content}`).join('\n');
+  const historyStr = messageHistory
+    .map((m) =>
+      m.role === "system"
+        ? m.content
+        : `(Sent at ${m.created_at}) ${m.role === "assistant" ? character.display_name : userDisplayName}: ${m.content}`,
+    )
+    .join("\n");
 
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are having a private direct message conversation with ${userDisplayName}.
 ${otherUserInfo}
 ${relationshipContext ? `Relationship with ${userDisplayName}: ${relationshipContext}` : `You don't know ${userDisplayName} well, treat them as an acquaintance or celebrity.`}
-${isDelayed ? `IMPORTANT: You were offline/busy for a while and are just now getting back to this message. You can briefly mention why you took so long if it fits your character (e.g. you were sleeping, busy with something, or just didn't see it).` : ''}
+${isDelayed ? `IMPORTANT: You were offline/busy for a while and are just now getting back to this message. You can briefly mention why you took so long if it fits your character (e.g. you were sleeping, busy with something, or just didn't see it).` : ""}
 
 Conversation history:
 ${historyStr}
 
 Reply in character to their latest message. 
 Notice the timestamps to understand the flow of time between messages.
-${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be customer support, answering inquiries, or maintaining brand voice.' : ''}
+${character.account_type === "company" ? "Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the user in a corporate or brand-appropriate way. It can be customer support, answering inquiries, or maintaining brand voice." : ""}
 CRITICAL: Make it feel like a REALISTIC text message/DM. 
 - Do NOT include any timestamps or Sent at prefixes in your reply (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)"). Just write the text.
 - Do NOT include any image placeholders or text like "[Generating image...]" or "[IMAGE ATTACHED: ...]" in your message. If you decide to send an image or pretend to attach one, just talk about it naturally without any bracketed text describing it.
@@ -1411,11 +1837,14 @@ Return your response in the following JSON format:
 }`;
 
   const messages: any[] = [
-    { role: 'system', content: systemPrompt },
-    ...messageHistory.map(m => ({
-      role: m.role === 'system' ? 'system' : m.role,
-      content: m.role === 'system' ? m.content : `(Sent at ${m.created_at})\n${m.content}`
-    }))
+    { role: "system", content: systemPrompt },
+    ...messageHistory.map((m) => ({
+      role: m.role === "system" ? "system" : m.role,
+      content:
+        m.role === "system"
+          ? m.content
+          : `(Sent at ${m.created_at})\n${m.content}`,
+    })),
   ];
 
   try {
@@ -1439,43 +1868,61 @@ Return your response in the following JSON format:
       if (content || !reasoning) break;
       console.log(`replyToDM: AI still reasoning (Attempt ${i + 1}/3)...`);
     }
-    
+
     logApi(
       "replyToDM",
-      { model: getModel(), messages, max_tokens: 10000, temperature: 0.8, finish_reason: finishReason },
+      {
+        model: getModel(),
+        messages,
+        max_tokens: 10000,
+        temperature: 0.8,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
-    
+
     const json = extractJSON(content);
     let finalContent = cleanAiResponse(json.content || content);
     let internal_thought = json.internal_thought || "";
 
     return { content: finalContent, internal_thought };
   } catch (error: any) {
-    console.error('Error replying to DM:', error);
+    console.error("Error replying to DM:", error);
     logApi(
       "replyToDM",
       { model: getModel(), messages, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      character.id
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      character.id,
     );
     return null;
   }
 }
 
-export async function generateGroupChatReply(character: any, groupName: string, messageHistory: {role: string, content: string, created_at: string}[], otherMembers: any[]) {
-  const otherMembersStr = otherMembers.map(m => m.display_name).join(', ');
-  const otherMembersBios = otherMembers.map(m => {
-    let bioStr = `${m.display_name} Bio: ${m.bio || 'No bio provided.'}`;
-    const universeContext = getOtherUserUniverseContext(character, m);
-    if (universeContext) {
-      bioStr += `\n${universeContext}`;
-    }
-    return bioStr;
-  }).join('\n\n');
-  
-  const historyStr = messageHistory.map(m => `(Sent at ${m.created_at}) ${m.content}`).join('\n');
+export async function generateGroupChatReply(
+  character: any,
+  groupName: string,
+  messageHistory: { role: string; content: string; created_at: string }[],
+  otherMembers: any[],
+) {
+  const otherMembersStr = otherMembers.map((m) => m.display_name).join(", ");
+  const otherMembersBios = otherMembers
+    .map((m) => {
+      let bioStr = `${m.display_name} Bio: ${m.bio || "No bio provided."}`;
+      const universeContext = getOtherUserUniverseContext(character, m);
+      if (universeContext) {
+        bioStr += `\n${universeContext}`;
+      }
+      return bioStr;
+    })
+    .join("\n\n");
+
+  const historyStr = messageHistory
+    .map((m) => `(Sent at ${m.created_at}) ${m.content}`)
+    .join("\n");
 
   const systemPrompt = `${buildCharacterPrompt(character)}
 You are in a group chat named "${groupName}" with ${otherMembersStr}.
@@ -1487,7 +1934,7 @@ ${historyStr}
 
 Reply in character to the latest messages. 
 Notice the timestamps to understand the flow of time between messages.
-${character.account_type === 'company' ? 'Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the group in a corporate or brand-appropriate way. You are representing the company in this group chat.' : ''}
+${character.account_type === "company" ? "Your reply should reflect your brand identity, promote your products/services if relevant, or engage with the group in a corporate or brand-appropriate way. You are representing the company in this group chat." : ""}
 CRITICAL: Make it feel like a REALISTIC group chat message. 
 - Do NOT include any timestamps or Sent at prefixes in your reply (e.g., no "[2026-04-08 22:04:15]" or "(Sent at ...)"). Just write the text.
 - Do NOT write long, overly formal paragraphs. 
@@ -1511,7 +1958,7 @@ Return your response in the following JSON format:
     { role: "system", content: systemPrompt },
     // We don't need to pass the history as separate messages because it's all in the system prompt,
     // but we can pass the last few as user messages to ensure the model focuses on them.
-    { role: "user", content: "Please reply to the group chat." }
+    { role: "user", content: "Please reply to the group chat." },
   ];
 
   try {
@@ -1531,38 +1978,48 @@ Return your response in the following JSON format:
       content = stripReasoning(rawContent);
 
       if (content || !reasoning) break;
-      console.log(`generateGroupChatReply: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `generateGroupChatReply: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "generateGroupChatReply",
       { model: getModel(), messages, max_tokens: 10000 },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
-    
+
     const json = extractJSON(content);
     return {
       content: cleanAiResponse(json.content || content),
-      internal_thought: json.internal_thought || ""
+      internal_thought: json.internal_thought || "",
     };
   } catch (error: any) {
-    console.error('Error replying to Group Chat:', error);
+    console.error("Error replying to Group Chat:", error);
     logApi(
       "generateGroupChatReply",
       { model: getModel(), messages },
       "Error: " + error.message,
-      character.id
+      character.id,
     );
     return null;
   }
 }
 
-export async function checkIfWantsToSendImage(character: any, messageHistory: {role: string, content: string}[], lastMessageContent: string): Promise<boolean> {
+export async function checkIfWantsToSendImage(
+  character: any,
+  messageHistory: { role: string; content: string }[],
+  lastMessageContent: string,
+): Promise<boolean> {
   try {
-    const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
+    const settings = db
+      .prepare("SELECT * FROM settings WHERE id = 1")
+      .get() as any;
     let maxHistory = messageHistory.slice(-5);
-    let historyText = maxHistory.map(m => `${m.role}: ${m.content}`).join('\n');
+    let historyText = maxHistory
+      .map((m) => `${m.role}: ${m.content}`)
+      .join("\n");
     const prompt = `Based on the following recent conversation history, does the AI character "${character.display_name}" want to send an image to the user? 
 Consider if the user explicitly asked for an image, or if the AI offered to show something or naturally would send a picture (e.g. "look at this selfie", "here is a photo").
 Note: their last message text was: "${lastMessageContent}".
@@ -1577,16 +2034,18 @@ ${historyText}`;
       max_tokens: 5,
       temperature: 0.1,
     });
-    
-    const ans = (response.choices[0].message.content || "").trim().toLowerCase();
-    
+
+    const ans = (response.choices[0].message.content || "")
+      .trim()
+      .toLowerCase();
+
     logApi(
       "checkIfWantsToSendImage",
       { prompt },
       { response: ans },
-      character.id
+      character.id,
     );
-    
+
     return ans.includes("yes");
   } catch (e) {
     console.error("Error in checkIfWantsToSendImage:", e);
@@ -1594,31 +2053,42 @@ ${historyText}`;
   }
 }
 
-export async function createDMImageRequestPrompt(character: any, messageHistory: {role: string, content: string}[], lastMessageContent: string): Promise<string> {
-   try {
-     const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
-     let maxHistory = messageHistory.slice(-5);
-     let historyText = maxHistory.map(m => `${m.role}: ${m.content}`).join('\n');
-     const prompt = `Based on the conversation history where you (the AI) decided to send an image to the user, write a brief 1-2 sentence description of WHAT that image should contain. Do not include your appearance. Just describe the scene or object you are showing. If it's a selfie, just say "a selfie taken in a [location]".
+export async function createDMImageRequestPrompt(
+  character: any,
+  messageHistory: { role: string; content: string }[],
+  lastMessageContent: string,
+): Promise<string> {
+  try {
+    const settings = db
+      .prepare("SELECT * FROM settings WHERE id = 1")
+      .get() as any;
+    let maxHistory = messageHistory.slice(-5);
+    let historyText = maxHistory
+      .map((m) => `${m.role}: ${m.content}`)
+      .join("\n");
+    const prompt = `Based on the conversation history where you (the AI) decided to send an image to the user, write a brief 1-2 sentence description of WHAT that image should contain. Do not include your appearance. Just describe the scene or object you are showing. If it's a selfie, just say "a selfie taken in a [location]".
 
 Conversation history:
 ${historyText}
 Last message sent: "${lastMessageContent}"`;
 
-     const response = await getOpenAI().chat.completions.create({
-       model: settings?.model_name || "zai-org/glm-5",
-       messages: [{ role: "user", content: prompt }],
-       max_tokens: 100,
-       temperature: 0.7,
-     });
-     
-     return (response.choices[0].message.content || "").trim();
-   } catch (e) {
-     return "A photo related to the recent conversation.";
-   }
+    const response = await getOpenAI().chat.completions.create({
+      model: settings?.model_name || "zai-org/glm-5",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 100,
+      temperature: 0.7,
+    });
+
+    return (response.choices[0].message.content || "").trim();
+  } catch (e) {
+    return "A photo related to the recent conversation.";
+  }
 }
 
-export async function enrichDMImagePrompt(character: any, dmDescription: string) {
+export async function enrichDMImagePrompt(
+  character: any,
+  dmDescription: string,
+) {
   const prompt = `You are an expert at writing highly detailed prompts for the Chroma AI image generator.
 You need to write a comprehensive image generation prompt for an image being sent in a direct message by ${character.display_name}.
 The user's description of the image they want to send is: "${dmDescription}"
@@ -1627,15 +2097,18 @@ Chroma is sensitive to prompting and understands plain English. A structured, de
 
 Character details:
 Name: ${character.display_name}
-Appearance: ${character.physical_appearance || character.bio || 'average looking'}
-Clothing style: ${character.clothing_style || 'casual everyday clothes'}
-Artstyle: ${character.artstyle || 'Realistic'}
+Appearance: ${character.physical_appearance || character.bio || "average looking"}
+Clothing style: ${character.clothing_style || "casual everyday clothes"}
+Artstyle: ${character.artstyle || "Realistic"}
 
-Guidelines for Seedream 4.0:
-- If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Smartphone photo", "Lighting: Natural light", "Style: Candid amateur photograph"). Mention camera type (e.g., "Shot on iPhone 15 Pro").
-- If the Artstyle is Stylized (Anime, Pixel Art, Oil Painting, etc.): Clearly describe the Art Direction (Genre, Medium, Texture, specific artist influences if applicable).
+Guidelines for Seedream 4.0 Pro Prompting:
+- Seedream 4.0 requires natural, complete sentences. Do NOT use older "keyword salad" habits (e.g., comma-separated adjectives).
+- Use this Formula: [Format/Application] + [Subject] + [Action] + [Environment/Setting] + [Style/Lighting]
+- Specify the Application Scenario (e.g., "A private direct message photo of...", "A candid snapshot of...").
+- If the Artstyle is Realistic: Define the medium and context. Mention constraints like "Shot on iPhone 15 Pro". If Stylized: Clearly describe the Art Direction.
+- Flawless Text Rendering: If the image should contain visible text anywhere, place the exact text inside double quotation marks (" ").
+- Reference Images: If the character is visible, an image of the character will be provided. The prompt MUST explicitly reference this (e.g., "Based on the character in the reference images, create a photo of...").
 - If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
-- Be very descriptive about the environment, lighting, mood, and composition.
 - Use descriptive adjectives and specific details to ensure a high-quality, accurate depiction.
 
 IMPORTANT: You must output a JSON object with exactly two fields:
@@ -1660,7 +2133,7 @@ Output ONLY the JSON object, nothing else.`;
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.7,
       });
@@ -1671,14 +2144,22 @@ Output ONLY the JSON object, nothing else.`;
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`enrichDMImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `enrichDMImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "enrichDMImagePrompt",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.7,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
 
     const parsed = extractJSON(content);
@@ -1687,12 +2168,15 @@ Output ONLY the JSON object, nothing else.`;
 
     return { prompt: finalPrompt, characterVisible };
   } catch (error: any) {
-    console.error('Error enriching DM image prompt:', error);
+    console.error("Error enriching DM image prompt:", error);
     logApi(
       "enrichDMImagePrompt",
       { model: getModel(), prompt, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      character.id
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      character.id,
     );
     return { prompt: dmDescription, characterVisible: false };
   }
@@ -1707,17 +2191,20 @@ Chroma is sensitive to prompting and understands plain English. A structured, de
 
 Character details:
 Name: ${character.display_name}
-Appearance: ${character.physical_appearance || character.bio || 'average looking'}
-Clothing style: ${character.clothing_style || 'casual everyday clothes'}
-Artstyle: ${character.artstyle || 'Realistic'}
+Appearance: ${character.physical_appearance || character.bio || "average looking"}
+Clothing style: ${character.clothing_style || "casual everyday clothes"}
+Artstyle: ${character.artstyle || "Realistic"}
 
-Guidelines for Seedream 4.0:
-- If the Artstyle is Realistic: Define the medium and context (e.g., "Source: Instagram photo", "Lighting: Natural morning light", "Style: Candid amateur photograph"). Mention camera type (e.g., "Shot on 35mm lens", "iPhone 15 Pro photo").
-- If the Artstyle is Stylized (Anime, Pixel Art, Oil Painting, etc.): Clearly describe the Art Direction (Genre, Medium, Texture, specific artist influences if applicable).
+Guidelines for Seedream 4.0 Pro Prompting:
+- Seedream 4.0 requires natural, complete sentences. Do NOT use older "keyword salad" habits (e.g., comma-separated adjectives).
+- Use this Formula: [Format/Application] + [Subject] + [Action] + [Environment/Setting] + [Style/Lighting]
+- Specify the Application Scenario (e.g., "A modern Instagram photo of...", "A stylized anime illustration of...").
+- If the Artstyle is Realistic: Define the medium and context. Mention constraints like "Shot on iPhone 15 Pro". If Stylized: Clearly describe the Art Direction.
+- Flawless Text Rendering: If the image should contain visible text anywhere, place the exact text inside double quotation marks (" ").
+- Reference Images: If the character is visible, an image of the character will be provided. The prompt MUST explicitly reference this (e.g., "Based on the character in the reference images, create a photo of...").
 - The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
 - Images don't always need to show the character who posted it. You can show a relevant object, scenery, situation, etc. Add variance.
 - If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
-- Be very descriptive about the environment, lighting, mood, and composition.
 - Use descriptive adjectives and specific details to ensure a high-quality, accurate depiction.
 
 IMPORTANT: You must output a JSON object with exactly two fields:
@@ -1742,7 +2229,7 @@ Output ONLY the JSON object, nothing else.`;
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.7,
       });
@@ -1752,14 +2239,22 @@ Output ONLY the JSON object, nothing else.`;
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`generateImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `generateImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "generateImagePrompt",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.7,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      character.id
+      character.id,
     );
 
     let finalPrompt = content || "";
@@ -1774,12 +2269,15 @@ Output ONLY the JSON object, nothing else.`;
 
     return { prompt: finalPrompt, characterVisible };
   } catch (error: any) {
-    console.error('Error generating image prompt:', error);
+    console.error("Error generating image prompt:", error);
     logApi(
       "generateImagePrompt",
       { model: getModel(), prompt, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      character.id
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      character.id,
     );
     return { prompt: "", characterVisible: false };
   }
@@ -1803,7 +2301,7 @@ ${positivePrompt}`;
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 10000,
         temperature: 0.7,
       });
@@ -1813,22 +2311,33 @@ ${positivePrompt}`;
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`generateNegativeImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `generateNegativeImagePrompt: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "generateNegativeImagePrompt",
-      { model: getModel(), prompt, max_tokens: 10000, temperature: 0.7, finish_reason: finishReason },
-      { content, reasoning, raw: rawContent }
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 10000,
+        temperature: 0.7,
+        finish_reason: finishReason,
+      },
+      { content, reasoning, raw: rawContent },
     );
 
     return content || "";
   } catch (error: any) {
-    console.error('Error generating negative image prompt:', error);
+    console.error("Error generating negative image prompt:", error);
     logApi(
       "generateNegativeImagePrompt",
       { model: getModel(), prompt, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
     );
     return "";
   }
@@ -1837,19 +2346,19 @@ ${positivePrompt}`;
 export async function getBase64Image(url: string): Promise<string | null> {
   if (!url) return null;
   try {
-    if (url.startsWith('/uploads/')) {
+    if (url.startsWith("/uploads/")) {
       const filePath = path.join(process.cwd(), url);
       if (fs.existsSync(filePath)) {
         const buffer = fs.readFileSync(filePath);
-        const ext = path.extname(filePath).substring(1) || 'png';
-        return `data:image/${ext};base64,${buffer.toString('base64')}`;
+        const ext = path.extname(filePath).substring(1) || "png";
+        return `data:image/${ext};base64,${buffer.toString("base64")}`;
       }
-    } else if (url.startsWith('http')) {
+    } else if (url.startsWith("http")) {
       const res = await fetch(url);
       const arrayBuffer = await res.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
-      const contentType = res.headers.get('content-type') || 'image/png';
-      return `data:${contentType};base64,${buffer.toString('base64')}`;
+      const contentType = res.headers.get("content-type") || "image/png";
+      return `data:${contentType};base64,${buffer.toString("base64")}`;
     }
   } catch (e) {
     console.error("Error fetching base64 image:", e);
@@ -1858,67 +2367,75 @@ export async function getBase64Image(url: string): Promise<string | null> {
 }
 
 export async function analyzeImage(imageUrl: string): Promise<string> {
-  const prompt = "Describe this image in detail. Focus on the subjects, setting, actions, and any text visible. This description will be used by an AI character to understand what was posted.";
-  
+  const prompt =
+    "Describe this image in detail. Focus on the subjects, setting, actions, and any text visible. This description will be used by an AI character to understand what was posted.";
+
   try {
     let finalUrl = imageUrl;
-    if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('http')) {
-       const base64 = await getBase64Image(imageUrl);
-       if (base64) {
-         finalUrl = base64;
-       }
+    if (imageUrl.startsWith("/uploads/") || imageUrl.startsWith("http")) {
+      const base64 = await getBase64Image(imageUrl);
+      if (base64) {
+        finalUrl = base64;
+      }
     }
 
     const response = await getOpenAI().chat.completions.create({
       model: getVisionModel(),
       messages: [
         {
-          role: 'user',
+          role: "user",
           content: [
-            { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: finalUrl } }
-          ] as any
-        }
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: finalUrl } },
+          ] as any,
+        },
       ],
       max_tokens: 1000,
     });
-    
+
     const content = response.choices[0].message.content || "";
-    
+
     logApi(
       "analyzeImage",
       { model: getVisionModel(), prompt, imageUrl },
-      { content }
+      { content },
     );
-    
+
     return content;
   } catch (error: any) {
-    console.error('Error analyzing image:', error);
+    console.error("Error analyzing image:", error);
     logApi(
       "analyzeImage",
       { model: getVisionModel(), prompt, imageUrl, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
     );
     return "An image was posted, but it could not be analyzed.";
   }
 }
 
-export async function generateImage(prompt: string, negative_prompt?: string, referenceImageUrls?: string[]) {
+export async function generateImage(
+  prompt: string,
+  negative_prompt?: string,
+  referenceImageUrls?: string[],
+) {
   try {
     const model = getImageModel();
     const sizes = getImageResolutions();
     let randomSize = sizes[Math.floor(Math.random() * sizes.length)];
-    if (!randomSize) randomSize = '4096x4096';
-    
+    if (!randomSize) randomSize = "4096x4096";
+
     const requestBody: any = {
       model: model,
       prompt: prompt,
       n: 1,
       size: randomSize,
-      response_format: 'b64_json',
+      response_format: "b64_json",
       steps: 28,
       guidance_scale: 3.5,
-      guidance: 3.5
+      guidance: 3.5,
     };
 
     if (negative_prompt) {
@@ -1926,9 +2443,11 @@ export async function generateImage(prompt: string, negative_prompt?: string, re
     }
 
     if (referenceImageUrls && referenceImageUrls.length > 0) {
-      const base64Images = await Promise.all(referenceImageUrls.map(url => getBase64Image(url)));
-      const validImages = base64Images.filter(img => img !== null);
-      
+      const base64Images = await Promise.all(
+        referenceImageUrls.map((url) => getBase64Image(url)),
+      );
+      const validImages = base64Images.filter((img) => img !== null);
+
       if (validImages.length === 1) {
         requestBody.image = validImages[0];
         requestBody.strength = 0.65;
@@ -1939,14 +2458,14 @@ export async function generateImage(prompt: string, negative_prompt?: string, re
     }
 
     const response = await getOpenAI().images.generate(requestBody);
-    
+
     const imageData = response.data[0];
-    let url = '';
-    
+    let url = "";
+
     if (imageData.b64_json) {
-      const buffer = Buffer.from(imageData.b64_json, 'base64');
+      const buffer = Buffer.from(imageData.b64_json, "base64");
       const filename = `${crypto.randomUUID()}.png`;
-      const uploadDir = path.join(process.cwd(), 'uploads');
+      const uploadDir = path.join(process.cwd(), "uploads");
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
@@ -1957,39 +2476,63 @@ export async function generateImage(prompt: string, negative_prompt?: string, re
       const arrayBuffer = await res.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       const filename = `${crypto.randomUUID()}.png`;
-      const uploadDir = path.join(process.cwd(), 'uploads');
+      const uploadDir = path.join(process.cwd(), "uploads");
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
       fs.writeFileSync(path.join(uploadDir, filename), buffer);
       url = `/uploads/${filename}`;
     }
-    
+
     logApi(
       "generateImage",
       requestBody,
-      url || "Empty Response (No Image Data)"
+      url || "Empty Response (No Image Data)",
     );
-    
+
     return url;
   } catch (error: any) {
-    console.error('Error generating image:', error);
+    console.error("Error generating image:", error);
     logApi(
       "generateImage",
       { model: getImageModel(), prompt, negative_prompt, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || "")
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
     );
     return null;
   }
 }
 
-export async function evaluateDynamicRelationship(user1: any, user2: any, recentComments: any[], recentDms: any[], difficulty: string, existingRelationship?: string, isCrossUniverse: boolean = false): Promise<{ result: boolean, description?: string }> {
+export async function evaluateDynamicRelationship(
+  user1: any,
+  user2: any,
+  recentComments: any[],
+  recentDms: any[],
+  difficulty: string,
+  existingRelationship?: string,
+  isCrossUniverse: boolean = false,
+): Promise<{ result: boolean; description?: string }> {
   let contextStr = "Recent Interactions:\n";
   if (recentComments.length > 0) {
-    contextStr += "Comments:\n" + recentComments.map(c => `[${c.created_at}] ${c.commenter} replied to ${c.poster}'s post ("${c.post_content}"): "${c.content}"`).join("\n") + "\n";
+    contextStr +=
+      "Comments:\n" +
+      recentComments
+        .map(
+          (c) =>
+            `[${c.created_at}] ${c.commenter} replied to ${c.poster}'s post ("${c.post_content}"): "${c.content}"`,
+        )
+        .join("\n") +
+      "\n";
   }
   if (recentDms.length > 0) {
-    contextStr += "Direct Messages:\n" + recentDms.map(m => `[${m.created_at}] ${m.sender}: "${m.content}"`).join("\n") + "\n";
+    contextStr +=
+      "Direct Messages:\n" +
+      recentDms
+        .map((m) => `[${m.created_at}] ${m.sender}: "${m.content}"`)
+        .join("\n") +
+      "\n";
   }
 
   const prompt = `You are evaluating if two users, ${user1.display_name} and ${user2.display_name}, have formed a meaningful relationship based on their recent interactions.
@@ -2004,12 +2547,12 @@ Difficulty Modifier: ${difficulty}
 ${isCrossUniverse ? `CRITICAL CONTEXT: These two characters are from DIFFERENT universes. It should be significantly harder for them to form a meaningful bond compared to characters from the same universe. Only say "Yes" if their interactions show an extraordinary, cross-dimensional connection that transcends their different origins.` : `These characters are from the same universe.`}
 
 User 1: ${user1.display_name} (@${user1.username})
-Bio: ${user1.bio || 'N/A'}
-Persona: ${user1.ai_persona || 'N/A'}
+Bio: ${user1.bio || "N/A"}
+Persona: ${user1.ai_persona || "N/A"}
 
 User 2: ${user2.display_name} (@${user2.username})
-Bio: ${user2.bio || 'N/A'}
-Persona: ${user2.ai_persona || 'N/A'}
+Bio: ${user2.bio || "N/A"}
+Persona: ${user2.ai_persona || "N/A"}
 
 ${contextStr}
 
@@ -2029,7 +2572,7 @@ DESCRIPTION: Your description here (if Yes)`;
     for (let i = 0; i < 3; i++) {
       const response = await getOpenAI().chat.completions.create({
         model: getModel(),
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: "user", content: prompt }],
         max_tokens: 1000,
         temperature: 0.7,
       });
@@ -2039,33 +2582,46 @@ DESCRIPTION: Your description here (if Yes)`;
       finishReason = response.choices[0].finish_reason;
 
       if (content || !reasoning) break;
-      console.log(`evaluateDynamicRelationship: AI still reasoning (Attempt ${i + 1}/3)...`);
+      console.log(
+        `evaluateDynamicRelationship: AI still reasoning (Attempt ${i + 1}/3)...`,
+      );
     }
-    
+
     logApi(
       "evaluateDynamicRelationship",
-      { model: getModel(), prompt, max_tokens: 1000, temperature: 0.7, finish_reason: finishReason },
+      {
+        model: getModel(),
+        prompt,
+        max_tokens: 1000,
+        temperature: 0.7,
+        finish_reason: finishReason,
+      },
       { content, reasoning, raw: rawContent },
-      user1.id
+      user1.id,
     );
 
     const resultMatch = content.match(/RESULT:\s*(Yes|No)/i);
     const descriptionMatch = content.match(/DESCRIPTION:\s*(.*)/is);
 
-    const result = resultMatch ? resultMatch[1].toLowerCase() === 'yes' : false;
-    const description = descriptionMatch ? descriptionMatch[1].trim() : undefined;
+    const result = resultMatch ? resultMatch[1].toLowerCase() === "yes" : false;
+    const description = descriptionMatch
+      ? descriptionMatch[1].trim()
+      : undefined;
 
     return {
       result,
-      description: result ? description : undefined
+      description: result ? description : undefined,
     };
   } catch (error: any) {
-    console.error('Error evaluating dynamic relationship:', error);
+    console.error("Error evaluating dynamic relationship:", error);
     logApi(
       "evaluateDynamicRelationship",
       { model: getModel(), prompt, error: "Catch Block" },
-      "Error: " + (error.message || "Unknown error") + "\nStack: " + (error.stack || ""),
-      user1.id
+      "Error: " +
+        (error.message || "Unknown error") +
+        "\nStack: " +
+        (error.stack || ""),
+      user1.id,
     );
     return { result: false };
   }
