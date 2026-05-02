@@ -520,6 +520,7 @@ export default function App() {
   const [probFavoriteDm, setProbFavoriteDm] = useState(50);
   const [crossUniverseProb, setCrossUniverseProb] = useState(50);
   const [showInternalThoughts, setShowInternalThoughts] = useState(false);
+  const [imageResolutions, setImageResolutions] = useState<string[]>(['4096x4096', '2304x4096', '4096x2304']);
   const [archetypes, setArchetypes] = useState<any[]>([]);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testResult, setTestResult] = useState<{success: boolean, message?: string, error?: string} | null>(null);
@@ -1335,6 +1336,11 @@ export default function App() {
         if (data.prob_favorite_dm !== undefined) setProbFavoriteDm(data.prob_favorite_dm);
         if (data.cross_universe_prob !== undefined) setCrossUniverseProb(data.cross_universe_prob);
         if (data.show_internal_thoughts !== undefined) setShowInternalThoughts(data.show_internal_thoughts === 1);
+        if (data.image_resolutions) {
+          try {
+            setImageResolutions(JSON.parse(data.image_resolutions));
+          } catch (e) {}
+        }
       }
     });
   }, [apiFetch]);
@@ -2244,6 +2250,16 @@ export default function App() {
       body: JSON.stringify({ api_key: apiKey })
     });
     showToast("API Key saved!");
+  };
+
+  const saveImageResolutions = async (resolutions: string[]) => {
+    setImageResolutions(resolutions);
+    await apiFetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_resolutions: resolutions })
+    });
+    showToast("Image Resolutions saved!");
   };
 
   const handleTestApi = async () => {
@@ -4630,6 +4646,42 @@ export default function App() {
                           Save
                         </button>
                       </div>
+                    </div>
+
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-slate-400 mb-1">Possible Image Resolutions</label>
+                      <div className="space-y-2">
+                        {imageResolutions.map((res, i) => (
+                          <div key={i} className="flex gap-2 items-center">
+                            <input 
+                              type="text" 
+                              value={res}
+                              onChange={e => {
+                                const newRes = [...imageResolutions];
+                                newRes[i] = e.target.value;
+                                setImageResolutions(newRes);
+                              }}
+                              className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-slate-100 outline-none focus:border-orange-500" 
+                              placeholder="e.g. 1024x1024"
+                            />
+                            <button onClick={() => {
+                              const newRes = imageResolutions.filter((_, idx) => idx !== i);
+                              setImageResolutions(newRes);
+                            }} className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition" title="Remove Resolution">
+                              <X size={20} />
+                            </button>
+                          </div>
+                        ))}
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={() => setImageResolutions([...imageResolutions, '1024x1024'])} className="bg-slate-800 hover:bg-slate-700 text-slate-100 py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
+                            <Plus size={16} /> Add Resolution
+                          </button>
+                          <button onClick={() => saveImageResolutions(imageResolutions)} className="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition ml-auto">
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2">A random resolution from this list will be picked for image generation.</p>
                     </div>
 
                     <div className="mb-6">

@@ -690,6 +690,38 @@ function getCommentDepth(commentId: number): number {
   return depth;
 }
 
+function isAITooSoonToDM(aiId: number, userId: number): boolean {
+  const recentDMs = db.prepare(`
+    SELECT sender_id, created_at FROM direct_messages 
+    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+    ORDER BY id DESC LIMIT 20
+  `).all(aiId, userId, userId, aiId) as any[];
+
+  if (recentDMs.length === 0) return false;
+
+  let consecutiveAIs = 0;
+  let lastAITime = null;
+
+  for (const dm of recentDMs) {
+    if (dm.sender_id === aiId) {
+      consecutiveAIs++;
+      if (!lastAITime) lastAITime = new Date(dm.created_at + 'Z').getTime();
+    } else {
+      break;
+    }
+  }
+
+  if (consecutiveAIs > 0 && lastAITime) {
+    const cooldownHours = 8 * Math.pow(2, consecutiveAIs - 1);
+    const cooldownMs = cooldownHours * 60 * 60 * 1000;
+    if (Date.now() < lastAITime + cooldownMs) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function handleOPReplies() {
   const settings = db.prepare("SELECT * FROM settings WHERE id = 1").get() as any;
   if (!settings || !settings.ai_enabled) return;
@@ -1449,7 +1481,7 @@ async function startServer() {
   });
 
   app.post("/api/settings", (req, res) => {
-    const { ai_enabled, model_name, image_model_name, vision_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob, show_internal_thoughts } = req.body;
+    const { ai_enabled, model_name, image_model_name, vision_model_name, timezone, api_key, prob_post, prob_image_post, prob_comment, prob_message, prob_favorite_dm, cross_universe_prob, show_internal_thoughts, image_resolutions } = req.body;
     if (ai_enabled !== undefined) {
       db.prepare("UPDATE settings SET ai_enabled = ? WHERE id = 1").run(ai_enabled ? 1 : 0);
     }
@@ -1488,6 +1520,9 @@ async function startServer() {
     }
     if (show_internal_thoughts !== undefined) {
       db.prepare("UPDATE settings SET show_internal_thoughts = ? WHERE id = 1").run(show_internal_thoughts);
+    }
+    if (image_resolutions !== undefined) {
+      db.prepare("UPDATE settings SET image_resolutions = ? WHERE id = 1").run(JSON.stringify(image_resolutions));
     }
     res.json({ success: true });
   });
@@ -3516,7 +3551,7 @@ async function startServer() {
                   `).get(randomFav.target_id, realUser.id) as any;
                   if (randomAi && (!randomAi.universe_id || !pausedUniverses.has(randomAi.universe_id))) {
                     const dmKey = `${randomAi.id}:${realUser.id}`;
-                    if (!pendingDMs.has(dmKey)) {
+                    if (!isAITooSoonToDM(randomAi.id, realUser.id) && !pendingDMs.has(dmKey)) {
                       pendingDMs.add(dmKey);
 
                       try {
@@ -3542,7 +3577,7 @@ async function startServer() {
                 // Fallback if no favorites
                 const randomAi = pickWeightedRandomUser(onlineFollowedAis);
                 const dmKey = `${randomAi.id}:${realUser.id}`;
-                if (!pendingDMs.has(dmKey)) {
+                if (!isAITooSoonToDM(randomAi.id, realUser.id) && !pendingDMs.has(dmKey)) {
                   pendingDMs.add(dmKey);
 
                   try {
@@ -3567,7 +3602,7 @@ async function startServer() {
               // Random AI
               const randomAi = pickWeightedRandomUser(onlineFollowedAis);
               const dmKey = `${randomAi.id}:${realUser.id}`;
-              if (!pendingDMs.has(dmKey)) {
+              if (!isAITooSoonToDM(randomAi.id, realUser.id) && !pendingDMs.has(dmKey)) {
                 pendingDMs.add(dmKey);
 
                 try {

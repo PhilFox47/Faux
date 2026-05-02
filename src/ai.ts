@@ -167,6 +167,18 @@ function getImageModel() {
   }
 }
 
+function getImageResolutions() {
+  try {
+    const settings = db.prepare("SELECT image_resolutions FROM settings WHERE id = 1").get() as any;
+    if (settings?.image_resolutions) {
+      return JSON.parse(settings.image_resolutions);
+    }
+    return ['4096x4096', '2304x4096', '4096x2304'];
+  } catch (e) {
+    return ['4096x4096', '2304x4096', '4096x2304'];
+  }
+}
+
 export function logApi(endpoint: string, request: any, response: any, userId: number | null = null) {
   console.log(`[DEBUG] logApi called for endpoint: ${endpoint}`);
   try {
@@ -1894,8 +1906,9 @@ export async function analyzeImage(imageUrl: string): Promise<string> {
 export async function generateImage(prompt: string, negative_prompt?: string, referenceImageUrls?: string[]) {
   try {
     const model = getImageModel();
-    const sizes = ['4096x4096', '2304x4096', '4096x2304'];
-    const randomSize = sizes[Math.floor(Math.random() * sizes.length)];
+    const sizes = getImageResolutions();
+    let randomSize = sizes[Math.floor(Math.random() * sizes.length)];
+    if (!randomSize) randomSize = '4096x4096';
     
     const requestBody: any = {
       model: model,

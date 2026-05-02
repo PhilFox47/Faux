@@ -43,6 +43,7 @@ export function initDb() {
       image_prompt TEXT,
       post_type TEXT DEFAULT 'life_update',
       event_id INTEGER,
+      universe_id INTEGER REFERENCES universes(id),
       is_visible BOOLEAN DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
@@ -144,7 +145,8 @@ export function initDb() {
       cross_universe_prob REAL DEFAULT 50.0,
       allow_nsfw BOOLEAN DEFAULT 0,
       enable_performance_logging BOOLEAN DEFAULT 0,
-      show_internal_thoughts BOOLEAN DEFAULT 0
+      show_internal_thoughts BOOLEAN DEFAULT 0,
+      image_resolutions TEXT DEFAULT '["4096x4096", "2304x4096", "4096x2304"]'
     );
 
     CREATE TABLE IF NOT EXISTS universes (
@@ -299,7 +301,6 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_posts_visible_type_created ON posts(is_visible, post_type, created_at DESC);
     -- New Performance Indexes
     CREATE INDEX IF NOT EXISTS idx_posts_type_created ON posts(post_type, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_posts_universe_created ON posts(universe_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_users_search ON users(username, display_name);
     CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
@@ -682,6 +683,7 @@ export function initDb() {
   } catch (e) {
     db.exec("ALTER TABLE posts ADD COLUMN universe_id INTEGER REFERENCES universes(id)");
   }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_posts_universe_created ON posts(universe_id, created_at DESC);");
 
   try {
     db.prepare('SELECT image_url FROM posts').get();
@@ -802,8 +804,12 @@ export function initDb() {
     db.exec("ALTER TABLE group_chat_messages ADD COLUMN internal_thought TEXT");
   } catch (e) {}
 
+  try {
+    db.exec("ALTER TABLE settings ADD COLUMN image_resolutions TEXT DEFAULT '[\"4096x4096\", \"2304x4096\", \"4096x2304\"]'");
+  } catch (e) {}
+
   // Insert default settings
-  db.prepare("INSERT OR IGNORE INTO settings (id, ai_enabled, model_name, image_model_name, timezone, api_key, allow_nsfw) VALUES (1, 1, 'zai-org/glm-5', 'z-image-turbo', 'UTC', '', 0)").run();
+  db.prepare("INSERT OR IGNORE INTO settings (id, ai_enabled, model_name, image_model_name, timezone, api_key, allow_nsfw, image_resolutions) VALUES (1, 1, 'zai-org/glm-5', 'z-image-turbo', 'UTC', '', 0, '[\"4096x4096\", \"2304x4096\", \"4096x2304\"]')").run();
 
   // Insert the real user if not exists
   const stmt = db.prepare('SELECT id FROM users WHERE is_ai = 0');
