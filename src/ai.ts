@@ -1629,12 +1629,17 @@ IMPORTANT: Do not "Imagine" or make up posts/comments that the user has never ac
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence. Do not wrap in quotes.
 IMPORTANT: This is a text-only message. DO NOT include any image descriptions, prompts, or text in parentheses/brackets describing an image (e.g., no "(A soft-focus photo of...)", "[Image of...]", etc.). Your message must rely entirely on text and emojis.
 
-CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this DM. This is what you are REALLY thinking or feeling while writing this DM. It can be different from what you actually post.
+CRITICAL ROLEPLAYING INSTRUCTION: You must also track the physical state (location and outfit) of both characters. Infer this from the conversation context. If it hasn't changed or isn't mentioned, keep it consistent with what you know.
+You must also provide your 'Internal Monologue' for this reply. This is what you are REALLY thinking or feeling while writing this reply. It can be different from what you actually post.
 
 Return your response in the following JSON format:
 {
   "content": "The actual DM text.",
-  "internal_thought": "Your hidden internal monologue/thoughts."
+  "internal_thought": "Your hidden internal monologue/thoughts.",
+  "your_outfit": "Your character's current outfit/clothing.",
+  "your_location": "Your character's current physical location.",
+  "their_outfit": "The other person's current outfit (if known/guessable, else null).",
+  "their_location": "The other person's current location (if known/guessable, else null)."
 }`;
 
   try {
@@ -1830,12 +1835,17 @@ CRITICAL: Make it feel like a REALISTIC text message/DM.
 Focus on the conversation topic.
 IMPORTANT: Always complete your sentences. Do not cut off mid-sentence.
 
-CRITICAL ROLEPLAYING INSTRUCTION: You must also provide your "Internal Monologue" for this reply. This is what you are REALLY thinking or feeling while writing this reply. It can be different from what you actually post.
+CRITICAL ROLEPLAYING INSTRUCTION: You must also track the physical state (location and outfit) of both characters. Infer this from the conversation context. If it hasn't changed or isn't mentioned, keep it consistent with what you know.
+You must also provide your 'Internal Monologue' for this reply. This is what you are REALLY thinking or feeling while writing this reply. It can be different from what you actually post.
 
 Return your response in the following JSON format:
 {
   "content": "The actual reply text.",
-  "internal_thought": "Your hidden internal monologue/thoughts."
+  "internal_thought": "Your hidden internal monologue/thoughts.",
+  "your_outfit": "Your character's current outfit/clothing.",
+  "your_location": "Your character's current physical location.",
+  "their_outfit": "The other person's current outfit (if known/guessable, else null).",
+  "their_location": "The other person's current location (if known/guessable, else null)."
 }`;
 
   const messages: any[] = [

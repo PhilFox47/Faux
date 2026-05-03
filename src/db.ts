@@ -270,6 +270,11 @@ export function initDb() {
       target_id INTEGER NOT NULL,
       is_group BOOLEAN NOT NULL DEFAULT 0,
       allow_image_gen BOOLEAN DEFAULT 0,
+      memory_notes TEXT,
+      user_location TEXT,
+      user_outfit TEXT,
+      target_location TEXT,
+      target_outfit TEXT,
       PRIMARY KEY (user_id, target_id, is_group),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -395,6 +400,13 @@ export function initDb() {
   } catch (e) {
     // Column might already exist
   }
+
+  // Add memory_notes column to dm_settings if it doesn't exist
+  try { db.exec("ALTER TABLE dm_settings ADD COLUMN memory_notes TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE dm_settings ADD COLUMN user_location TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE dm_settings ADD COLUMN user_outfit TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE dm_settings ADD COLUMN target_location TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE dm_settings ADD COLUMN target_outfit TEXT"); } catch (e) {}
 
   // Initialize default archetypes if table is empty
   const archetypeCount = db.prepare("SELECT COUNT(*) as count FROM post_archetypes").get() as any;

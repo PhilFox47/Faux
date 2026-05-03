@@ -63,6 +63,51 @@ function saveBase64Image(base64String: string): string {
   return `/uploads/${filename}`;
 }
 
+function getFullRelContext(user1Id: number, user2Id: number): string {
+  const rel = db
+    .prepare("SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?")
+    .get(user1Id, user2Id) as any;
+  
+  const dmSettings = db
+    .prepare("SELECT memory_notes, user_location, user_outfit, target_location, target_outfit FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = 0")
+    .get(user2Id, user1Id) as any; // user2Id is the human, user1Id is the AI character
+
+  let context = rel ? rel.description : "";
+  if (dmSettings) {
+    if (dmSettings.memory_notes) {
+      context += `\n\n[USER MANUAL MEMORY PROMPT/NOTES FOR YOU]: ${dmSettings.memory_notes}`;
+    }
+    const states = [];
+    if (dmSettings.target_location) states.push(`Your current location: ${dmSettings.target_location}`);
+    if (dmSettings.target_outfit) states.push(`Your current outfit: ${dmSettings.target_outfit}`);
+    if (dmSettings.user_location) states.push(`Their current location: ${dmSettings.user_location}`);
+    if (dmSettings.user_outfit) states.push(`Their current outfit: ${dmSettings.user_outfit}`);
+    
+    if (states.length > 0) {
+      context += `\n\n[CURRENT PHYSICAL STATE MEMORY]:\n${states.join("\n")}`;
+    }
+  }
+  
+  return context;
+}
+
+function updateDMState(humanId: number, aiId: number, state: any) {
+  if (!state) return;
+  db.prepare(`
+    INSERT INTO dm_settings (user_id, target_id, is_group, user_location, user_outfit, target_location, target_outfit)
+    VALUES (?, ?, 0, ?, ?, ?, ?)
+    ON CONFLICT(user_id, target_id, is_group) DO UPDATE SET
+      user_location = COALESCE(excluded.user_location, dm_settings.user_location),
+      user_outfit = COALESCE(excluded.user_outfit, dm_settings.user_outfit),
+      target_location = COALESCE(excluded.target_location, dm_settings.target_location),
+      target_outfit = COALESCE(excluded.target_outfit, dm_settings.target_outfit)
+  `).run(
+    humanId, aiId, 
+    state.their_location || null, state.their_outfit || null,
+    state.your_location || null, state.your_outfit || null
+  );
+}
+
 async function getDMSummaryAndHistory(
   user1Id: number,
   user2Id: number,
@@ -952,12 +997,7 @@ async function triggerPostComments(
       .all(postId)
       .map((c: any) => `[${c.created_at}] ${c.content}`)
       .join(" | ");
-    const rel = db
-      .prepare(
-        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-      )
-      .get(randomAi.id, post.user_id) as any;
-    const relContext = rel ? rel.description : "";
+    const relContext = getFullRelContext(randomAi.id, post.user_id);
 
     try {
       const commentData = await generateComment(
@@ -1212,12 +1252,7 @@ async function handleOPReplies() {
       if (pendingComments.has(`${opUser.id}:comment:${comment.id}`)) continue;
       pendingComments.add(`${opUser.id}:comment:${comment.id}`);
 
-      const rel = db
-        .prepare(
-          "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-        )
-        .get(opUser.id, comment.user_id) as any;
-      const relContext = rel ? rel.description : "";
+      const relContext = getFullRelContext(opUser.id, comment.user_id);
 
       const threadContext = buildThreadContext(comment.id);
 
@@ -1932,12 +1967,7 @@ async function doAiPost(
           setTimeout(
             async () => {
               try {
-                const rel = db
-                  .prepare(
-                    "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                  )
-                  .get(otherAi.id, aiUser.id) as any;
-                const relContext = rel ? rel.description : "";
+                const relContext = getFullRelContext(otherAi.id, aiUser.id);
                 const post = db
                   .prepare("SELECT created_at FROM posts WHERE id = ?")
                   .get(postId) as any;
@@ -2216,7 +2246,14 @@ async function startServer() {
     });
 
     app.get("/api/health", (req, res) => {
-      res.json({ status: "ok" });
+      try {
+        const c = process.cwd();
+        const p = path.join(c, 'faux.db');
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+        res.json({ status: "ok", cwd: c, path: p, tables });
+      } catch(e: any) {
+        res.json({ error: e.message });
+      }
     });
 
     app.get("/api/real-users", (req, res) => {
@@ -2788,11 +2825,9 @@ async function startServer() {
 
         // Companies cannot form relationships with characters
         if (isUser1Company && !isUser2Company) {
-          return res
-            .status(400)
-            .json({
-              error: "Companies cannot form relationships with characters.",
-            });
+          return res.status(400).json({
+            error: "Companies cannot form relationships with characters.",
+          });
         }
 
         // If either is a company, they must be from the same universe
@@ -2800,12 +2835,10 @@ async function startServer() {
           (isUser1Company || isUser2Company) &&
           user1.universe_id !== user2.universe_id
         ) {
-          return res
-            .status(400)
-            .json({
-              error:
-                "Relationships involving companies must be within the same universe.",
-            });
+          return res.status(400).json({
+            error:
+              "Relationships involving companies must be within the same universe.",
+          });
         }
 
         // Insert relationship for user 1 -> user 2
@@ -3414,11 +3447,9 @@ async function startServer() {
           .prepare("SELECT id FROM users WHERE username = ?")
           .get(username);
         if (existingUser) {
-          return res
-            .status(400)
-            .json({
-              error: "Username already taken. Please choose another one.",
-            });
+          return res.status(400).json({
+            error: "Username already taken. Please choose another one.",
+          });
         }
 
         const finalAvatarUrl = avatar_url ? saveBase64Image(avatar_url) : null;
@@ -4359,25 +4390,29 @@ async function startServer() {
           "SELECT * FROM dm_settings WHERE user_id = ? AND target_id = ? AND is_group = ?",
         )
         .get(user.id, req.params.targetId, isGroup ? 1 : 0) as any;
-      res.json(settings || { allow_image_gen: 0 });
+      res.json(settings || { allow_image_gen: 0, memory_notes: "" });
     });
 
     app.post("/api/dms/settings/:targetId", (req, res) => {
       const user = getRealUser(req);
       if (!user) return res.status(401).json({ error: "User not found" });
-      const { allow_image_gen } = req.body;
+      const { allow_image_gen, memory_notes } = req.body;
       const isGroup = req.query.isGroup === "true";
+
       db.prepare(
         `
-      INSERT INTO dm_settings (user_id, target_id, is_group, allow_image_gen)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id, target_id, is_group) DO UPDATE SET allow_image_gen = excluded.allow_image_gen
+      INSERT INTO dm_settings (user_id, target_id, is_group, allow_image_gen, memory_notes)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, target_id, is_group) DO UPDATE SET 
+        allow_image_gen = COALESCE(excluded.allow_image_gen, dm_settings.allow_image_gen),
+        memory_notes = COALESCE(excluded.memory_notes, dm_settings.memory_notes)
     `,
       ).run(
         user.id,
         req.params.targetId,
         isGroup ? 1 : 0,
-        allow_image_gen ? 1 : 0,
+        allow_image_gen !== undefined ? (allow_image_gen ? 1 : 0) : null,
+        memory_notes !== undefined ? memory_notes : null,
       );
       res.json({ success: true });
     });
@@ -4465,12 +4500,17 @@ async function startServer() {
           .get(aiUser.id, user.id) as any;
         const lastTextContent = lastTextMsg ? lastTextMsg.content : "";
 
-        const rawPrompt = await createDMImageRequestPrompt(
-          aiUser,
-          formattedHistory,
-          lastTextContent,
-        );
-        const enriched = await enrichDMImagePrompt(aiUser, rawPrompt);
+        let enriched;
+        if (msg.image_prompt) {
+          enriched = { prompt: msg.image_prompt, characterVisible: true };
+        } else {
+          const rawPrompt = await createDMImageRequestPrompt(
+            aiUser,
+            formattedHistory,
+            lastTextContent,
+          );
+          enriched = await enrichDMImagePrompt(aiUser, rawPrompt);
+        }
 
         const refImagesStr = aiUser.reference_images || "[]";
         let refImages: string[] = [];
@@ -4589,12 +4629,7 @@ async function startServer() {
                   receiverId,
                 );
 
-                const rel = db
-                  .prepare(
-                    "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                  )
-                  .get(receiverId, user.id) as any;
-                const relContext = rel ? rel.description : "";
+                const relContext = getFullRelContext(receiverId, user.id);
 
                 const replyData = await replyToDM(
                   receiver,
@@ -4607,6 +4642,7 @@ async function startServer() {
                 );
                 if (replyData) {
                   const { content: replyContent, internal_thought } = replyData;
+                  updateDMState(user.id, receiverId, replyData);
 
                   db.prepare(
                     "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
@@ -4624,9 +4660,18 @@ async function startServer() {
                       replyContent,
                     );
                     if (wantsImage) {
+                      const rawPrompt = await createDMImageRequestPrompt(
+                        receiver,
+                        formattedHistory,
+                        replyContent,
+                      );
+                      const enriched = await enrichDMImagePrompt(
+                        receiver,
+                        rawPrompt,
+                      );
                       db.prepare(
-                        "INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')",
-                      ).run(receiverId, user.id);
+                        "INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status, image_prompt) VALUES (?, ?, '', 1, 'pending', ?)",
+                      ).run(receiverId, user.id, enriched.prompt);
                     }
                   }
 
@@ -5314,12 +5359,7 @@ async function startServer() {
                         pendingDMs.add(dmKey);
 
                         try {
-                          const rel = db
-                            .prepare(
-                              "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                            )
-                            .get(randomAi.id, realUser.id) as any;
-                          const relContext = rel ? rel.description : "";
+                          const relContext = getFullRelContext(randomAi.id, realUser.id);
 
                           const messageHistory = await getDMSummaryAndHistory(
                             randomAi.id,
@@ -5336,8 +5376,9 @@ async function startServer() {
                             messageHistory,
                           );
                           if (dmData) {
-                            db.prepare(
-                              "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+  updateDMState(realUser.id, randomAi.id, dmData);
+  db.prepare(
+    "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
                             ).run(
                               randomAi.id,
                               realUser.id,
@@ -5369,12 +5410,7 @@ async function startServer() {
                     pendingDMs.add(dmKey);
 
                     try {
-                      const rel = db
-                        .prepare(
-                          "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                        )
-                        .get(randomAi.id, realUser.id) as any;
-                      const relContext = rel ? rel.description : "";
+                      const relContext = getFullRelContext(randomAi.id, realUser.id);
 
                       const messageHistory = await getDMSummaryAndHistory(
                         randomAi.id,
@@ -5391,8 +5427,9 @@ async function startServer() {
                         messageHistory,
                       );
                       if (dmData) {
-                        db.prepare(
-                          "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+  updateDMState(realUser.id, randomAi.id, dmData);
+  db.prepare(
+    "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
                         ).run(
                           randomAi.id,
                           realUser.id,
@@ -5423,12 +5460,7 @@ async function startServer() {
                   pendingDMs.add(dmKey);
 
                   try {
-                    const rel = db
-                      .prepare(
-                        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                      )
-                      .get(randomAi.id, realUser.id) as any;
-                    const relContext = rel ? rel.description : "";
+                    const relContext = getFullRelContext(randomAi.id, realUser.id);
 
                     const messageHistory = await getDMSummaryAndHistory(
                       randomAi.id,
@@ -5445,8 +5477,9 @@ async function startServer() {
                       messageHistory,
                     );
                     if (dmData) {
-                      db.prepare(
-                        "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+  updateDMState(realUser.id, randomAi.id, dmData);
+  db.prepare(
+    "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
                       ).run(
                         randomAi.id,
                         realUser.id,
@@ -5513,12 +5546,7 @@ async function startServer() {
                       aiUser.id,
                     );
 
-                    const rel = db
-                      .prepare(
-                        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                      )
-                      .get(aiUser.id, realUser.id) as any;
-                    const relContext = rel ? rel.description : "";
+                    const relContext = getFullRelContext(aiUser.id, realUser.id);
 
                     const dmSettings = db
                       .prepare(
@@ -5541,6 +5569,7 @@ async function startServer() {
                     if (replyData && replyData.content) {
                       const { content: replyContent, internal_thought } =
                         replyData;
+                      updateDMState(realUser.id, aiUser.id, replyData);
 
                       db.prepare(
                         "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
@@ -5558,9 +5587,18 @@ async function startServer() {
                           replyContent,
                         );
                         if (wantsImage) {
+                          const rawPrompt = await createDMImageRequestPrompt(
+                            aiUser,
+                            formattedHistory,
+                            replyContent,
+                          );
+                          const enriched = await enrichDMImagePrompt(
+                            aiUser,
+                            rawPrompt,
+                          );
                           db.prepare(
-                            "INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status) VALUES (?, ?, '', 1, 'pending')",
-                          ).run(aiUser.id, realUser.id);
+                            "INSERT INTO direct_messages (sender_id, receiver_id, content, is_image_request, image_request_status, image_prompt) VALUES (?, ?, '', 1, 'pending', ?)",
+                          ).run(aiUser.id, realUser.id, enriched.prompt);
                         }
                       }
 
@@ -6204,12 +6242,7 @@ async function startServer() {
                 if (pendingDMs.has(`${randomAi.id}:${author.id}`)) continue;
                 pendingDMs.add(`${randomAi.id}:${author.id}`);
                 try {
-                  const rel = db
-                    .prepare(
-                      "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                    )
-                    .get(randomAi.id, author.id) as any;
-                  const relContext = rel ? rel.description : "";
+                  const relContext = getFullRelContext(randomAi.id, author.id);
                   const dmContext = `You saw their post: "${choice.data.content}" and decided to DM them about it.`;
 
                   // Fetch message history
@@ -6228,8 +6261,9 @@ async function startServer() {
                     messageHistory,
                   );
                   if (dmData) {
-                    db.prepare(
-                      "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
+  updateDMState(author.id, randomAi.id, dmData);
+  db.prepare(
+    "INSERT INTO direct_messages (sender_id, receiver_id, content, internal_thought) VALUES (?, ?, ?, ?)",
                     ).run(
                       randomAi.id,
                       author.id,
@@ -6335,12 +6369,7 @@ async function startServer() {
                       .join(" | ");
 
                     // Get relationship context
-                    const rel = db
-                      .prepare(
-                        "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                      )
-                      .get(randomAi.id, randomPost.user_id) as any;
-                    const relContext = rel ? rel.description : "";
+                    const relContext = getFullRelContext(randomAi.id, randomPost.user_id);
 
                     const commentData = await generateComment(
                       randomAi,
@@ -6415,12 +6444,7 @@ async function startServer() {
                     );
                     try {
                       // Get relationship context
-                      const rel = db
-                        .prepare(
-                          "SELECT description FROM relationships WHERE user_id_1 = ? AND user_id_2 = ?",
-                        )
-                        .get(randomAi.id, randomComment.user_id) as any;
-                      const relContext = rel ? rel.description : "";
+                      const relContext = getFullRelContext(randomAi.id, randomComment.user_id);
 
                       const threadContext = buildThreadContext(
                         randomComment.id,
@@ -6512,6 +6536,11 @@ async function startServer() {
         "reason:",
         reason,
       );
+    });
+
+    // API 404 handler
+    app.use("/api", (req, res) => {
+      res.status(404).json({ error: "API route not found" });
     });
 
     // Vite middleware for development

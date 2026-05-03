@@ -461,13 +461,17 @@ export default function App() {
     if (!loggedInUser) {
       apiFetch("/api/real-users")
         .then((res) => res.json())
-        .then((data) => setRealUsers(data))
+        .then((data) => {
+          if (Array.isArray(data)) setRealUsers(data);
+        })
         .catch((err) => console.error(err));
 
       apiFetch("/api/random-profiles?limit=80") // Fetch many to select a random background
         .then((res) => res.json())
         .then((data) => {
-          setLoginBackgroundAvatars(data.map((u: any) => u.avatar_url));
+          if (Array.isArray(data)) {
+            setLoginBackgroundAvatars(data.map((u: any) => u.avatar_url));
+          }
         })
         .catch((err) => console.error(err));
     }
@@ -1508,7 +1512,7 @@ export default function App() {
     // Fetch all users (lightweight) for global state (mentions, counts, etc.)
     apiFetch("/api/users?limit=1000")
       .then((r) => r.json())
-      .then(setUsers);
+      .then((data) => { if (Array.isArray(data)) setUsers(data); });
   }, [apiFetch]);
 
   const fetchExploreUsers = useCallback(
@@ -1549,31 +1553,31 @@ export default function App() {
   const fetchUniverses = useCallback(() => {
     apiFetch("/api/universes")
       .then((r) => r.json())
-      .then(setUniverses);
+      .then((data) => { if (Array.isArray(data)) setUniverses(data); });
   }, [apiFetch]);
 
   const fetchConversations = useCallback(() => {
     apiFetch("/api/dms")
       .then((r) => r.json())
-      .then(setConversations);
+      .then((data) => { if (Array.isArray(data)) setConversations(data); });
   }, [apiFetch]);
 
   const fetchGroupChats = useCallback(() => {
     apiFetch("/api/group-chats")
       .then((r) => r.json())
-      .then(setGroupChats);
+      .then((data) => { if (Array.isArray(data)) setGroupChats(data); });
   }, [apiFetch]);
 
   const fetchDmFavorites = useCallback(() => {
     apiFetch("/api/favorites")
       .then((r) => r.json())
-      .then(setDmFavorites);
+      .then((data) => { if (Array.isArray(data)) setDmFavorites(data); });
   }, [apiFetch]);
 
   const fetchNotifications = useCallback(() => {
     apiFetch("/api/notifications")
       .then((r) => r.json())
-      .then(setNotifications);
+      .then((data) => { if (Array.isArray(data)) setNotifications(data); });
   }, [apiFetch]);
 
   const fetchChatMessages = useCallback(
@@ -2541,7 +2545,32 @@ export default function App() {
     }
   };
 
-  const [dmSettings, setDmSettings] = useState<any>({ allow_image_gen: 0 });
+  const [dmSettings, setDmSettings] = useState<any>({ allow_image_gen: 0, memory_notes: "" });
+  const [showMemoryNotepad, setShowMemoryNotepad] = useState(false);
+  const [memoryNotepadText, setMemoryNotepadText] = useState("");
+
+  const handleSaveMemoryNotepad = async () => {
+    if (!activeChat) return;
+    try {
+      const res = await apiFetch(`/api/dms/settings/${activeChat.id}?isGroup=${isGroupChat}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memory_notes: memoryNotepadText })
+      });
+      if (res.ok) {
+        setDmSettings({ ...dmSettings, memory_notes: memoryNotepadText });
+        setShowMemoryNotepad(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    if (showMemoryNotepad) {
+      setMemoryNotepadText(dmSettings.memory_notes || "");
+    }
+  }, [showMemoryNotepad, dmSettings.memory_notes]);
 
   useEffect(() => {
     if (activeChat) {
@@ -4710,6 +4739,17 @@ export default function App() {
                         users.find((u) => u.id === activeChat.id)?.is_ai ===
                           1 && (
                           <button
+                            onClick={() => setShowMemoryNotepad(true)}
+                            className={`p-2 rounded-full transition ${dmSettings.memory_notes ? "text-purple-500 bg-purple-500/10" : "text-slate-400 hover:text-purple-500 hover:bg-purple-500/10"}`}
+                            title="Memory Notepad"
+                          >
+                            <Brain size={20} />
+                          </button>
+                        )}
+                      {!isGroupChat &&
+                        users.find((u) => u.id === activeChat.id)?.is_ai ===
+                          1 && (
+                          <button
                             onClick={handlePoke}
                             className="p-2 text-slate-400 hover:text-green-500 hover:bg-green-500/10 rounded-full transition"
                             title="Poke Character (Force Online)"
@@ -4728,6 +4768,42 @@ export default function App() {
                       )}
                     </div>
                   </div>
+                  {showMemoryNotepad && (
+                    <div className="absolute top-16 left-0 right-0 z-10 p-4 bg-slate-900 border-b border-white/10 shadow-xl">
+                      <div className="flex justify-between items-center mb-2">
+                        <h3 className="font-bold text-sm flex items-center gap-2">
+                          <Brain size={16} className="text-purple-500" />
+                          Manual AI Memory
+                        </h3>
+                        <button onClick={() => setShowMemoryNotepad(false)} className="text-slate-400 hover:text-white">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-400 mb-3">
+                        Write down important facts, rules or context that this character should always keep in mind when texting you.
+                      </p>
+                      <textarea 
+                        value={memoryNotepadText}
+                        onChange={(e) => setMemoryNotepadText(e.target.value)}
+                        placeholder="e.g. You are currently pretending to be my fake boyfriend..."
+                        className="w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-purple-500 min-h-[100px] mb-3"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button 
+                          onClick={() => setShowMemoryNotepad(false)}
+                          className="px-4 py-2 rounded-lg text-sm bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          onClick={handleSaveMemoryNotepad}
+                          className="px-4 py-2 rounded-lg text-sm bg-purple-600 hover:bg-purple-700 font-bold"
+                        >
+                          Save Memory
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div
                     ref={chatScrollRef}
                     onScroll={handleChatScroll}
@@ -4942,6 +5018,13 @@ export default function App() {
                                                     wants to send an image.
                                                   </p>
                                                 </div>
+                                                {msg.image_prompt && (
+                                                  <p
+                                                    className={`text-[10px] italic line-clamp-3 mb-1 ${isMe ? "text-orange-200" : "text-slate-400"}`}
+                                                  >
+                                                    Preview: {msg.image_prompt}
+                                                  </p>
+                                                )}
 
                                                 {msg.image_request_status ===
                                                   "pending" && (
@@ -5993,7 +6076,7 @@ export default function App() {
                               fetchUsers();
                               apiFetch("/api/real-users")
                                 .then((r) => r.json())
-                                .then(setRealUsers);
+      .then((data) => { if (Array.isArray(data)) setRealUsers(data); });
                             } else {
                               const err = await res.json();
                               showToast(err.error || "Failed to update PIN");
@@ -6089,7 +6172,7 @@ export default function App() {
                             form.reset();
                             apiFetch("/api/real-users")
                               .then((r) => r.json())
-                              .then(setRealUsers);
+      .then((data) => { if (Array.isArray(data)) setRealUsers(data); });
                           } else {
                             const err = await res.json();
                             showToast(err.error || "Failed to add user");
