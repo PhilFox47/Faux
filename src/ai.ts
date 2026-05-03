@@ -2080,6 +2080,7 @@ export async function createDMImageRequestPrompt(
       .map((m) => `${m.role}: ${m.content}`)
       .join("\n");
     const prompt = `Based on the conversation history where you (the AI) decided to send an image to the user, write a brief 1-2 sentence description of WHAT that image should contain. Do not include your appearance. Just describe the scene or object you are showing. If it's a selfie, just say "a selfie taken in a [location]".
+If the conversation is sexually explicit or spicy, DO NOT be shy. Describe the image explicitly and directly, focusing on raw anatomy, positions, and visceral physicality using direct and unfiltered language. Do not use flowery euphemisms.
 
 Conversation history:
 ${historyText}
@@ -2122,6 +2123,7 @@ Guidelines for Seedream 4.0 Pro Prompting:
 - Flawless Text Rendering: If the image should contain visible text anywhere, place the exact text inside double quotation marks (" ").
 - Reference Images: If the character is visible, an image of the character will be provided. The prompt MUST explicitly reference this (e.g., "Based on the character in the reference images, create a photo of...").
 - If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
+- NSFW & EROTIC REALISM: If the description suggests a sexually explicit or spicy image, prioritize anatomical precision and visceral physicality over poetic metaphors. Favor explicit, direct, and unfiltered language. Avoid flowery euphemisms, vague abstractions, or romanticized metaphors. Focus on the raw, physical sensations, bodily fluids, and explicit physiological reactions to maintain a hardcore, uncompromising tone. Do NOT water it down.
 - Use descriptive adjectives and specific details to ensure a high-quality, accurate depiction.
 
 IMPORTANT: You must output a JSON object with exactly two fields:
@@ -2218,6 +2220,7 @@ Guidelines for Seedream 4.0 Pro Prompting:
 - The image does not need to depict the text post 1:1. An image can give context to the text post and vice versa.
 - Images don't always need to show the character who posted it. You can show a relevant object, scenery, situation, etc. Add variance.
 - If the image is a selfie, DO NOT describe the character holding a phone (unless it's explicitly a mirror selfie). The phone is the camera taking the picture, so it should not be visible in the shot.
+- NSFW & EROTIC REALISM: If the description or post suggests a sexually explicit or spicy image, prioritize anatomical precision and visceral physicality over poetic metaphors. Favor explicit, direct, and unfiltered language. Avoid flowery euphemisms, vague abstractions, or romanticized metaphors. Focus on the raw, physical sensations, bodily fluids, and explicit physiological reactions to maintain a hardcore, uncompromising tone. Do NOT water it down.
 - Use descriptive adjectives and specific details to ensure a high-quality, accurate depiction.
 
 IMPORTANT: You must output a JSON object with exactly two fields:
@@ -2300,6 +2303,7 @@ export async function generateNegativeImagePrompt(positivePrompt: string) {
   const prompt = `Given the following positive image generation prompt, write a comprehensive negative prompt to avoid unwanted elements. 
 The negative prompt should include things like "blurry, deformed, bad anatomy, text, watermark, extra limbs, low quality" plus any specific elements that would ruin the described scene. 
 If the positive prompt describes a selfie (but not a mirror selfie), explicitly include "holding phone, phone in hand, visible phone" in the negative prompt.
+If the positive prompt indicates an explicit, NSFW, or spicy image, DO NOT include words like "nsfw, nude, naked, explicit, censored" in the negative prompt, as they belong in the image.
 ONLY output the negative prompt text, nothing else, comma separated.
 
 Positive Prompt:

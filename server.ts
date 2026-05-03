@@ -2653,11 +2653,11 @@ async function startServer() {
           .prepare(
             `
         SELECT * FROM (
-          SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'character' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?
+          SELECT * FROM (SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'character' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?)
           UNION ALL
-          SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'company' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?
+          SELECT * FROM (SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'company' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?)
           UNION ALL
-          SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'news' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?
+          SELECT * FROM (SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'news' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?)
         ) ORDER BY id DESC LIMIT ?
       `,
           )
