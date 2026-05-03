@@ -332,6 +332,46 @@ const splitMessageContent = (content: string) => {
   return bubbles;
 };
 
+const MemoryNotepad = React.memo(({ initialNotes, onSave, onClose }: { initialNotes: string; onSave: (notes: string) => void; onClose: () => void }) => {
+  const [text, setText] = useState(initialNotes);
+  return (
+    <div className="absolute top-16 left-0 right-0 z-10 p-4 bg-slate-900 border-b border-white/10 shadow-xl">
+      <div className="flex justify-between items-center mb-2">
+        <h3 className="font-bold text-sm flex items-center gap-2">
+          <Brain size={16} className="text-purple-500" />
+          Manual AI Memory
+        </h3>
+        <button onClick={onClose} className="text-slate-400 hover:text-white">
+          <X size={16} />
+        </button>
+      </div>
+      <p className="text-xs text-slate-400 mb-3">
+        Write down important facts, rules or context that this character should always keep in mind when texting you.
+      </p>
+      <textarea 
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="e.g. You are currently pretending to be my fake boyfriend..."
+        className="w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-purple-500 min-h-[100px] mb-3"
+      />
+      <div className="flex justify-end gap-2">
+        <button 
+          onClick={onClose}
+          className="px-4 py-2 rounded-lg text-sm bg-slate-800 text-slate-300 hover:bg-slate-700"
+        >
+          Cancel
+        </button>
+        <button 
+          onClick={() => onSave(text)}
+          className="px-4 py-2 rounded-lg text-sm bg-purple-600 hover:bg-purple-700 font-bold"
+        >
+          Save Memory
+        </button>
+      </div>
+    </div>
+  );
+});
+
 const ChatInputForm = React.memo(function ChatInputForm({
   users,
   onSend,
@@ -2547,30 +2587,23 @@ export default function App() {
 
   const [dmSettings, setDmSettings] = useState<any>({ allow_image_gen: 0, memory_notes: "" });
   const [showMemoryNotepad, setShowMemoryNotepad] = useState(false);
-  const [memoryNotepadText, setMemoryNotepadText] = useState("");
 
-  const handleSaveMemoryNotepad = async () => {
+  const handleSaveMemoryNotepad = async (text: string) => {
     if (!activeChat) return;
     try {
       const res = await apiFetch(`/api/dms/settings/${activeChat.id}?isGroup=${isGroupChat}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ memory_notes: memoryNotepadText })
+        body: JSON.stringify({ memory_notes: text })
       });
       if (res.ok) {
-        setDmSettings({ ...dmSettings, memory_notes: memoryNotepadText });
+        setDmSettings({ ...dmSettings, memory_notes: text });
         setShowMemoryNotepad(false);
       }
     } catch (e) {
       console.error(e);
     }
   };
-
-  useEffect(() => {
-    if (showMemoryNotepad) {
-      setMemoryNotepadText(dmSettings.memory_notes || "");
-    }
-  }, [showMemoryNotepad, dmSettings.memory_notes]);
 
   useEffect(() => {
     if (activeChat) {
@@ -4769,40 +4802,11 @@ export default function App() {
                     </div>
                   </div>
                   {showMemoryNotepad && (
-                    <div className="absolute top-16 left-0 right-0 z-10 p-4 bg-slate-900 border-b border-white/10 shadow-xl">
-                      <div className="flex justify-between items-center mb-2">
-                        <h3 className="font-bold text-sm flex items-center gap-2">
-                          <Brain size={16} className="text-purple-500" />
-                          Manual AI Memory
-                        </h3>
-                        <button onClick={() => setShowMemoryNotepad(false)} className="text-slate-400 hover:text-white">
-                          <X size={16} />
-                        </button>
-                      </div>
-                      <p className="text-xs text-slate-400 mb-3">
-                        Write down important facts, rules or context that this character should always keep in mind when texting you.
-                      </p>
-                      <textarea 
-                        value={memoryNotepadText}
-                        onChange={(e) => setMemoryNotepadText(e.target.value)}
-                        placeholder="e.g. You are currently pretending to be my fake boyfriend..."
-                        className="w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-purple-500 min-h-[100px] mb-3"
-                      />
-                      <div className="flex justify-end gap-2">
-                        <button 
-                          onClick={() => setShowMemoryNotepad(false)}
-                          className="px-4 py-2 rounded-lg text-sm bg-slate-800 text-slate-300 hover:bg-slate-700"
-                        >
-                          Cancel
-                        </button>
-                        <button 
-                          onClick={handleSaveMemoryNotepad}
-                          className="px-4 py-2 rounded-lg text-sm bg-purple-600 hover:bg-purple-700 font-bold"
-                        >
-                          Save Memory
-                        </button>
-                      </div>
-                    </div>
+                    <MemoryNotepad 
+                      initialNotes={dmSettings.memory_notes || ""}
+                      onSave={handleSaveMemoryNotepad}
+                      onClose={() => setShowMemoryNotepad(false)}
+                    />
                   )}
                   <div
                     ref={chatScrollRef}

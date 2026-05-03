@@ -2648,17 +2648,20 @@ async function startServer() {
       try {
         const limit = parseInt(req.query.limit as string) || 50;
         // Fetch only essential data for background gallery, randomizing efficiently
+        const queryLimit = limit * 10;
         const users = db
           .prepare(
             `
-        SELECT id, avatar_url, account_type
-        FROM users
-        WHERE account_type IN ('character', 'company', 'news') AND avatar_url IS NOT NULL AND avatar_url != ''
-        ORDER BY id DESC
-        LIMIT ?
+        SELECT * FROM (
+          SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'character' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?
+          UNION ALL
+          SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'company' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?
+          UNION ALL
+          SELECT id, avatar_url, account_type FROM users INDEXED BY idx_users_account_avatar WHERE account_type = 'news' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY id DESC LIMIT ?
+        ) ORDER BY id DESC LIMIT ?
       `,
           )
-          .all(limit * 10) as any[];
+          .all(queryLimit, queryLimit, queryLimit, queryLimit) as any[];
         
         // In-memory shuffle to prevent O(N) ORDER BY RANDOM() in sqlite
         for (let i = users.length - 1; i > 0; i--) {
@@ -3593,9 +3596,9 @@ async function startServer() {
 
       // Optimize query hints
       let indexHint = "";
-      if (universeId && !type) {
+      if (universeId && !type && !accountType) {
         indexHint = "INDEXED BY idx_posts_universe_created";
-      } else if (type && !universeId) {
+      } else if (type && !universeId && !accountType) {
         indexHint = "INDEXED BY idx_posts_visible_type_created";
       } else if (!type && !accountType && !universeId) {
         indexHint = "INDEXED BY idx_posts_visible_created";
@@ -3631,19 +3634,11 @@ async function startServer() {
       }
 
       if (accountType) {
-        let accountUsers: any[] = [];
         if (accountType === "news") {
-          accountUsers = db.prepare("SELECT id FROM users WHERE account_type IN ('news', 'faux_news')").all() as any[];
+          query += ` AND u.account_type IN ('news', 'faux_news')`;
         } else {
-          accountUsers = db.prepare("SELECT id FROM users WHERE account_type = ?").all(accountType) as any[];
-        }
-        const accountIds = accountUsers.map((u) => u.id);
-        if (accountIds.length > 0) {
-          // If we are filtering by accounttype, override any index hint with the user index.
-          query = query.replace(`FROM posts p ${indexHint}`, `FROM posts p INDEXED BY idx_posts_user_visible_created`);
-          query += ` AND p.user_id IN (${accountIds.join(",")})`;
-        } else {
-          query += ` AND 1=0`;
+          query += ` AND u.account_type = ?`;
+          params.push(accountType);
         }
       }
 
@@ -4275,13 +4270,20 @@ async function startServer() {
       const conversations = db
         .prepare(
           `
-      WITH LatestMessages AS (
-        SELECT 
-          CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_user_id,
-          MAX(id) as max_id
-        FROM direct_messages
-        WHERE sender_id = ? OR receiver_id = ?
-        GROUP BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
+      WITH other_users AS (
+        SELECT DISTINCT receiver_id as uid FROM direct_messages WHERE sender_id = ?
+        UNION
+        SELECT DISTINCT sender_id as uid FROM direct_messages WHERE receiver_id = ?
+      ),
+      LatestMessages AS (
+        SELECT uid as other_user_id, (
+          SELECT id FROM (
+            SELECT id FROM direct_messages INDEXED BY idx_dm_conversations WHERE sender_id = ? AND receiver_id = uid
+            UNION ALL
+            SELECT id FROM direct_messages INDEXED BY idx_dm_conversations WHERE sender_id = uid AND receiver_id = ?
+          ) ORDER BY id DESC LIMIT 1
+        ) as max_id
+        FROM other_users
       ),
       UnreadCounts AS (
         SELECT sender_id, COUNT(*) as count
@@ -4316,11 +4318,11 @@ async function startServer() {
 
       let query = `
       SELECT * FROM (
-        SELECT * FROM direct_messages WHERE sender_id = ? AND receiver_id = ? ${beforeId ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?
+        SELECT * FROM direct_messages INDEXED BY idx_dm_conversations WHERE sender_id = ? AND receiver_id = ? ${beforeId ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?
       )
       UNION ALL
       SELECT * FROM (
-        SELECT * FROM direct_messages WHERE sender_id = ? AND receiver_id = ? ${beforeId ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?
+        SELECT * FROM direct_messages INDEXED BY idx_dm_conversations WHERE sender_id = ? AND receiver_id = ? ${beforeId ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?
       )
       ORDER BY id DESC LIMIT ?
     `;

@@ -307,6 +307,7 @@ export function initDb() {
     -- New Performance Indexes
     CREATE INDEX IF NOT EXISTS idx_posts_type_created ON posts(post_type, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_users_search ON users(username, display_name);
+    CREATE INDEX IF NOT EXISTS idx_users_account_avatar ON users(account_type, id DESC) WHERE avatar_url IS NOT NULL AND avatar_url != '';
     CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
     CREATE INDEX IF NOT EXISTS idx_comments_post_id_created_at ON comments(post_id, created_at ASC);
