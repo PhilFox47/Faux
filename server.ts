@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
@@ -1914,7 +1915,7 @@ async function doAiPost(
         db
           .prepare(
             `
-        SELECT DISTINCT receiver_id FROM direct_messages dm
+        SELECT DISTINCT receiver_id FROM direct_messages dm INDEXED BY idx_direct_messages_created_at
         JOIN users u ON dm.sender_id = u.id
         WHERE u.is_ai = 0 AND dm.created_at >= ?
       `,
@@ -2017,9 +2018,11 @@ async function startServer() {
     const app = express();
     const PORT = 3000;
 
+    app.use(compression());
     app.use(express.json({ limit: "50mb" }));
     app.use(express.urlencoded({ limit: "50mb", extended: true }));
-    app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+    // Add long caching to uploads, and compression will gzip text/images that are compressible.
+    app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), { maxAge: "1y" }));
 
     // Performance Logging Middleware
     app.use((req, res, next) => {
@@ -2651,12 +2654,19 @@ async function startServer() {
         SELECT id, avatar_url, account_type
         FROM users
         WHERE account_type IN ('character', 'company', 'news') AND avatar_url IS NOT NULL AND avatar_url != ''
-        ORDER BY RANDOM()
+        ORDER BY id DESC
         LIMIT ?
       `,
           )
-          .all(limit);
-        res.json(users);
+          .all(limit * 10) as any[];
+        
+        // In-memory shuffle to prevent O(N) ORDER BY RANDOM() in sqlite
+        for (let i = users.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [users[i], users[j]] = [users[j], users[i]];
+        }
+        
+        res.json(users.slice(0, limit));
       } catch (e: any) {
         console.error("Error fetching random profiles:", e);
         res.status(500).json({ error: "Failed to fetch random profiles" });
@@ -2713,7 +2723,7 @@ async function startServer() {
             db
               .prepare(
                 `
-          SELECT DISTINCT receiver_id FROM direct_messages dm
+          SELECT DISTINCT receiver_id FROM direct_messages dm INDEXED BY idx_direct_messages_created_at
           JOIN users u ON dm.sender_id = u.id
           WHERE u.is_ai = 0 AND dm.created_at >= ?
         `,
@@ -3621,12 +3631,19 @@ async function startServer() {
       }
 
       if (accountType) {
+        let accountUsers: any[] = [];
         if (accountType === "news") {
-          // Use subquery so SQLite can optimize the user filtering
-          query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type IN ('news', 'faux_news'))`;
+          accountUsers = db.prepare("SELECT id FROM users WHERE account_type IN ('news', 'faux_news')").all() as any[];
         } else {
-          query += ` AND p.user_id IN (SELECT id FROM users WHERE account_type = ?)`;
-          params.push(accountType);
+          accountUsers = db.prepare("SELECT id FROM users WHERE account_type = ?").all(accountType) as any[];
+        }
+        const accountIds = accountUsers.map((u) => u.id);
+        if (accountIds.length > 0) {
+          // If we are filtering by accounttype, override any index hint with the user index.
+          query = query.replace(`FROM posts p ${indexHint}`, `FROM posts p INDEXED BY idx_posts_user_visible_created`);
+          query += ` AND p.user_id IN (${accountIds.join(",")})`;
+        } else {
+          query += ` AND 1=0`;
         }
       }
 
@@ -4258,19 +4275,13 @@ async function startServer() {
       const conversations = db
         .prepare(
           `
-      WITH OtherUsers AS (
-        SELECT receiver_id as other_user_id FROM direct_messages WHERE sender_id = ?
-        UNION
-        SELECT sender_id as other_user_id FROM direct_messages WHERE receiver_id = ?
-      ),
-      LatestMessages AS (
+      WITH LatestMessages AS (
         SELECT 
-          o.other_user_id,
-          MAX(
-            COALESCE((SELECT MAX(id) FROM direct_messages WHERE sender_id = ? AND receiver_id = o.other_user_id), 0),
-            COALESCE((SELECT MAX(id) FROM direct_messages WHERE sender_id = o.other_user_id AND receiver_id = ?), 0)
-          ) as max_id
-        FROM OtherUsers o
+          CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END AS other_user_id,
+          MAX(id) as max_id
+        FROM direct_messages
+        WHERE sender_id = ? OR receiver_id = ?
+        GROUP BY CASE WHEN sender_id = ? THEN receiver_id ELSE sender_id END
       ),
       UnreadCounts AS (
         SELECT sender_id, COUNT(*) as count
@@ -4304,22 +4315,24 @@ async function startServer() {
         : null;
 
       let query = `
-      SELECT * FROM direct_messages
-      WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
+      SELECT * FROM (
+        SELECT * FROM direct_messages WHERE sender_id = ? AND receiver_id = ? ${beforeId ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?
+      )
+      UNION ALL
+      SELECT * FROM (
+        SELECT * FROM direct_messages WHERE sender_id = ? AND receiver_id = ? ${beforeId ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?
+      )
+      ORDER BY id DESC LIMIT ?
     `;
-      const params: any[] = [
-        user.id,
-        req.params.userId,
-        req.params.userId,
-        user.id,
-      ];
-
-      if (beforeId) {
-        query += " AND id < ?";
-        params.push(beforeId);
-      }
-
-      query += ` ORDER BY id DESC LIMIT ?`;
+      const params: any[] = [];
+      params.push(user.id, req.params.userId);
+      if (beforeId) params.push(beforeId);
+      params.push(limit);
+      
+      params.push(req.params.userId, user.id);
+      if (beforeId) params.push(beforeId);
+      params.push(limit);
+      
       params.push(limit);
 
       const messages = db
@@ -4785,7 +4798,7 @@ async function startServer() {
           db
             .prepare(
               `
-        SELECT DISTINCT receiver_id FROM direct_messages dm
+        SELECT DISTINCT receiver_id FROM direct_messages dm INDEXED BY idx_direct_messages_created_at
         JOIN users u ON dm.sender_id = u.id
         WHERE u.is_ai = 0 AND dm.created_at >= ?
       `,

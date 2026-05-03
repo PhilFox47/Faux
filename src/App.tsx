@@ -126,7 +126,7 @@ const CharacterSidebarItem = React.memo(
             className={`w-full h-full bg-gray-700 ${getAvatarShape(u.account_type)} flex items-center justify-center overflow-hidden`}
           >
             {u.avatar_url ? (
-              <img
+              <img loading="lazy" decoding="async"
                 src={u.avatar_url}
                 alt=""
                 className="w-full h-full object-cover"
@@ -371,7 +371,7 @@ const ChatInputForm = React.memo(function ChatInputForm({
       />
       {image && (
         <div className="relative mb-2">
-          <img
+          <img loading="lazy" decoding="async"
             src={image}
             alt="Upload preview"
             className="h-20 rounded-lg object-cover"
@@ -3012,7 +3012,7 @@ export default function App() {
                     key={i}
                     className="aspect-square w-24 sm:w-32 md:w-36 flex-shrink-0 rounded-md overflow-hidden bg-slate-900 border border-white/5 opacity-80"
                   >
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={avatarUrl}
                       alt=""
                       className="w-full h-full object-cover filter grayscale hover:grayscale-0 transition-all duration-1000"
@@ -3034,7 +3034,7 @@ export default function App() {
             </div>
           )}
           <div className="mb-12">
-            <img
+            <img loading="lazy" decoding="async"
               src="https://i.imgur.com/tI0YtLX.png"
               alt="Faux Logo"
               className="h-24 object-contain"
@@ -3055,7 +3055,7 @@ export default function App() {
                   className={`w-32 h-32 ${getAvatarShape(user.account_type)} overflow-hidden border-4 transition-all duration-200 ${selectedLoginUser?.id === user.id ? "border-white scale-110" : "border-transparent group-hover:border-gray-400 group-hover:scale-105"}`}
                 >
                   {user.avatar_url ? (
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={user.avatar_url}
                       alt={user.display_name}
                       className="w-full h-full object-cover"
@@ -3346,7 +3346,7 @@ export default function App() {
         <div className="hidden md:flex w-20 xl:w-64 border-r border-white/10 bg-white/5 backdrop-blur-md flex-col justify-between p-4 flex-shrink-0 z-20 relative overflow-y-auto custom-scrollbar">
           <div>
             <div className="flex items-center justify-center xl:justify-start mb-8 p-2">
-              <img
+              <img loading="lazy" decoding="async"
                 src="https://i.imgur.com/tI0YtLX.png"
                 alt="Faux Logo"
                 className="h-12 xl:h-16 w-auto max-w-full object-contain"
@@ -3492,7 +3492,7 @@ export default function App() {
                   className={`w-10 h-10 bg-slate-800 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden border border-white/10`}
                 >
                   {loggedInUser?.avatar_url ? (
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={loggedInUser.avatar_url}
                       alt=""
                       className="w-full h-full object-cover"
@@ -3591,7 +3591,7 @@ export default function App() {
                   className={`w-10 h-10 bg-slate-800 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden border border-white/10`}
                 >
                   {loggedInUser?.avatar_url ? (
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={loggedInUser?.avatar_url}
                       alt=""
                       className="w-full h-full object-cover"
@@ -3612,7 +3612,7 @@ export default function App() {
                   />
                   {newPostImage && (
                     <div className="relative mt-2 inline-block">
-                      <img
+                      <img loading="lazy" decoding="async"
                         src={newPostImage}
                         alt="Post preview"
                         className="max-h-48 rounded-xl object-cover border border-white/10"
@@ -4203,7 +4203,7 @@ export default function App() {
                       {charReferenceImages.map((img, idx) => (
                         <div key={idx} className="flex gap-2 items-center">
                           {img && (
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={img}
                               alt="Ref"
                               className="w-10 h-10 object-cover rounded-lg border border-white/10"
@@ -4429,7 +4429,7 @@ export default function App() {
                   <div className="flex gap-4">
                     <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden bg-slate-800 border border-white/10">
                       {notif.actor_avatar ? (
-                        <img
+                        <img loading="lazy" decoding="async"
                           src={notif.actor_avatar}
                           alt=""
                           className="w-full h-full object-cover"
@@ -4569,7 +4569,7 @@ export default function App() {
                               className={`w-full h-full bg-slate-800 ${getAvatarShape(conv.account_type)} flex items-center justify-center overflow-hidden border border-white/10`}
                             >
                               {conv.avatar_url ? (
-                                <img
+                                <img loading="lazy" decoding="async"
                                   src={conv.avatar_url}
                                   alt=""
                                   className="w-full h-full object-cover"
@@ -4633,7 +4633,7 @@ export default function App() {
                           className={`w-full h-full bg-slate-800 ${getAvatarShape(activeChat.account_type)} flex items-center justify-center overflow-hidden border border-white/10`}
                         >
                           {activeChat.avatar_url ? (
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={activeChat.avatar_url}
                               alt=""
                               className="w-full h-full object-cover"
@@ -4901,7 +4901,7 @@ export default function App() {
                                     <div className="w-6 flex-shrink-0">
                                       {isLastInSequence ? (
                                         <div className="relative">
-                                          <img
+                                          <img loading="lazy" decoding="async"
                                             src={
                                               sender?.avatar_url ||
                                               activeChat.avatar_url ||
@@ -4939,7 +4939,7 @@ export default function App() {
                                             setExpandedImageUrl(msg.image_url)
                                           }
                                         >
-                                          <img
+                                          <img loading="lazy" decoding="async"
                                             src={msg.image_url}
                                             alt=""
                                             className="w-full h-auto max-h-64 object-cover"
@@ -5250,7 +5250,7 @@ export default function App() {
                           key={char.id}
                           className={`relative inline-block ${!char.is_active ? "opacity-50 grayscale" : ""}`}
                         >
-                          <img
+                          <img loading="lazy" decoding="async"
                             src={
                               char.avatar_url ||
                               `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`
@@ -5281,7 +5281,7 @@ export default function App() {
                     <div className="flex items-center gap-4 mb-3">
                       <div className="w-16 h-16 bg-slate-800 rounded-full overflow-hidden flex-shrink-0 border border-white/10 group-hover:border-orange-500/50 transition-colors">
                         {u.image_url ? (
-                          <img
+                          <img loading="lazy" decoding="async"
                             src={u.image_url}
                             alt={u.name}
                             className="w-full h-full object-cover"
@@ -5322,7 +5322,7 @@ export default function App() {
                             key={char.id}
                             className={`relative inline-block ${!char.is_active ? "opacity-50 grayscale" : ""}`}
                           >
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={
                                 char.avatar_url ||
                                 `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`
@@ -5433,7 +5433,7 @@ export default function App() {
                   <div className="flex flex-col md:flex-row gap-6 items-start">
                     <div className="w-32 h-32 bg-slate-800 rounded-full overflow-hidden flex-shrink-0 border border-white/10">
                       {viewingUniverse.image_url ? (
-                        <img
+                        <img loading="lazy" decoding="async"
                           src={viewingUniverse.image_url}
                           alt={viewingUniverse.name}
                           className="w-full h-full object-cover"
@@ -5526,7 +5526,7 @@ export default function App() {
                           className={`bg-slate-900/50 border border-white/10 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 hover:border-orange-500/30 transition backdrop-blur-sm group ${!char.is_active ? "opacity-50 grayscale" : ""}`}
                         >
                           <div className="relative">
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={
                                 char.avatar_url ||
                                 `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`
@@ -5723,7 +5723,7 @@ export default function App() {
                       onClick={() => handleViewProfile(char.id)}
                     >
                       <div className="relative flex-shrink-0">
-                        <img
+                        <img loading="lazy" decoding="async"
                           src={
                             char.avatar_url ||
                             `https://api.dicebear.com/7.x/avataaars/svg?seed=${char.username}`
@@ -5820,7 +5820,7 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           {arc.entity_image ? (
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={arc.entity_image}
                               alt={arc.entity_name}
                               className={`w-10 h-10 ${getAvatarShape(arc.entity_account_type)} object-cover border border-white/10 bg-slate-800`}
@@ -5940,7 +5940,7 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className="flex -space-x-4">
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={
                                 check.user1_avatar ||
                                 `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user1_name}`
@@ -5949,7 +5949,7 @@ export default function App() {
                               className={`w-12 h-12 ${getAvatarShape(check.user1_account_type)} border-2 border-slate-950 object-cover bg-slate-800`}
                               referrerPolicy="no-referrer"
                             />
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={
                                 check.user2_avatar ||
                                 `https://api.dicebear.com/7.x/avataaars/svg?seed=${check.user2_name}`
@@ -6238,7 +6238,7 @@ export default function App() {
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-slate-800 overflow-hidden border border-white/10">
                                 {u.avatar_url ? (
-                                  <img
+                                  <img loading="lazy" decoding="async"
                                     src={u.avatar_url}
                                     className="w-full h-full object-cover"
                                   />
@@ -6922,7 +6922,7 @@ export default function App() {
                     {profileReferenceImages.map((img, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
                         {img && (
-                          <img
+                          <img loading="lazy" decoding="async"
                             src={img}
                             alt="Ref"
                             className="w-10 h-10 object-cover rounded"
@@ -7342,7 +7342,7 @@ export default function App() {
                         className="bg-slate-900/50 p-3 rounded-lg border border-white/10 flex justify-between items-center backdrop-blur-sm"
                       >
                         <div className="flex items-center gap-3">
-                          <img
+                          <img loading="lazy" decoding="async"
                             src={rel.other_avatar}
                             alt=""
                             className={`w-8 h-8 ${getAvatarShape(rel.other_account_type)} object-cover border border-white/10`}
@@ -7558,7 +7558,7 @@ export default function App() {
             <div className="relative w-64 bg-slate-950 border-r border-white/10 h-full flex flex-col animate-in slide-in-from-left duration-200">
               <div className="p-4 border-b border-white/10 flex items-center justify-between">
                 <div className="flex items-center">
-                  <img
+                  <img loading="lazy" decoding="async"
                     src="https://i.imgur.com/tI0YtLX.png"
                     alt="Faux Logo"
                     className="h-12 w-auto object-contain"
@@ -7682,7 +7682,7 @@ export default function App() {
                     className={`w-10 h-10 bg-slate-800 ${getAvatarShape(loggedInUser?.account_type)} flex-shrink-0 flex items-center justify-center font-bold overflow-hidden border border-white/10`}
                   >
                     {loggedInUser?.avatar_url ? (
-                      <img
+                      <img loading="lazy" decoding="async"
                         src={loggedInUser.avatar_url}
                         alt=""
                         className="w-full h-full object-cover"
@@ -7791,7 +7791,7 @@ export default function App() {
                     className={`relative w-24 h-24 ${getAvatarShape(viewingProfile.account_type)} border-4 border-slate-900 bg-slate-800 overflow-hidden shadow-xl`}
                   >
                     {viewingProfile.avatar_url ? (
-                      <img
+                      <img loading="lazy" decoding="async"
                         src={viewingProfile.avatar_url}
                         alt=""
                         className="w-full h-full object-cover"
@@ -8157,7 +8157,7 @@ export default function App() {
                                   className="aspect-square bg-slate-900 rounded-lg overflow-hidden border border-white/10 cursor-pointer group relative"
                                   onClick={() => handleViewPost(post.id)}
                                 >
-                                  <img
+                                  <img loading="lazy" decoding="async"
                                     src={post.image_url}
                                     alt="Post image"
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -8350,7 +8350,7 @@ export default function App() {
                       className={`w-10 h-10 bg-slate-800 ${getAvatarShape(u.account_type)} overflow-hidden border border-white/10`}
                     >
                       {u.avatar_url ? (
-                        <img
+                        <img loading="lazy" decoding="async"
                           src={u.avatar_url}
                           alt=""
                           className="w-full h-full object-cover"
@@ -8409,7 +8409,7 @@ export default function App() {
                       className={`w-10 h-10 bg-slate-800 ${getAvatarShape(u.account_type)} overflow-hidden border border-white/10`}
                     >
                       {u.avatar_url ? (
-                        <img
+                        <img loading="lazy" decoding="async"
                           src={u.avatar_url}
                           alt=""
                           className="w-full h-full object-cover"
@@ -8539,7 +8539,7 @@ export default function App() {
                         >
                           <div className="flex items-center gap-3">
                             {log.user_profile_picture ? (
-                              <img
+                              <img loading="lazy" decoding="async"
                                 src={log.user_profile_picture}
                                 alt={log.user_display_name}
                                 className={`w-8 h-8 ${getAvatarShape(log.user_account_type)} object-cover border border-white/10`}
@@ -8720,7 +8720,7 @@ export default function App() {
                             className={`relative w-8 h-8 bg-slate-800 ${getAvatarShape(user.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden border border-white/10`}
                           >
                             {user.avatar_url ? (
-                              <img
+                              <img loading="lazy" decoding="async"
                                 src={user.avatar_url}
                                 alt=""
                                 className="w-full h-full object-cover"
@@ -8768,7 +8768,7 @@ export default function App() {
             className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
             onClick={() => setExpandedImageUrl(null)}
           >
-            <img
+            <img loading="lazy" decoding="async"
               src={expandedImageUrl}
               alt="Expanded image"
               className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
@@ -8812,7 +8812,7 @@ export default function App() {
                         className="aspect-square rounded-lg overflow-hidden border border-white/10 cursor-pointer hover:border-orange-500 transition-colors shadow-lg"
                         onClick={() => setExpandedImageUrl(msg.image_url)}
                       >
-                        <img
+                        <img loading="lazy" decoding="async"
                           src={msg.image_url}
                           alt=""
                           className="w-full h-full object-cover"
@@ -9061,7 +9061,7 @@ const FauxPicItem = React.memo(function FauxPicItem({
         className="p-4 flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 transition-colors"
         onClick={() => onViewProfile(post.user_id)}
       >
-        <img
+        <img loading="lazy" decoding="async"
           src={post.avatar_url}
           alt=""
           className={`w-8 h-8 ${getAvatarShape(post.account_type)} object-cover border border-white/10`}
@@ -9072,7 +9072,7 @@ const FauxPicItem = React.memo(function FauxPicItem({
         </span>
       </div>
       <div className="bg-slate-950 flex items-center justify-center min-h-[300px] border-y border-white/5">
-        <img
+        <img loading="lazy" decoding="async"
           src={
             post.image_url ||
             post.content.match(/\((.*?)\)/)?.[1] ||
@@ -9510,7 +9510,7 @@ const PostItem = React.memo(function PostItem({
           className={`w-10 h-10 bg-slate-800 ${getAvatarShape(post.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer border border-white/10`}
         >
           {post.avatar_url ? (
-            <img
+            <img loading="lazy" decoding="async"
               src={post.avatar_url}
               alt=""
               className="w-full h-full object-cover"
@@ -9638,7 +9638,7 @@ const PostItem = React.memo(function PostItem({
                 className="mt-3 rounded-2xl overflow-hidden border border-white/10 bg-slate-950/50 flex items-center justify-center cursor-pointer shadow-lg hover:border-orange-500/50 transition-colors"
                 onClick={() => setIsImageExpanded(true)}
               >
-                <img
+                <img loading="lazy" decoding="async"
                   src={post.image_url}
                   alt="Post image"
                   className="max-w-full max-h-[600px] object-contain"
@@ -9650,7 +9650,7 @@ const PostItem = React.memo(function PostItem({
                   className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
                   onClick={() => setIsImageExpanded(false)}
                 >
-                  <img
+                  <img loading="lazy" decoding="async"
                     src={post.image_url}
                     alt="Expanded post image"
                     className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
@@ -9740,7 +9740,7 @@ const PostItem = React.memo(function PostItem({
           >
             <div className="w-8 h-8 bg-slate-800 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-xs mb-1 overflow-hidden border border-white/10">
               {loggedInUser?.avatar_url ? (
-                <img
+                <img loading="lazy" decoding="async"
                   src={loggedInUser?.avatar_url}
                   alt=""
                   className="w-full h-full object-cover"
@@ -9902,7 +9902,7 @@ const CommentItem = React.memo(function CommentItem({
           className={`w-8 h-8 bg-slate-800 ${getAvatarShape(comment.account_type)} flex-shrink-0 flex items-center justify-center overflow-hidden cursor-pointer border border-white/10`}
         >
           {comment.avatar_url ? (
-            <img
+            <img loading="lazy" decoding="async"
               src={comment.avatar_url}
               alt=""
               className="w-full h-full object-cover"

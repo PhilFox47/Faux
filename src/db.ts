@@ -345,6 +345,9 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_direct_messages_sender_receiver_id ON direct_messages(sender_id, receiver_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_sender_id ON direct_messages(receiver_id, sender_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_direct_messages_receiver_created ON direct_messages(receiver_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_direct_messages_created_at ON direct_messages(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dm_conversations ON direct_messages(sender_id, receiver_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_dm_images ON direct_messages(sender_id, receiver_id) WHERE image_url IS NOT NULL AND image_url != '';
     CREATE INDEX IF NOT EXISTS idx_api_logs_created_at ON api_logs(created_at DESC);
   `);
 
