@@ -387,7 +387,7 @@ const ChatInputForm = React.memo(function ChatInputForm({
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if ((!msg.trim() && !image) || isSendingMsg) return;
+    if (isSendingMsg) return;
     onSend(msg.trim(), image);
     setMsg("");
     setImage(null);
@@ -449,7 +449,7 @@ const ChatInputForm = React.memo(function ChatInputForm({
       />
       <button
         type="submit"
-        disabled={isSendingMsg || (!msg.trim() && !image)}
+        disabled={isSendingMsg}
         className="bg-orange-500 text-white p-3 rounded-full hover:bg-orange-600 flex-shrink-0 mb-1 disabled:opacity-50"
       >
         <Send size={24} />
@@ -2635,22 +2635,26 @@ export default function App() {
   };
 
   const handleSendMsg = async (msg: string, image_url: string | null) => {
-    if ((!msg.trim() && !image_url) || !activeChat || isSendingMsg) return;
+    if (!activeChat || isSendingMsg) return;
 
     setIsSendingMsg(true);
-    // Optimistic update
-    const realUser = loggedInUser;
+    const isEmpty = !msg.trim() && !image_url;
     const tempId = Date.now();
-    setChatMessages((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        sender_id: realUser?.id || 1,
-        content: msg,
-        image_url: image_url,
-        created_at: new Date().toISOString(),
-      },
-    ]);
+
+    if (!isEmpty) {
+      // Optimistic update
+      const realUser = loggedInUser;
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          sender_id: realUser?.id || 1,
+          content: msg,
+          image_url: image_url,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    }
 
     const endpoint = isGroupChat
       ? `/api/group-chats/${activeChat.id}/messages`
@@ -2667,7 +2671,9 @@ export default function App() {
       else fetchConversations();
       fetchUsers();
     } catch (e) {
-      setChatMessages((prev) => prev.filter((m) => m.id !== tempId));
+      if (!isEmpty) {
+        setChatMessages((prev) => prev.filter((m) => m.id !== tempId));
+      }
       fetchChatMessages(activeChat.id, isGroupChat, undefined, true);
     } finally {
       setIsSendingMsg(false);

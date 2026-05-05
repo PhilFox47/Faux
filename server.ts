@@ -4123,9 +4123,14 @@ async function startServer() {
 
       const groupId = req.params.id;
       try {
-        db.prepare(
-          "INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)",
-        ).run(groupId, user.id, content);
+        let finalContent = content?.trim() || "";
+        let isForceReply = finalContent === "";
+
+        if (!isForceReply) {
+          db.prepare(
+            "INSERT INTO group_chat_messages (group_chat_id, sender_id, content) VALUES (?, ?, ?)",
+          ).run(groupId, user.id, finalContent);
+        }
 
         res.json({ success: true });
 
@@ -4163,26 +4168,36 @@ async function startServer() {
           content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`,
         }));
 
-        // Let each AI decide if they want to reply (e.g. based on activity level or if mentioned)
+        // Select one random AI character to reply, weighted by activity level
         const settings = db
           .prepare("SELECT timezone FROM settings WHERE id = 1")
           .get() as any;
         const timezone = settings?.timezone || "UTC";
 
-        for (const aiUser of members) {
-          if (!isUserOnline(aiUser, timezone)) continue;
+        let eligibleAIs = members.filter((ai) => isUserOnline(ai, timezone));
 
-          const isMentioned =
-            content.toLowerCase().includes(aiUser.display_name.toLowerCase()) ||
-            content.toLowerCase().includes(aiUser.username.toLowerCase());
-          const activityLevel = aiUser.activity_level ?? 5;
-          // Base probability between 5% and 50% depending on activity level
-          const baseProb = (activityLevel / 10) * 0.5;
-          const shouldReply = isMentioned || Math.random() < baseProb;
+        if (isForceReply && history.length > 0) {
+          const lastMsgSenderId = history[history.length - 1].sender_id;
+          eligibleAIs = eligibleAIs.filter((ai) => ai.id !== lastMsgSenderId);
+        }
 
-          if (shouldReply) {
-            const gcKey = `${groupId}:${aiUser.id}`;
-            if (pendingGroupChats.has(gcKey)) continue;
+        if (eligibleAIs.length > 0) {
+          const totalWeight = eligibleAIs.reduce((sum, ai) => sum + (ai.activity_level ?? 5), 0);
+          let random = Math.random() * totalWeight;
+          let selectedAi = null;
+          for (const ai of eligibleAIs) {
+            random -= (ai.activity_level ?? 5);
+            if (random <= 0) {
+              selectedAi = ai;
+              break;
+            }
+          }
+          if (!selectedAi) selectedAi = eligibleAIs[eligibleAIs.length - 1];
+
+          const aiUser = selectedAi;
+          const gcKey = `${groupId}:${aiUser.id}`;
+          
+          if (!pendingGroupChats.has(gcKey)) {
             pendingGroupChats.add(gcKey);
 
             try {
@@ -4211,12 +4226,6 @@ async function startServer() {
                   replyData.content,
                   replyData.internal_thought,
                 );
-
-                // Add this reply to history for the next AI
-                formattedHistory.push({
-                  role: "assistant",
-                  content: `[${new Date().toISOString()}] [${aiUser.display_name}]: ${replyData.content}`,
-                });
               }
             } finally {
               pendingGroupChats.delete(gcKey);
@@ -4586,13 +4595,17 @@ async function startServer() {
         let finalContent = content?.trim() || "";
         const finalImageUrl = image_url ? saveBase64Image(image_url) : null;
 
-        const info = db
-          .prepare(
-            "INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)",
-          )
-          .run(user.id, receiverId, finalContent, finalImageUrl);
+        let messageId = null;
+        let isForceReply = finalContent === "" && !finalImageUrl;
 
-        const messageId = info.lastInsertRowid;
+        if (!isForceReply) {
+          const info = db
+            .prepare(
+              "INSERT INTO direct_messages (sender_id, receiver_id, content, image_url) VALUES (?, ?, ?, ?)",
+            )
+            .run(user.id, receiverId, finalContent, finalImageUrl);
+          messageId = info.lastInsertRowid;
+        }
 
         res.json({ success: true, messageId });
 
@@ -4610,7 +4623,9 @@ async function startServer() {
               }
             }
 
-            checkDynamicRelationship(user.id, receiverId).catch(console.error);
+            if (!isForceReply) {
+              checkDynamicRelationship(user.id, receiverId).catch(console.error);
+            }
 
             // AI Reply logic
             const receiver = db
@@ -5740,126 +5755,7 @@ async function startServer() {
           }
         }
 
-        // Handle Group Chat Replies (AI talking to AI or continuing conversation)
-        if (Math.random() < 0.3 && activeAiUsers.length > 0) {
-          // Find a recent group chat
-          const recentGroups = db
-            .prepare(
-              `
-          SELECT gc.id, gc.name, MAX(gcm.created_at) as last_msg_time
-          FROM group_chats gc
-          JOIN group_chat_messages gcm ON gc.id = gcm.group_chat_id
-          GROUP BY gc.id
-          ORDER BY last_msg_time DESC LIMIT 5
-        `,
-            )
-            .all() as any[];
 
-          if (recentGroups.length > 0) {
-            const group =
-              recentGroups[Math.floor(Math.random() * recentGroups.length)];
-
-            // Get members
-            const members = db
-              .prepare(
-                `
-            SELECT u.* FROM users u
-            JOIN group_chat_members gcm ON u.id = gcm.user_id
-            WHERE gcm.group_chat_id = ? AND u.is_ai = 1 AND u.is_active = 1
-          `,
-              )
-              .all(group.id) as any[];
-
-            const onlineMembers = members.filter(
-              (m) =>
-                isUserOnline(m, settings.timezone || "UTC") &&
-                (!m.universe_id || !pausedUniverses.has(m.universe_id)),
-            );
-
-            if (onlineMembers.length > 0) {
-              // Pick an AI to reply based on activity level
-              const totalActivity = onlineMembers.reduce(
-                (sum, m) => sum + (m.activity_level ?? 5),
-                0,
-              );
-              let random = Math.random() * totalActivity;
-              let selectedAi = onlineMembers[0];
-              for (const m of onlineMembers) {
-                random -= m.activity_level ?? 5;
-                if (random <= 0) {
-                  selectedAi = m;
-                  break;
-                }
-              }
-
-              // Check if the last message was already from this AI
-              const lastMsg = db
-                .prepare(
-                  "SELECT sender_id FROM group_chat_messages WHERE group_chat_id = ? ORDER BY created_at DESC LIMIT 1",
-                )
-                .get(group.id) as any;
-
-              if (lastMsg && lastMsg.sender_id !== selectedAi.id) {
-                const gcKey = `${group.id}:${selectedAi.id}`;
-                if (!pendingGroupChats.has(gcKey)) {
-                  pendingGroupChats.add(gcKey);
-
-                  try {
-                    const history = db
-                      .prepare(
-                        `
-                  SELECT m.sender_id, m.content, u.display_name, m.created_at, u.is_ai
-                  FROM group_chat_messages m
-                  JOIN users u ON m.sender_id = u.id
-                  WHERE m.group_chat_id = ?
-                  ORDER BY m.created_at DESC LIMIT 15
-                `,
-                      )
-                      .all(group.id)
-                      .reverse();
-
-                    const formattedHistory = history.map((msg: any) => ({
-                      role: msg.is_ai === 0 ? "user" : "assistant",
-                      content: `[${msg.created_at}] [${msg.display_name}]: ${msg.content}`,
-                    }));
-
-                    const otherMembers = db
-                      .prepare(
-                        `
-                  SELECT u.* FROM users u
-                  JOIN group_chat_members gcm ON u.id = gcm.user_id
-                  WHERE gcm.group_chat_id = ? AND u.id != ?
-                `,
-                      )
-                      .all(group.id, selectedAi.id) as any[];
-
-                    const replyData = await generateGroupChatReply(
-                      selectedAi,
-                      group.name,
-                      formattedHistory,
-                      otherMembers,
-                    );
-                    if (replyData) {
-                      db.prepare(
-                        "INSERT INTO group_chat_messages (group_chat_id, sender_id, content, internal_thought) VALUES (?, ?, ?, ?)",
-                      ).run(
-                        group.id,
-                        selectedAi.id,
-                        replyData.content,
-                        replyData.internal_thought,
-                      );
-                      console.log(
-                        `${selectedAi.display_name} replied in group chat ${group.name}`,
-                      );
-                    }
-                  } finally {
-                    pendingGroupChats.delete(gcKey);
-                  }
-                }
-              }
-            }
-          }
-        }
 
         // Handle mentions
         const unrepliedMentions = db
